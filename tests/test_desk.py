@@ -798,5 +798,60 @@ class SnapshotTest(unittest.TestCase):
         self.assertEqual(base64.b64decode(data["d"]), b"56789", "only the output after the picture")
 
 
+class ReviewActionTest(unittest.TestCase):
+    def setUp(self):
+        import actions
+        self.actions = actions
+        self.pr = model.slim_pr(raw_pr())  # authored by {author}
+        approved = raw_pr(participants=[{"user": {"uuid": "{me}", "display_name": "Me"}, "role": "REVIEWER", "approved": True, "state": "approved"}])
+        calls = self.calls = []
+
+        class Client:
+            workspace = "acme"
+            def send(self, method, path, body=None, params=None):
+                calls.append((method, path))
+                return {}
+            def get(self, path, params=None):
+                calls.append(("GET", path))
+                return approved
+        self.updated = []
+        self.engine = type("E", (), {})()
+        self.engine.client = Client()
+        self.engine.find_pr = lambda repo, pr_id: self.pr
+        self.engine.me = lambda: {"uuid": "{me}"}
+        self.engine.update_pr = lambda pr: self.updated.append(pr)
+
+    def test_approve_posts_then_rereads_and_updates_every_copy(self):
+        out = self.actions.review(self.engine, {"repo": "shop-api", "id": 42, "action": "approve"})
+        self.assertEqual(self.calls[0], ("POST", "/repositories/acme/shop-api/pullrequests/42/approve"))
+        self.assertEqual(self.calls[1][0], "GET")
+        mine = next(r for r in out["pr"]["reviews"] if r["uuid"] == "{me}")
+        self.assertEqual(mine["state"], "approved")
+        self.assertEqual(len(self.updated), 1)
+
+    def test_taking_it_back_uses_delete(self):
+        self.actions.review(self.engine, {"repo": "shop-api", "id": 42, "action": "unrequest_changes"})
+        self.assertEqual(self.calls[0], ("DELETE", "/repositories/acme/shop-api/pullrequests/42/request-changes"))
+
+    def test_refuses_your_own_and_unknown_actions(self):
+        self.engine.me = lambda: {"uuid": "{author}"}
+        with self.assertRaises(PermissionError):
+            self.actions.review(self.engine, {"repo": "shop-api", "id": 42, "action": "approve"})
+        with self.assertRaises(ValueError):
+            self.actions.review(self.engine, {"repo": "shop-api", "id": 42, "action": "merge"})
+        self.assertEqual(self.calls, [])
+
+    def test_update_pr_replaces_cached_copies(self):
+        import engine as engine_mod
+        eng = engine_mod.Engine.__new__(engine_mod.Engine)
+        eng.lock = __import__("threading").RLock()
+        eng._save = lambda: None
+        old = model.slim_pr(raw_pr())
+        eng.data = {"people": {"{a}": {"open": [old]}, "{b}": {"open": [old], "merged": []}}}
+        new = dict(old, title="fresh")
+        eng.update_pr(new)
+        self.assertEqual([p["title"] for person in eng.data["people"].values() for p in person["open"]], ["fresh", "fresh"])
+
+
 if __name__ == "__main__":
     unittest.main()

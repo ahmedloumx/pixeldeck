@@ -47,7 +47,7 @@ SECRET = secrets.token_urlsafe(32)
 AGENT_KEY = secrets.token_urlsafe(32)
 AGENT_ROUTES = {("POST", "propose"), ("GET", "proposal")}
 PROPOSALS = proposals.Proposals()
-FEATURES = ["merge", "sync", "drop", "proposals", "snapshots"]
+FEATURES = ["merge", "sync", "drop", "proposals", "snapshots", "reviews"]
 SNAPSHOT_MAX = 4 * 1024 * 1024
 MIN_COLS, MIN_ROWS = 20, 4  # a collapsed panel must not squeeze a program into a sliver
 TERMS = terminals.Terminals()
@@ -284,6 +284,8 @@ class Desk(BaseHTTPRequestHandler):
                 return self._send(200, actions.decline(engine, body))
             if method == "POST" and route == "merge":
                 return self._send(200, actions.merge(engine, body))
+            if method == "POST" and route == "review":
+                return self._send(200, actions.review(engine, body))
             if method == "POST" and route == "sync":
                 return self._send(200, actions.sync(engine, WORKSPACE_ROOT, body))
             if method == "GET" and route == "pr-sync":

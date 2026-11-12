@@ -238,6 +238,18 @@ class Engine:
             entry = self.data["people"].get(uuid)
         return entry
 
+    def update_pr(self, pr):
+        """Put a freshly read pull request in place of every cached copy of it."""
+        key = (pr["repo"], pr["id"])
+        with self.lock:
+            for person in self.data["people"].values():
+                for name in ("open", "merged", "declined"):
+                    items = person.get(name) or []
+                    for i, old in enumerate(items):
+                        if (old["repo"], old["id"]) == key:
+                            items[i] = pr
+        self._save()
+
     def find_pr(self, repo, pr_id):
         with self.lock:
             for person in self.data["people"].values():

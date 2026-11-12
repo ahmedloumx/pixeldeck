@@ -13,8 +13,9 @@ Full documentation, with the architecture, security model and measured performan
 ## What it does
 
 - **Queue.** Your pull requests by state: needs you, changes requested, open, waiting, approved,
-  waiting for your review, pushed without a pull request, merged and declined. A colour-coded
-  merge tree shows what branched off and came back.
+  waiting for your review, pushed without a pull request, merged and declined. A date filter
+  (today, 7 days, 30 days, or a range) narrows any list by when it was opened, merged or
+  declined. A colour-coded merge tree shows what branched off and came back.
 - **Pull request view.** Overview with the description rendered from Markdown, the diff with
   per-file "viewed" marks, threads, commits and tasks. The header folds away so the diff gets the room.
 - **Copy review comments.** One click copies every thread (or the open ones, or one thread) as
@@ -34,6 +35,8 @@ Full documentation, with the architecture, security model and measured performan
 - **Review banners.** When someone approves, asks for changes or comments on one of your pull
   requests, a banner drops in from the top with who it was.
 - **Team and insights.** Your teammates' queues, review load and merge history.
+- **Reviews.** Approve or request changes on a teammate's open pull request, and take either
+  back, from the pull request's toolbar.
 - **Actions.** Open a pull request from a pushed branch; sync, merge or decline your own pull
   request; delete a pushed branch. Each asks for a second click in place. When your branch is behind its
   target, a bar says by how much and offers **Sync now**, like Bitbucket's.

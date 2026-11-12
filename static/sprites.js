@@ -72,6 +72,7 @@ const Sprites = (() => {
     decline: { frames: [["cc.....cc", "ccc...ccc", ".ccc.ccc.", "..ccccc..", "...ccc...", "..ccccc..", ".ccc.ccc.", "ccc...ccc", "cc.....cc"]] },
     up: { frames: [["....c....", "...ccc...", "..cc.cc..", ".cc...cc.", "cc.....cc"]] },
     down: { frames: [["cc.....cc", ".cc...cc.", "..cc.cc..", "...ccc...", "....c...."]] },
+    changes: { frames: [["......cc.", ".....cccc", "....cccc.", "...cccc..", "..cccc...", ".cccc....", "cccc.....", "cc.......", "c........"]] },
     sync: { frames: [["..ccccc..", ".c.....cc", "c.....ccc", "c........", "c.......c", "........c", "ccc.....c", "cc.....c.", "..ccccc.."]] },
     merge: { frames: [["cc.....cc", "cc.....cc", ".cc...cc.", "..cc.cc..", "...ccc...", "...ccc...", "...ccc...", "...ccc...", "...ccc..."]] },
     copy: { frames: [["...cccccc", "...c....c", "cccccc..c", "c....c..c", "c....c..c", "c....cccc", "c....c...", "c....c...", "cccccc..."]] },

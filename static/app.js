@@ -156,7 +156,51 @@ function signals(pr) {
     approved: changes.length === 0 && approvals.length > 0,
   };
 }
+/* The date filter: open pull requests by when they were opened, merged and declined ones by
+   when that happened, pushed branches by the push. Kept per browser. */
+const DATES_KEY = "prdesk.datefilter.v1";
+const DATE_PRESETS = [["all", "Any time"], ["today", "Today"], ["7", "7 days"], ["30", "30 days"], ["range", "Dates"]];
+let dateFilter = (() => { try { return JSON.parse(localStorage.getItem(DATES_KEY)) || { preset: "all", from: "", to: "" }; } catch { return { preset: "all", from: "", to: "" }; } })();
+const isoDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+function dateRange() {
+  const now = new Date();
+  const dayStart = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  if (dateFilter.preset === "today") return [dayStart(now), Infinity];
+  if (dateFilter.preset === "7" || dateFilter.preset === "30") return [Date.now() - Number(dateFilter.preset) * DAY, Infinity];
+  if (dateFilter.preset === "range") {
+    const from = dateFilter.from ? Date.parse(`${dateFilter.from}T00:00:00`) : -Infinity;
+    const to = dateFilter.to ? Date.parse(`${dateFilter.to}T23:59:59.999`) : Infinity;
+    return [from, to];
+  }
+  return null;
+}
+function inDates(pr) {
+  const range = dateRange();
+  if (!range) return true;
+  const when = pr.pushed_at ? pr.pushed_at * 1000 : Date.parse(!pr.state || pr.state === "OPEN" ? pr.created_on || pr.updated_on : pr.updated_on || pr.created_on);
+  return Number.isFinite(when) && when >= range[0] && when <= range[1];
+}
+function setDates(next) {
+  dateFilter = { ...dateFilter, ...next };
+  if (dateFilter.preset === "range" && !dateFilter.from && !dateFilter.to) {
+    dateFilter.from = isoDay(new Date(Date.now() - 30 * DAY));
+    dateFilter.to = isoDay(new Date());
+  }
+  try { localStorage.setItem(DATES_KEY, JSON.stringify(dateFilter)); } catch { /* storage blocked */ }
+  renderQueue();
+}
+function dateBar(secId, shown, total) {
+  const basis = secId === "merged" ? "Merged" : secId === "declined" ? "Declined" : secId === "pushed" ? "Pushed" : "Opened";
+  const chips = DATE_PRESETS.map(([id, label]) => `<button class="date-chip" type="button" data-date-preset="${id}" aria-pressed="${dateFilter.preset === id}">${label}</button>`).join("");
+  const range = dateFilter.preset === "range"
+    ? `<label class="date-input"><span class="visually-hidden">From</span><input type="date" data-date-from value="${esc(dateFilter.from)}"></label><span class="date-to">to</span>
+       <label class="date-input"><span class="visually-hidden">To</span><input type="date" data-date-to value="${esc(dateFilter.to)}"></label>` : "";
+  const count = dateFilter.preset !== "all" ? `<span class="date-count">${shown} of ${total}</span>` : "";
+  return `<div class="date-bar" role="group" aria-label="${basis} date filter"><span class="date-basis">${basis}</span>${chips}${range}${count}</div>`;
+}
+
 function matches(pr) {
+  if (!inDates(pr)) return false;
   const q = state.filter.trim().toLowerCase();
   if (!q) return true;
   const hay = [pr.repo, pr.title, pr.source, pr.dest, pr.ticket?.key, pr.author?.name, pr.id ? `#${pr.id}` : "", pr.branch, pr.subject].join(" ").toLowerCase();
@@ -285,7 +329,7 @@ function prRow(pr, opts = {}) {
 }
 function queueTable(prs, opts = {}) {
   const list = prs.filter(matches);
-  if (!list.length) return `<p class="empty">${esc(state.filter ? "Nothing matches the filter." : opts.empty || "Nothing here.")}</p>`;
+  if (!list.length) return `<p class="empty">${esc(state.filter || dateFilter.preset !== "all" ? "Nothing matches the filter." : opts.empty || "Nothing here.")}</p>`;
   const limit = opts.limit && !state.showAll ? opts.limit : list.length;
   const merged = list[0]?.state === "MERGED";
   const head = merged
@@ -296,7 +340,7 @@ function queueTable(prs, opts = {}) {
   return `<table class="queue"><thead>${head}</thead><tbody>${rows}</tbody></table>${more}`;
 }
 function pushedTable(items) {
-  const list = items.filter((b) => matches({ repo: b.repo, title: b.subject, source: b.branch, dest: b.dest }));
+  const list = items.filter((b) => matches({ repo: b.repo, title: b.subject, source: b.branch, dest: b.dest, pushed_at: b.pushed_at }));
   if (!list.length) return `<p class="empty">${state.filter ? "Nothing matches the filter." : "Every branch you pushed lately has a pull request."}</p>`;
   const rows = list.map((b, i) => `<tr class="row" style="--i:${Math.min(i, 14)}">
       <td><span class="chip">Pushed</span></td>
@@ -482,7 +526,7 @@ function renderQueue() {
   else if (sec.id === "pushed") { visual = pushedChart(b.pushed); body = pushedTable(b.pushed); }
   else if (sec.id === "merged") {
     visual = mergeTree(b.merged.filter(matches), (data.open || []).filter(matches), {
-      limit: 40, declined: b.declined.filter(matches), pushed: b.pushed.filter((x) => matches({ repo: x.repo, title: x.subject, source: x.branch, dest: x.dest })),
+      limit: 40, declined: b.declined.filter(matches), pushed: b.pushed.filter((x) => matches({ repo: x.repo, title: x.subject, source: x.branch, dest: x.dest, pushed_at: x.pushed_at })),
     });
     body = queueTable(b.merged, { empty: sec.empty, limit: 40, showAuthor: kind === "team" });
   } else if (sec.id === "declined") {
@@ -498,6 +542,7 @@ function renderQueue() {
     <nav class="sec-chips" role="tablist" aria-label="Sections" aria-orientation="vertical">${chips}</nav>
     <div class="queue-main">${authNotice()}
       <header class="panel-head-row"><h2 class="panel-title">${esc(who)}</h2><span class="note">${esc(projectNote())}</span></header>
+      ${data ? dateBar(sec.id, sec.id === "pushed" ? b.pushed.filter((x) => matches({ repo: x.repo, title: x.subject, source: x.branch, dest: x.dest, pushed_at: x.pushed_at })).length : b[sec.id].filter(matches).length, b[sec.id].length) : ""}
       ${visual ? `<figure class="section-visual"><figcaption>${esc(VISUAL_TITLE[sec.id] || "")}</figcaption>${visual}</figure>` : ""}
       <section class="block">${body}</section>
     </div></div>`;
@@ -833,8 +878,45 @@ function prTools(pr) {
           : `Not approved yet. Bitbucket's merge checks decide whether it can merge into ${pr.dest}. Asks you to confirm.`)
       + tool("tool--danger", "data-decline", Sprites.svg("decline", { scale: 2 }), "Decline", "Decline this pull request. Asks you to confirm.")
     : tool("tool--agent", 'data-launch="review"', buddy, "Review with the rubric", `Review with the rubric: Claude reviews it in the Terminal panel. ${shift}`)
-      + tool("tool--quiet", 'data-launch="summarize"', Sprites.svg("read", { scale: 2 }), "Summarize the threads", `Summarize the threads, edit nothing. ${shift}`);
+      + tool("tool--quiet", 'data-launch="summarize"', Sprites.svg("read", { scale: 2 }), "Summarize the threads", `Summarize the threads, edit nothing. ${shift}`)
+      + reviewTools(pr);
   return `${tools}<span class="tool-sep" aria-hidden="true"></span>${fold}`;
+}
+
+// Your verdict on someone else's pull request. A pressed button is the verdict you gave;
+// clicking it again takes it back. Both ask for a second click, as Bitbucket tells the author.
+function reviewTools(pr) {
+  if (!(state.features || []).includes("reviews")) return "";
+  const mine = (pr.reviews || []).find((r) => isMeUuid(r.uuid))?.state;
+  const approved = mine === "approved", asked = mine === "changes_requested";
+  const btn = (cls, action, sprite, label, tip, on) =>
+    `<button class="btn tool ${cls}${on ? " is-on" : ""}" type="button" data-review="${action}" aria-pressed="${on}" data-tip="${esc(tip)}">${Sprites.svg(sprite, { scale: 2 })}<span class="tool-label">${esc(label)}</span></button>`;
+  return `<span class="tool-sep" aria-hidden="true"></span>`
+    + btn("tool--approve", approved ? "unapprove" : "approve", "check", approved ? "Remove your approval" : "Approve",
+      approved ? "You approved it. Click to take your approval back." : "Approve this pull request. Asks you to confirm.", approved)
+    + btn("tool--changes", asked ? "unrequest_changes" : "request_changes", "changes", asked ? "Withdraw your change request" : "Request changes",
+      asked ? "You asked for changes. Click to withdraw the request." : "Request changes on this pull request. Asks you to confirm.", asked);
+}
+const REVIEW_CONFIRM = { approve: "Confirm: approve", unapprove: "Confirm: remove your approval", request_changes: "Confirm: request changes", unrequest_changes: "Confirm: withdraw your request" };
+const REVIEW_DONE = { approve: "Approved", unapprove: "Approval removed on", request_changes: "Changes requested on", unrequest_changes: "Change request withdrawn on" };
+async function reviewPr(button) {
+  const pr = state.pr?.detail?.pr || state.pr?.pr;
+  const action = button.dataset.review;
+  if (!pr || !REVIEW_CONFIRM[action] || !armed(button, `${REVIEW_CONFIRM[action]} #${pr.id}`)) return;
+  try {
+    const res = await busy(button, () => api("review", { method: "POST", body: { repo: pr.repo, id: pr.id, action } }));
+    if (state.pr && prKey(state.pr.pr) === prKey(pr)) {
+      state.pr.pr = { ...state.pr.pr, ...res.pr };
+      if (state.pr.detail?.pr) state.pr.detail.pr = { ...state.pr.detail.pr, ...res.pr };
+    }
+    renderPr();
+    toast(`${REVIEW_DONE[action]} #${pr.id}.`, `${pr.author?.name || "The author"} sees it on Bitbucket.`);
+    state.loadedAt = {};
+    loadView({ silent: true });
+  } catch (err) {
+    if (/no route/.test(err.message)) toast("Reviews need the newer PixelDeck server.", NEEDS_RESTART, true);
+    else toast("Bitbucket did not take the review.", err.message, true);
+  }
 }
 
 const VIEWED_KEY = "prdesk.viewed.v1";
@@ -1845,6 +1927,10 @@ function bind() {
     if (t.closest("[data-decline]")) return declinePr(t.closest("[data-decline]"));
     if (t.closest("[data-merge]")) return mergePr(t.closest("[data-merge]"));
     if (t.closest("[data-sync]")) return syncPr(t.closest("[data-sync]"));
+    const preset = t.closest("[data-date-preset]");
+    if (preset) return setDates({ preset: preset.dataset.datePreset });
+    const verdict = t.closest("[data-review]");
+    if (verdict) return reviewPr(verdict);
     const proceed = t.closest("[data-proposal-proceed]");
     if (proceed) return decideProposal(proceed, proceed.dataset.proposalProceed, "approve");
     const refuse = t.closest("[data-proposal-decline]");
@@ -1887,6 +1973,8 @@ function bind() {
   document.addEventListener("change", async (e) => {
     const t = e.target;
     if (t.matches("[data-viewed]")) return markViewed(Number(t.dataset.viewed), t.checked);
+    if (t.matches("[data-date-from]")) return setDates({ from: t.value });
+    if (t.matches("[data-date-to]")) return setDates({ to: t.value });
     if (t.matches("[data-panel-toggle]")) { if (t.checked) Layout.show(t.dataset.panelToggle); else Layout.hide(t.dataset.panelToggle); renderBar(); return; }
     if (t.id === "person") {
       const v = t.value;
