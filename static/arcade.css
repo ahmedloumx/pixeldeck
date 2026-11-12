@@ -241,3 +241,52 @@
   .boot.is-leaving { opacity: 0; transition: opacity 150ms linear; }
   .boot.is-leaving .boot-stage, .boot.is-leaving .boot-blinds i { animation: none; }
 }
+
+/* ------------------------------------------------- terminal tabs: drag to reorder */
+.term-tab-name { touch-action: none; }
+.term-tab.is-dragging { position: relative; z-index: 2; cursor: grabbing; background: var(--color-paper-2); border-color: var(--color-ink-2); box-shadow: 3px 3px 0 var(--color-rule-2); }
+.term-tab.is-drop-before { box-shadow: inset 3px 0 0 var(--color-accent); }
+.term-tab.is-drop-after { box-shadow: inset -3px 0 0 var(--color-accent); }
+
+/* ------------------------------------------------- files dropped on a terminal */
+.term-panes { position: relative; }
+.term-panes.is-drop::after {
+  content: "DROP TO PASTE THE PATH"; position: absolute; inset: var(--space-xs); z-index: 5; display: grid; place-items: center; pointer-events: none;
+  border: var(--pixel) dashed var(--color-accent); background: oklch(29% 0.05 80 / 0.55); color: var(--color-accent); font: 400 11px var(--font-num);
+}
+
+/* ------------------------------------------------- review banners: drop in from the top */
+.notices { position: fixed; top: var(--space-lg); left: 50%; z-index: calc(var(--z-toast) + 5); display: grid; gap: var(--space-xs); width: min(30rem, calc(100% - 32px)); transform: translateX(-50%); pointer-events: none; }
+.review-banner {
+  --tone: var(--color-cool); position: relative; display: flex; align-items: stretch; pointer-events: auto;
+  background: var(--color-paper); border: var(--pixel) solid var(--tone); box-shadow: 0 0 0 3px var(--color-paper-3), 5px 5px 0 3px oklch(0% 0 0 / 0.5);
+  animation: rb-drop 520ms steps(6, end) both;
+}
+.review-banner.is-ok { --tone: var(--color-ok); }
+.review-banner.is-bad { --tone: var(--color-bad); }
+.review-banner.is-leaving { animation: rb-rise 400ms steps(4, end) forwards; }
+.rb-open { display: flex; flex: 1; align-items: center; gap: var(--space-sm); min-width: 0; padding: var(--space-sm) var(--space-md); border: 0; background: none; color: var(--color-ink); text-align: left; cursor: pointer; }
+.rb-open:hover .rb-pr { color: var(--color-ink); text-decoration: underline; text-decoration-color: var(--tone); }
+.rb-face { flex: none; display: grid; place-items: center; width: 40px; height: 40px; background: var(--color-paper-3); border: var(--pixel) solid var(--tone); color: var(--tone); font: 400 12px var(--font-num); }
+.rb-bang { position: absolute; top: -14px; left: 26px; color: var(--color-accent); font: 400 14px var(--font-num); animation: rb-bang 900ms steps(2, jump-none) infinite; }
+.rb-text { display: grid; gap: 2px; min-width: 0; }
+.rb-who { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rb-what { color: var(--tone); font: 400 10px/1.6 var(--font-num); }
+.rb-pr { overflow: hidden; color: var(--color-ink-2); font-size: var(--text-sm); text-overflow: ellipsis; white-space: nowrap; }
+.rb-x { flex: none; width: 34px; border: 0; border-left: var(--rule-hair) solid var(--color-rule); background: none; color: var(--color-muted); cursor: pointer; font-size: 18px; }
+.rb-x:hover { color: var(--color-ink); background: var(--color-paper-2); }
+@keyframes rb-drop { 0% { transform: translateY(-140%); } 70% { transform: translateY(8px); } 85% { transform: translateY(-3px); } 100% { transform: translateY(0); } }
+@keyframes rb-rise { to { transform: translateY(-140%); opacity: 0; } }
+@keyframes rb-bang { 50% { transform: translateY(-4px); } }
+@media (prefers-reduced-motion: reduce) { .review-banner, .review-banner.is-leaving, .rb-bang { animation: none; } }
+
+/* ------------------------------------------------- a tab at work: a small pixel loader */
+.term-tab-name::after { content: ""; display: inline-block; width: 0; height: 4px; margin-left: 0; vertical-align: 2px; transition: width var(--dur-micro) var(--ease-out), margin var(--dur-micro) var(--ease-out); }
+.term-tab.is-busy .term-tab-name::after {
+  width: 14px; margin-left: var(--space-2xs);
+  background: linear-gradient(var(--color-accent) 0 0) 0 0 / 4px 4px no-repeat, linear-gradient(var(--color-rule-2) 0 0) 0 0 / 14px 4px no-repeat;
+  animation: tab-busy 600ms steps(3, jump-none) infinite;
+}
+.term-tab.is-done:not(.is-busy) .term-tab-name::after { width: 5px; height: 5px; margin-left: var(--space-2xs); background: var(--color-ok); }
+@keyframes tab-busy { from { background-position: 0 0, 0 0; } to { background-position: 10px 0, 0 0; } }
+@media (prefers-reduced-motion: reduce) { .term-tab.is-busy .term-tab-name::after { animation: none; background: var(--color-accent); width: 5px; height: 5px; } }

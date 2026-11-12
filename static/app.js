@@ -1238,6 +1238,7 @@ function replay(action, button) {
   const sample = state.pr?.detail?.pr || state.pr?.pr || (currentData()?.merged || [])[0] || { id: 0, title: "", ticket: null };
   if (action === "fx-merge") Sprites.celebrate(sample);
   else if (action === "fx-die") Sprites.die({ left: innerWidth / 2 - 20, top: innerHeight / 2 - 20, width: 40, height: 40 }, "branch");
+  else if (action === "fx-review") reviewBanner(sample, { name: "Ada Reviewer", state: ["approved", "changes_requested", "commented"][Math.floor(Math.random() * 3)] });
   else { Layout.activate("terminal"); setTimeout(() => Term.showBuild(), 150); }
 }
 
@@ -1353,13 +1354,14 @@ async function mergePr(button) {
     const how = res.strategy ? `Strategy: ${res.strategy.replace(/_/g, " ")}.` : "";
     if (res.state === "MERGED") {
       forgetOpen(pr); // the merge moment plays now, not a second time on the next refresh
+      showMerged(pr, res.pr);
       Sprites.celebrate(pr);
       toast(`Merged #${pr.id} into ${pr.dest}.`, how);
     } else {
       toast(`Merging #${pr.id}: Bitbucket is finishing it.`, `${how} It moves to Merged on the next refresh.`);
     }
-    closePr();
     await reloadMine();
+    if (state.pr && prKey(state.pr.pr) === prKey(pr)) openPr(findPr(prKey(pr)) || state.pr.pr, { force: true });
   } catch (err) { toast("Could not merge the pull request.", err.message, true); }
 }
 
@@ -1456,6 +1458,7 @@ function applyBoot(b) {
   state.me = b.me; state.auth = b.auth; state.team = b.team || [];
   state.budget = b.budget || state.budget; state.launches = b.launches || []; state.project = b.project || null;
   state.root = b.root || "";
+  state.platform = b.platform || "";
 }
 const signature = (d) => JSON.stringify([d.open, d.merged, d.declined, d.review_requests, d.pushed, d.synced_at, d.members, d.project]);
 async function loadPerson(uuid) {
@@ -1466,12 +1469,75 @@ async function loadPerson(uuid) {
   const changed = !before || signature(before) !== signature(data);
   if (changed) state.people[uuid] = data;
   state.loadedAt[uuid] = Date.now();
-  if (isMeUuid(uuid)) { primeSeen(data.open || []); watchMerges(data); }
+  if (isMeUuid(uuid)) { primeSeen(data.open || []); watchMerges(data); watchReviews(data); }
   return changed;
 }
 // A pull request that was open last time and is merged now gets the merge moment, once.
 // The first load only records what is open, so history never fires.
 const MINE_OPEN_KEY = "prdesk.mine.open.v1";
+// The merged pull request moves at once: out of Open, to the top of Merged, and the view
+// stays on it showing its new state, before the refresh from Bitbucket comes back.
+function showMerged(pr, merged) {
+  const now = { ...pr, ...(merged || {}), state: "MERGED", updated_on: merged?.updated_on || new Date().toISOString() };
+  const mine = state.me && state.people[state.me.uuid];
+  if (mine) {
+    mine.open = (mine.open || []).filter((p) => prKey(p) !== prKey(pr));
+    mine.merged = [now, ...(mine.merged || []).filter((p) => prKey(p) !== prKey(pr))];
+  }
+  if (state.pr && prKey(state.pr.pr) === prKey(pr)) {
+    state.pr.pr = { ...state.pr.pr, ...now };
+    if (state.pr.detail?.pr) state.pr.detail.pr = { ...state.pr.detail.pr, state: "MERGED" };
+  }
+  renderAll();
+  renderPr();
+}
+/* A review on one of your open pull requests drops a banner from the top: who, and whether
+   they approved, asked for changes or commented. The first load only records what is there,
+   and so does a pull request seen for the first time. An approval cleared by a new push shows
+   up as "commented" in Bitbucket's data, so "commented" counts only from no review at all. */
+const REVIEWS_KEY = "prdesk.mine.reviews.v1";
+const BANNER_WORD = { approved: "APPROVED", changes_requested: "ASKED FOR CHANGES", commented: "COMMENTED" };
+function watchReviews(data) {
+  let before = null;
+  try { before = JSON.parse(localStorage.getItem(REVIEWS_KEY)); } catch { /* none yet */ }
+  const now = {};
+  for (const pr of data.open || []) {
+    const was = before && before[prKey(pr)];
+    const states = {};
+    for (const r of pr.reviews || []) {
+      if (!r.uuid || isMeUuid(r.uuid)) continue;
+      states[r.uuid] = r.state;
+      const prev = was ? was[r.uuid] : undefined;
+      if (!was || prev === r.state || !BANNER_WORD[r.state]) continue;
+      if (r.state === "commented" && prev && prev !== "pending") continue;
+      reviewBanner(pr, r);
+    }
+    now[prKey(pr)] = states;
+  }
+  try { localStorage.setItem(REVIEWS_KEY, JSON.stringify(now)); } catch { /* private window */ }
+}
+function reviewBanner(pr, review) {
+  const box = $("#notices");
+  if (!box) return;
+  while (box.children.length >= 3) box.firstElementChild.remove();
+  const tone = review.state === "approved" ? "is-ok" : review.state === "changes_requested" ? "is-bad" : "is-info";
+  const el = document.createElement("div");
+  el.className = `review-banner ${tone}`;
+  el.setAttribute("role", "status");
+  el.innerHTML = `<button class="rb-open" type="button" data-open="${esc(prKey(pr))}">
+      <span class="rb-bang" aria-hidden="true">!</span>
+      <span class="rb-face" aria-hidden="true">${esc(initials(review.name))}</span>
+      <span class="rb-text"><b class="rb-who">${esc(review.name || "Someone")}</b><span class="rb-what">${BANNER_WORD[review.state]}</span>
+        <span class="rb-pr">#${esc(pr.id)} ${esc(pr.title || "")}</span></span>
+    </button><button class="rb-x" type="button" aria-label="Dismiss">×</button>`;
+  const leave = () => { if (!el.isConnected || el.classList.contains("is-leaving")) return; el.classList.add("is-leaving"); setTimeout(() => el.remove(), 420); };
+  el.querySelector(".rb-x").addEventListener("click", leave);
+  el.querySelector(".rb-open").addEventListener("click", () => setTimeout(leave, 50));
+  let timer = setTimeout(leave, 9000);
+  el.addEventListener("mouseenter", () => clearTimeout(timer));
+  el.addEventListener("mouseleave", () => { timer = setTimeout(leave, 4000); });
+  box.append(el);
+}
 function forgetOpen(pr) {
   try {
     const before = JSON.parse(localStorage.getItem(MINE_OPEN_KEY)) || [];
@@ -1520,7 +1586,7 @@ async function refreshNow() {
     if (state.route.who === "team") state.teamData = await api("refresh", { method: "POST", body: { uuid: "team" } });
     else {
       state.people[whoUuid()] = await api("refresh", { method: "POST", body: { uuid: whoUuid() } });
-      if (state.route.who === "me") watchMerges(state.people[whoUuid()]);
+      if (state.route.who === "me") { watchMerges(state.people[whoUuid()]); watchReviews(state.people[whoUuid()]); }
     }
     applyBoot(await api("bootstrap"));
   } catch (err) {
@@ -1665,7 +1731,7 @@ function bind() {
     if (action === "preset-compact") { Layout.preset("compact"); return; }
     if (action === "close-help") return $("#help-dialog").close();
     if (action === "pr-fold") return applyFold(!state.prFolded);
-    if (action === "fx-merge" || action === "fx-die" || action === "fx-run") return replay(action, t.closest("[data-action]"));
+    if (["fx-merge", "fx-die", "fx-run", "fx-review"].includes(action)) return replay(action, t.closest("[data-action]"));
   });
   document.addEventListener("change", async (e) => {
     const t = e.target;

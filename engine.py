@@ -219,6 +219,20 @@ class Engine:
             self._save()
         return entry
 
+    def file_merged(self, uuid, raw):
+        """Move a pull request just merged from here into the merged list at once, from
+        Bitbucket's own answer, instead of waiting for its merged list to catch up."""
+        pr = model.slim_pr(raw)
+        key = (pr["repo"], pr["id"])
+        with self.lock:
+            entry = self.data["people"].get(uuid)
+            if entry is None:
+                return pr
+            entry["open"] = [p for p in entry.get("open", []) if (p["repo"], p["id"]) != key]
+            entry["merged"] = [pr] + [p for p in entry.get("merged", []) if (p["repo"], p["id"]) != key]
+        self._save()
+        return pr
+
     def person(self, uuid):
         with self.lock:
             entry = self.data["people"].get(uuid)

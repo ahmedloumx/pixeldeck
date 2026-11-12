@@ -46,6 +46,18 @@ const Term = (() => {
   }
   const tabEl = (id) => tabsEl?.querySelector(`.term-tab[data-term-id="${CSS.escape(id)}"]`);
 
+  // Tabs keep the order you dragged them into, across reloads.
+  const ORDER_KEY = "prdesk.termorder.v1";
+  // WebGL draws the terminal on the GPU: smoother scrolling and fast output. Set this key to
+  // "dom" (localStorage, then reload) to use the plain renderer if a graphics driver misbehaves.
+  const RENDERER_KEY = "prdesk.term.renderer";
+  const wantWebgl = () => { try { return localStorage.getItem(RENDERER_KEY) !== "dom"; } catch { return true; } };
+  const DROP_MAX = 50 * 1024 * 1024;
+  // A tab is "working" while output keeps coming that is not the echo of your own typing:
+  // Claude Code redraws its spinner as it works and goes quiet when it waits for you.
+  const ECHO_MS = 350, BUSY_MS = 1500;
+  let dragging = null, swallowClick = false;
+
   function cssColor(value) {
     const c = document.createElement("canvas").getContext("2d");
     c.fillStyle = "#000";
@@ -70,6 +82,7 @@ const Term = (() => {
     tabsEl = root.querySelector(".term-tabs");
     panesEl = root.querySelector(".term-panes");
     root.addEventListener("click", (e) => {
+      if (swallowClick) { swallowClick = false; return; } // the end of a tab drag, not a click
       if (e.target.closest("[data-term-new]")) return newShell();
       const close = e.target.closest("[data-term-close]");
       if (close) { e.stopPropagation(); return closeSession(close.dataset.termClose); }
@@ -77,7 +90,24 @@ const Term = (() => {
       if (tab) select(tab.dataset.termTab);
     });
     root.addEventListener("dblclick", (e) => { const name = e.target.closest(".term-tab-name"); if (name) rename(name.dataset.termTab); });
-    root.addEventListener("keydown", (e) => { const name = e.target.closest?.(".term-tab-name"); if (name && e.key === "F2") { e.preventDefault(); rename(name.dataset.termTab); } });
+    root.addEventListener("keydown", (e) => {
+      const name = e.target.closest?.(".term-tab-name");
+      if (!name) return;
+      if (e.key === "F2") { e.preventDefault(); rename(name.dataset.termTab); }
+      if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) { e.preventDefault(); moveTab(name.dataset.termTab, e.key === "ArrowLeft" ? -1 : 1); }
+    });
+    tabsEl.addEventListener("pointerdown", startDrag);
+    // Files dropped anywhere else must not open in the window; on a terminal they paste paths.
+    document.addEventListener("dragover", (e) => { if (hasFiles(e)) e.preventDefault(); });
+    document.addEventListener("drop", (e) => { if (hasFiles(e) && !panesEl.contains(e.target)) e.preventDefault(); });
+    panesEl.addEventListener("dragover", (e) => { if (!hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy"; panesEl.classList.add("is-drop"); });
+    panesEl.addEventListener("dragleave", (e) => { if (!panesEl.contains(e.relatedTarget)) panesEl.classList.remove("is-drop"); });
+    panesEl.addEventListener("drop", (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      panesEl.classList.remove("is-drop");
+      dropFiles(e.dataTransfer);
+    });
     new ResizeObserver(() => fitCurrent()).observe(panesEl);
     if (!streaming) stream();
   }
@@ -91,11 +121,14 @@ const Term = (() => {
     const term = new Terminal({
       fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--font-term").trim() || "monospace",
       fontSize: 13, lineHeight: 1.12, cursorBlink: true, scrollback: 8000, theme: theme(),
+      // The wheel glides instead of jumping; output that arrives still scrolls at once.
+      smoothScrollDuration: 90, fastScrollSensitivity: 5,
+      allowProposedApi: true, // the Unicode 11 width tables go through the proposed unicode API
     });
     const fit = new FitAddon.FitAddon();
     term.loadAddon(fit);
     const s = { id, title, term, fit, pane, alive: true, pos: 0, size: "", auto: stored(TITLES_KEY)[id] || "", custom: names()[id] || "", stage: "" };
-    term.onData((data) => send(id, data));
+    term.onData((data) => { s.lastKey = Date.now(); send(id, data); });
     term.onTitleChange((raw) => {
       const auto = cleanTitle(raw);
       if (!auto || auto === s.auto) return;
@@ -108,10 +141,163 @@ const Term = (() => {
       if (s.alive && key !== s.size) { s.size = key; api("term-resize", { method: "POST", body: { id, cols, rows } }).catch(() => {}); }
     });
     sessions.set(id, s);
+    orderSessions();
     term.open(pane);
+    s.renderer = loadRenderer(s);
+    if (typeof Unicode11Addon !== "undefined") {
+      try { term.loadAddon(new Unicode11Addon.Unicode11Addon()); term.unicode.activeVersion = "11"; } catch { /* xterm's own widths stay */ }
+    }
     paintTabs();
     select(id);
     return s;
+  }
+
+  function setBusy(s, on) {
+    if (on) s.busyUntil = Date.now() + BUSY_MS;
+    if (s.busy === on) return;
+    s.busy = on;
+    if (!on && s.id !== current) s.done = true; // finished out of sight: a dot until you look
+    const el = tabEl(s.id);
+    el?.classList.toggle("is-busy", on);
+    el?.classList.toggle("is-done", !!s.done);
+  }
+  setInterval(() => {
+    const now = Date.now();
+    for (const s of sessions.values()) if (s.busy && now > s.busyUntil) setBusy(s, false);
+  }, 400);
+
+  function loadRenderer(s) {
+    if (!wantWebgl() || typeof WebglAddon === "undefined") return "dom";
+    try {
+      const gl = new WebglAddon.WebglAddon();
+      // A lost GPU context (driver reset, too many contexts) falls back to the DOM renderer.
+      gl.onContextLoss(() => { gl.dispose(); s.renderer = "dom"; });
+      s.term.loadAddon(gl);
+      return "webgl";
+    } catch { return "dom"; }
+  }
+
+  /* ------------------------------------------------------------ tab order */
+
+  function savedOrder() { try { return JSON.parse(localStorage.getItem(ORDER_KEY)) || []; } catch { return []; } }
+  function orderSessions() {
+    const saved = savedOrder();
+    const rank = (id) => { const i = saved.indexOf(id); return i < 0 ? Infinity : i; };
+    const entries = [...sessions.entries()].sort((a, b) => rank(a[0]) - rank(b[0]));
+    sessions.clear();
+    for (const [key, value] of entries) sessions.set(key, value);
+  }
+  function setOrder(ids) {
+    const entries = ids.filter((id) => sessions.has(id)).map((id) => [id, sessions.get(id)]);
+    sessions.clear();
+    for (const [key, value] of entries) sessions.set(key, value);
+    try { localStorage.setItem(ORDER_KEY, JSON.stringify(ids)); } catch { /* storage blocked */ }
+    paintTabs();
+  }
+  function moveTab(id, step) {
+    const ids = [...sessions.keys()];
+    const from = ids.indexOf(id), to = Math.max(0, Math.min(ids.length - 1, from + step));
+    if (from < 0 || from === to) return;
+    ids.splice(to, 0, ids.splice(from, 1)[0]);
+    setOrder(ids);
+    tabEl(id)?.querySelector(".term-tab-name")?.focus();
+  }
+  // Drag a tab sideways to move it. A press that barely moves stays a click.
+  function startDrag(e) {
+    const name = e.target.closest(".term-tab-name");
+    const el = name?.closest(".term-tab");
+    if (!el || e.button !== 0 || el.querySelector(".term-tab-input") || sessions.size < 2) return;
+    const x0 = e.clientX;
+    let target = -1;
+    const others = () => [...tabsEl.querySelectorAll(".term-tab")].filter((t) => t !== el);
+    const mark = () => others().forEach((t, i) => {
+      t.classList.toggle("is-drop-before", i === target);
+      t.classList.toggle("is-drop-after", target === others().length && i === others().length - 1);
+    });
+    const move = (ev) => {
+      const dx = ev.clientX - x0;
+      if (!dragging && Math.abs(dx) < 6) return;
+      if (!dragging) { dragging = el.dataset.termId; el.classList.add("is-dragging"); }
+      el.style.transform = `translateX(${dx}px)`;
+      const r = el.getBoundingClientRect(), mid = r.left + r.width / 2;
+      target = others().filter((t) => { const b = t.getBoundingClientRect(); return b.left + b.width / 2 < mid; }).length;
+      mark();
+    };
+    const up = () => {
+      removeEventListener("pointermove", move);
+      removeEventListener("pointerup", up);
+      removeEventListener("pointercancel", up);
+      if (!dragging) return;
+      swallowClick = true;
+      setTimeout(() => { swallowClick = false; }, 0);
+      const id = dragging;
+      dragging = null;
+      el.classList.remove("is-dragging");
+      el.style.transform = "";
+      target = Math.max(0, target);
+      const ids = others().map((t) => t.dataset.termId);
+      ids.splice(target, 0, id);
+      target = -1;
+      mark();
+      setOrder(ids);
+    };
+    addEventListener("pointermove", move);
+    addEventListener("pointerup", up);
+    addEventListener("pointercancel", up);
+  }
+
+  /* ------------------------------------------------------------ file drops */
+
+  // Dropped files become their paths at the prompt, quoted and never run. A file manager can
+  // hand over real paths (text/uri-list); when it does not, the file is copied into PixelDeck's
+  // drop folder through the server and that copy's path is pasted instead.
+  const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes("Files");
+  const platform = () => (typeof state !== "undefined" && state.platform) || "";
+  function fromUriList(text) {
+    const out = [];
+    for (const line of String(text || "").split(/\r?\n/)) {
+      const item = line.trim();
+      if (!item || item.startsWith("#")) continue;
+      try {
+        const url = new URL(item);
+        if (url.protocol !== "file:") continue;
+        let path = decodeURIComponent(url.pathname);
+        if (/^\/[A-Za-z]:\//.test(path)) path = path.slice(1); // file:///C:/x on Windows
+        if (!/[\u0000-\u001f\u007f]/.test(path)) out.push(path);
+      } catch { /* not a URL */ }
+    }
+    return out;
+  }
+  function quotePath(path) {
+    if (platform() === "win32") return `"${path}"`;
+    return /^[A-Za-z0-9_./~+@%=:,-]+$/.test(path) ? path : `'${path.replace(/'/g, "'\\''")}'`;
+  }
+  async function upload(file) {
+    if (file.size > DROP_MAX) throw new Error(`It is over ${DROP_MAX / 1048576} MB.`);
+    const res = await fetch("/api/term-drop", {
+      method: "POST",
+      headers: { "X-Desk-Token": TOKEN, "X-File-Name": encodeURIComponent(file.name), "Content-Type": "application/octet-stream" },
+      body: file,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.path) return data.path;
+    if (/JSON body/.test(data.error || "")) throw new Error("This needs the newer PixelDeck server: restart it once.");
+    throw new Error(data.error || `HTTP ${res.status}`);
+  }
+  async function dropFiles(dt) {
+    // Both lists can only be read during the drop event itself, so before any await.
+    const files = [...(dt.files || [])].slice(0, 10);
+    let paths = fromUriList(dt.getData("text/uri-list"));
+    const s = sessions.get(current);
+    if (!s || !s.alive) { toast("Open a terminal first.", "Then drop the files on it."); return; }
+    if (!paths.length || paths.length < files.length) {
+      paths = [];
+      for (const file of files) {
+        try { paths.push(await upload(file)); } catch (err) { toast(`Could not drop ${file.name}.`, err.message, true); }
+      }
+    }
+    if (paths.length) s.term.paste(`${paths.map(quotePath).join(" ")} `);
+    s.term.focus();
   }
 
   function send(id, data) {
@@ -122,6 +308,7 @@ const Term = (() => {
     const s = sessions.get(id);
     if (!s) return;
     current = id;
+    s.done = false;
     for (const other of sessions.values()) other.pane.hidden = other.id !== id;
     const empty = panesEl.querySelector(".term-empty");
     if (empty) empty.hidden = true;
@@ -155,6 +342,8 @@ const Term = (() => {
       el.classList.toggle("is-ended", !s.alive);
       el.classList.toggle("is-scaffold", s.stage !== "");
       el.classList.toggle("is-building", s.stage === "building");
+      el.classList.toggle("is-busy", !!s.busy);
+      el.classList.toggle("is-done", !!s.done);
       el.setAttribute("aria-selected", String(s.id === current));
       const text = el.querySelector(".term-tab-label");
       if (text.textContent !== label) text.textContent = label;
@@ -163,6 +352,15 @@ const Term = (() => {
       el.querySelector(".term-tab-close").setAttribute("aria-label", `Close ${tabLabel(s)}`);
     }
     for (const el of tabsEl.querySelectorAll(".term-tab")) if (!sessions.has(el.dataset.termId)) el.remove();
+    if (!dragging) {
+      let prev = null;
+      for (const s of sessions.values()) {
+        const el = tabEl(s.id);
+        const want = prev ? prev.nextElementSibling : tabsEl.firstElementChild;
+        if (el && el !== want) tabsEl.insertBefore(el, want);
+        prev = el || prev;
+      }
+    }
     const empty = panesEl.querySelector(".term-empty");
     if (empty) empty.hidden = sessions.size > 0;
     if (typeof Layout !== "undefined") Layout.setBadge("terminal", [...sessions.values()].filter((s) => s.alive).length || "");
@@ -302,7 +500,12 @@ const Term = (() => {
       if ("exit" in msg && !msg.d) return; // an ended session nobody had open
       s = attach(msg.id, msg.t || "Terminal");
     }
-    if (msg.d) s.term.write(decode(msg.d));
+    if (msg.d) {
+      s.term.write(decode(msg.d));
+      // The first chunk after attaching is the replayed scrollback, not new work.
+      if (s.ready && Date.now() - (s.lastKey || 0) > ECHO_MS) setBusy(s, true);
+      s.ready = true;
+    }
     if (typeof msg.p === "number") s.pos = msg.p;
     if ("exit" in msg && s.alive) {
       s.alive = false;
@@ -311,5 +514,14 @@ const Term = (() => {
     }
   }
 
-  return { mount, attach, select, newShell, showBuild, fit: fitCurrent, count: () => sessions.size };
+  return { mount, attach, select, newShell, showBuild, fit: fitCurrent, count: () => sessions.size,
+    renderers: () => [...sessions.values()].map((s) => s.renderer), order: () => [...sessions.keys()],
+    // The last lines of the current terminal as text: with WebGL the screen is not in the DOM.
+    lines: (n = 5) => {
+      const buf = sessions.get(current)?.term.buffer.active;
+      if (!buf) return [];
+      const out = [];
+      for (let y = Math.max(0, buf.length - 200); y < buf.length; y++) out.push(buf.getLine(y)?.translateToString(true) || "");
+      return out.filter((line) => line.trim()).slice(-n);
+    } };
 })();
