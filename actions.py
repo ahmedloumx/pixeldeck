@@ -1,5 +1,5 @@
 """Write actions: preview and open a pull request from a pushed branch, delete a
-pushed branch, decline one of your open pull requests.
+pushed branch, sync, merge or decline one of your open pull requests.
 
 The browser only names what to act on. Every action is checked against the
 server's own data first (the pushed list, the cached pull request, the remote
@@ -7,6 +7,9 @@ tip), so a stale page cannot delete or decline the wrong thing.
 """
 
 import json
+import secrets
+import shutil
+import subprocess
 import time
 
 import config
@@ -34,6 +37,29 @@ def _repo_dir(root, repo):
     if repo_dir is None:
         raise ValueError(f"no local clone of {repo}")
     return repo_dir
+
+
+def remote_tip(root, repo, branch):
+    """The branch's commit on the remote right now, after a fetch."""
+    repo_dir = _repo_dir(root, repo)
+    gitscan.git(repo_dir, "fetch", "--quiet", "origin", branch, timeout=90)
+    return gitscan.git(repo_dir, "rev-parse", f"origin/{branch}").strip()
+
+
+DIFF_MAX = 400_000  # bytes of diff text read for the popup; a larger diff is cut and says so
+
+
+def branch_diff(root, repo, branch, dest):
+    """The diff a pull request from branch into dest would show, parsed, for the popup."""
+    repo_dir = _repo_dir(root, repo)
+    for ref in (branch, dest):
+        if not isinstance(ref, str) or not ref or ref.startswith("-") or not _ref_exists(repo_dir, f"refs/remotes/origin/{ref}"):
+            raise ValueError(f"unknown branch {ref!r}")
+    text = gitscan.git(repo_dir, "diff", "--no-color", "--no-ext-diff", f"origin/{dest}...origin/{branch}", timeout=60)
+    cut = len(text) > DIFF_MAX
+    if cut:
+        text = text[:DIFF_MAX].rsplit("\ndiff --git ", 1)[0]
+    return {"files": model.parse_diff(text), "cut": cut}
 
 
 def _ref_exists(repo_dir, ref):
@@ -206,6 +232,104 @@ def merge(engine, body):
     _after_change(engine)
     # A slow merge answers 202 with no body: Bitbucket finishes it, and the next refresh files it.
     return {"repo": repo, "id": pr_id, "state": result.get("state") or "PENDING", "strategy": strategy, "pr": merged}
+
+
+class SyncConflict(Exception):
+    """The destination does not merge cleanly into the branch; nothing was pushed."""
+
+    def __init__(self, dest, files):
+        super().__init__(f"{dest} does not merge cleanly: {len(files)} file(s) conflict")
+        self.files = files
+
+
+_clones = {"at": 0, "root": None, "map": {}}
+
+
+def _clone(root, repo):
+    """The local clone of a repository; the scan of the workspace is kept ten minutes."""
+    if _clones["root"] != str(root) or time.time() - _clones["at"] > 600:
+        _clones.update(at=time.time(), root=str(root), map=gitscan.repo_dirs(root))
+    return _clones["map"].get(repo)
+
+
+def _own_open(engine, repo, pr_id):
+    if not isinstance(repo, str) or not isinstance(pr_id, int):
+        raise ValueError("repo and id are required")
+    pr = engine.find_pr(repo, pr_id)
+    if pr is None:
+        raise ValueError("unknown pull request; refresh first")
+    if pr["author"]["uuid"] != (engine.me() or {}).get("uuid"):
+        raise PermissionError("only your own pull requests can be synced from here")
+    if pr["state"] != "OPEN":
+        raise ValueError(f"#{pr_id} is {pr['state'].lower()}, not open")
+    return pr
+
+
+def _counts(repo_dir, pr):
+    src, dest = pr["source"], pr["dest"]
+    gitscan.git(repo_dir, "fetch", "--quiet", "origin", src, dest, timeout=120)
+    behind = int(gitscan.git(repo_dir, "rev-list", "--count", f"origin/{src}..origin/{dest}").strip())
+    ahead = int(gitscan.git(repo_dir, "rev-list", "--count", f"origin/{dest}..origin/{src}").strip())
+    return behind, ahead
+
+
+def sync_status(engine, root, repo, pr_id):
+    """How far the branch is behind its destination, read from a fresh fetch of the clone."""
+    pr = _own_open(engine, repo, pr_id)
+    repo_dir = _clone(root, repo)
+    if repo_dir is None:
+        return {"available": False, "why": f"no local clone of {repo} under {root}"}
+    behind, ahead = _counts(repo_dir, pr)
+    return {"available": True, "behind": behind, "ahead": ahead, "source": pr["source"], "dest": pr["dest"]}
+
+
+def sync(engine, root, body):
+    """Merge the destination into the pull request's branch and push it, as Bitbucket's
+    "Sync now" does.
+
+    The merge happens in a throwaway worktree on the remote tip, so no checkout of yours
+    changes. The push is a plain one: if someone pushed to the branch meanwhile, git
+    refuses it and nothing is lost. A conflict aborts the merge and pushes nothing. Hooks
+    are skipped (--no-verify) because this commit only joins two pushed histories, the
+    way Bitbucket's own button does on its servers, and a temporary worktree has no
+    installed tooling for them to run.
+    """
+    pr = _own_open(engine, body.get("repo"), body.get("id"))
+    repo_dir = _clone(root, pr["repo"])
+    if repo_dir is None:
+        raise ValueError(f"no local clone of {pr['repo']} under {root}")
+    src, dest = pr["source"], pr["dest"]
+    behind, _ = _counts(repo_dir, pr)
+    if behind == 0:
+        return {"state": "up to date", "behind": 0, "merged": 0}
+    tip = gitscan.git(repo_dir, "rev-parse", f"origin/{src}").strip()
+    folder = config.folder("state") / "sync"
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{pr['repo']}-{pr['id']}-{secrets.token_hex(3)}"
+    gitscan.git(repo_dir, "worktree", "add", "--detach", str(path), tip, timeout=120)
+    try:
+        try:
+            gitscan.git(path, "merge", "--no-ff", "--no-verify", "-m", f"Merged {dest} into {src}", f"origin/{dest}", timeout=180)
+        except (RuntimeError, subprocess.TimeoutExpired):
+            conflicts = gitscan.git(path, "diff", "--name-only", "--diff-filter=U").split()
+            try:
+                gitscan.git(path, "merge", "--abort")
+            except RuntimeError:
+                pass
+            raise SyncConflict(dest, conflicts) from None
+        head = gitscan.git(path, "rev-parse", "HEAD").strip()
+        gitscan.git(path, "push", "--no-verify", "origin", f"{head}:refs/heads/{src}", timeout=180)
+    finally:
+        try:
+            gitscan.git(repo_dir, "worktree", "remove", "--force", str(path), timeout=60)
+        except (RuntimeError, subprocess.TimeoutExpired):
+            shutil.rmtree(path, ignore_errors=True)
+            try:
+                gitscan.git(repo_dir, "worktree", "prune")
+            except RuntimeError:
+                pass
+    _after_change(engine)
+    return {"state": "synced", "behind": 0, "merged": behind, "head": head[:12], "source": src, "dest": dest}
 
 
 def _after_change(engine):

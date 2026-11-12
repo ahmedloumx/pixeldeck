@@ -5,6 +5,9 @@
   python3 pixeldeck.py --status   say whether the server runs
   python3 pixeldeck.py --stop     stop the server (and every terminal in it)
   python3 pixeldeck.py --server   run the server in this console, for debugging
+  python3 pixeldeck.py --propose --repo R --branch B --title T [--description-file F]
+                                  ask PixelDeck to open a pull request and wait for you
+                                  (exit 0 opened, 2 declined, 3 still waiting, 4 error)
 
 The window, best first:
   Linux    its own GTK 4 + WebKitGTK window, when PyGObject and WebKitGTK 6 are installed
@@ -14,12 +17,14 @@ The window, best first:
 """
 
 import argparse
+import json
 import os
 import shutil
 import signal
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 import webbrowser
 from pathlib import Path
@@ -141,13 +146,92 @@ def open_window():
     return "default browser"
 
 
+# ---------------------------------------------------------------- propose
+
+def _call(method, path, body=None, key=""):
+    data = json.dumps(body).encode() if body is not None else None
+    request = urllib.request.Request(url() + "api/" + path, data=data, method=method,
+                                     headers={"X-Agent-Key": key, "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=120) as res:
+            return json.loads(res.read() or b"{}")
+    except urllib.error.HTTPError as exc:
+        try:
+            message = json.loads(exc.read()).get("error")
+        except ValueError:
+            message = None
+        raise RuntimeError(message or f"HTTP {exc.code}") from None
+
+
+def propose(args):
+    """Ask PixelDeck to open a pull request, then wait for the person to decide.
+
+    Asking again for the same branch returns the same proposal, so a caller cut off by its
+    own time limit can run the very same command again to keep waiting or to read the answer.
+    """
+    try:
+        key = json.loads(state_file("agent.key").read_text())["key"]
+    except (OSError, ValueError, KeyError):
+        print("PixelDeck is not running (no propose key). Start it, then run this again.", file=sys.stderr)
+        return 4
+    description = None
+    if args.description_file:
+        description = Path(args.description_file).read_text(encoding="utf-8")
+    elif args.description is not None:
+        description = args.description
+    body = {"repo": args.repo, "branch": args.branch, "close_source_branch": not args.keep_branch}
+    if args.dest:
+        body["dest"] = args.dest
+    if args.title:
+        body["title"] = args.title
+    if description is not None:
+        body["description"] = description
+    try:
+        item = _call("POST", "propose", body, key)
+    except (RuntimeError, OSError) as exc:
+        print(f"PixelDeck refused the proposal: {exc}", file=sys.stderr)
+        return 4
+    if item["status"] == "pending":
+        print(f"Waiting for you in PixelDeck: {item['repo']} {item['branch']} into {item['dest']}: {item['title']}", flush=True)
+    deadline = time.time() + args.wait
+    while item["status"] in ("pending", "opening") and time.time() < deadline:
+        time.sleep(1.5)
+        try:
+            item = _call("GET", f"proposal?id={item['id']}", key=key)
+        except (RuntimeError, OSError) as exc:
+            print(f"Lost PixelDeck while waiting ({exc}). Run the same command again.", file=sys.stderr)
+            return 4
+    if item["status"] == "opened":
+        result = item.get("result") or {}
+        print(f"Opened pull request #{result.get('id')}: {result.get('url')}")
+        return 0
+    if item["status"] == "declined":
+        print(f"Declined in PixelDeck: {item.get('reason') or 'no reason given'}")
+        return 2
+    print("Still waiting for you in PixelDeck. Run the same command again to keep waiting.")
+    return 3
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--status", action="store_true")
     group.add_argument("--stop", action="store_true")
     group.add_argument("--server", action="store_true")
+    group.add_argument("--propose", action="store_true", help="ask PixelDeck to open a pull request")
+    parser.add_argument("--repo", help="--propose: the repository slug")
+    parser.add_argument("--branch", help="--propose: the pushed branch")
+    parser.add_argument("--dest", help="--propose: the branch to merge into (default: the repo's usual one)")
+    parser.add_argument("--title", help="--propose: the title")
+    parser.add_argument("--description", help="--propose: the description")
+    parser.add_argument("--description-file", help="--propose: read the description from this file")
+    parser.add_argument("--keep-branch", action="store_true", help="--propose: do not close the branch after the merge")
+    parser.add_argument("--wait", type=int, default=100, help="--propose: seconds to wait before exiting with 3 (default 100)")
     args = parser.parse_args()
+    if args.propose:
+        if not args.repo or not args.branch:
+            parser.error("--propose needs --repo and --branch")
+        sys.exit(propose(args))
     if args.status:
         print(f"running on {url()} (log: {state_file('server.log')})" if alive() else "stopped")
         return

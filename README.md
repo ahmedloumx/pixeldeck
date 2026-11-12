@@ -26,14 +26,22 @@ Full documentation, with the architecture, security model and measured performan
 - **Terminal panel.** Real shells in tabs, drawn with WebGL for smooth scrolling. Tabs are named
   after what runs in them, can be renamed and dragged into any order, and show a small loader
   while something is working in them. Drop files on a terminal to paste their paths. The shells
-  stay alive after you close the window.
+  stay alive after you close the window, and reopening it brings their screens back as they were.
+- **Pull requests an agent asks to open.** Instead of opening a pull request itself, an agent
+  such as Claude Code runs `pixeldeck.py --propose` and waits. A notification shows the branch,
+  its target and its size: **Proceed** opens it as proposed, **Review** opens the popup (target
+  branch, close the branch after the merge, the diff), **Decline** says no. See below.
 - **Review banners.** When someone approves, asks for changes or comments on one of your pull
   requests, a banner drops in from the top with who it was.
 - **Team and insights.** Your teammates' queues, review load and merge history.
-- **Actions.** Open a pull request from a pushed branch, merge or decline your own pull request,
-  delete a pushed branch. Each asks for a second click.
+- **Actions.** Open a pull request from a pushed branch; sync, merge or decline your own pull
+  request; delete a pushed branch. Each asks for a second click in place. When your branch is behind its
+  target, a bar says by how much and offers **Sync now**, like Bitbucket's.
 - **Arcade layer.** A title screen while it loads, pixel sprites, and small game moments for
-  merges, deletions and new shells. Reduced motion turns them off.
+  merges, deletions and new shells. Two mascots: the green slime does AI work (it comes when you
+  start Claude and builds its terminal tab), the blue bot does PixelDeck's own work (it stands by
+  a button while a merge, sync, decline or delete runs) and its eyes follow your pointer. Reduced
+  motion turns them off.
 
 ## Requirements
 
@@ -106,6 +114,21 @@ in the real environment wins over the file, and the file is re-read when it chan
 | `PIXELDECK_PORT` | The local port. Default 8642. |
 | `PIXELDECK_CACHE_DIR`, `_STATE_DIR`, `_DATA_DIR`, `_CONFIG_DIR`, `PIXELDECK_SETTINGS_FILE` | Move where PixelDeck keeps its files. |
 
+### Letting an agent open pull requests through you
+
+```sh
+python3 pixeldeck.py --propose --repo shop-api --branch feat/ABC-12-cart \
+    --title "feat: cart totals (ABC-12)" --description-file pr.md
+```
+
+The command waits up to 100 seconds (`--wait` to change it) and then exits with **0** and the
+pull request's link when you open it, **2** if you declined, **3** if you have not answered yet
+(run the same command again: it picks up the same proposal), or **4** if PixelDeck is not
+running. `--dest` picks another target branch and `--keep-branch` keeps the branch after the
+merge. Approval is refused if the branch moved since it was proposed, so what opens is what you
+saw. Put a line in your agent's instructions (for Claude Code, its `CLAUDE.md`) telling it to
+open pull requests this way.
+
 ### Claude brief templates
 
 The text Claude receives is built from `briefs/head.md` plus one of `summarize.md`, `review.md`,
@@ -121,10 +144,14 @@ folder. Files you leave out come from `briefs/`. Placeholders such as `{source}`
 - Pull request text is untrusted: descriptions and comments are rendered by an escape-first
   Markdown renderer that only builds a fixed set of tags, and the Claude brief fences reviewer
   text as data. Tests feed both hostile input.
-- Destructive actions need a second click. Merge and decline work only on your own open pull
+- Destructive actions ask for a second click in place (an agent's proposal needs your one click
+  on Proceed). Merge and decline work only on your own open pull
   requests. A merge re-reads the pull request first, and Bitbucket's own merge checks still
   decide. Protected branches are never deleted, and a deleted branch is logged with the command
   that restores it.
+- The propose key an agent uses can only ask and read the answer; only the page can approve.
+  That makes the approval a cooperative step, not a barrier: any program running as you can
+  reach PixelDeck, and your `.env`, anyway.
 - Fix and push tells Claude to push with `--force-with-lease` on the exact remote commit. That
   is an instruction to Claude, not a check PixelDeck enforces.
 
@@ -139,7 +166,7 @@ on every request, so a reload shows a change. The documentation describes each f
 
 ## Credits
 
-- [xterm.js](https://xtermjs.org/) and its fit, WebGL and Unicode 11 add-ons, MIT license.
+- [xterm.js](https://xtermjs.org/) and its fit, WebGL, Unicode 11 and serialize add-ons, MIT license.
 - Fonts: Press Start 2P, Pixelify Sans and Host Grotesk, SIL Open Font License 1.1.
 
 Their license texts are in [licenses/](licenses/).

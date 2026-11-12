@@ -33,6 +33,7 @@ import actions  # noqa: E402
 import launcher  # noqa: E402
 import terminals  # noqa: E402
 import opener  # noqa: E402
+import proposals  # noqa: E402
 from bitbucket import BitbucketError  # noqa: E402
 from engine import Engine  # noqa: E402
 
@@ -41,6 +42,14 @@ import config  # noqa: E402
 STATIC = HERE / "static"
 WORKSPACE_ROOT = config.workspace_root()
 SECRET = secrets.token_urlsafe(32)
+# A second key, for an agent proposing a pull request from a terminal: it can ask and read the
+# answer, nothing else. Written to the state folder (mode 600) at start; see proposals.py.
+AGENT_KEY = secrets.token_urlsafe(32)
+AGENT_ROUTES = {("POST", "propose"), ("GET", "proposal")}
+PROPOSALS = proposals.Proposals()
+FEATURES = ["merge", "sync", "drop", "proposals", "snapshots"]
+SNAPSHOT_MAX = 4 * 1024 * 1024
+MIN_COLS, MIN_ROWS = 20, 4  # a collapsed panel must not squeeze a program into a sliver
 TERMS = terminals.Terminals()
 MAX_BODY = 64 * 1024
 DROP_MAX = 50 * 1024 * 1024
@@ -118,8 +127,10 @@ class Desk(BaseHTTPRequestHandler):
     def _error(self, status, message, **more):
         self._send(status, {"error": message, **more})
 
-    def _authorized(self):
-        return secrets.compare_digest(self.headers.get("X-Desk-Token", ""), SECRET)
+    def _authorized(self, method="", route=""):
+        if secrets.compare_digest(self.headers.get("X-Desk-Token", ""), SECRET):
+            return True
+        return (method, route) in AGENT_ROUTES and secrets.compare_digest(self.headers.get("X-Agent-Key", ""), AGENT_KEY)
 
     def _body(self):
         length = int(self.headers.get("Content-Length") or 0)
@@ -142,7 +153,7 @@ class Desk(BaseHTTPRequestHandler):
         if url.path.startswith("/static/"):
             return self._static(url.path[len("/static/"):])
         if url.path.startswith("/api/"):
-            if not self._authorized():
+            if not self._authorized("GET", url.path[5:]):
                 return self._error(HTTPStatus.UNAUTHORIZED, "stale page token")
             return self._api("GET", url.path[5:], parse_qs(url.query), None)
         self._error(HTTPStatus.NOT_FOUND, "not found")
@@ -153,8 +164,22 @@ class Desk(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         if not url.path.startswith("/api/"):
             return self._error(HTTPStatus.NOT_FOUND, "not found")
-        if not self._authorized():
+        if not self._authorized("POST", url.path[5:]):
             return self._error(HTTPStatus.UNAUTHORIZED, "stale page token")
+        if url.path == "/api/term-snapshot":  # the serialized screen is text far above the JSON cap
+            query = parse_qs(url.query)
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                if not 0 < length <= SNAPSHOT_MAX:
+                    raise ValueError("snapshot size out of range")
+                num = lambda k: int((query.get(k) or ["0"])[0])  # noqa: E731
+                session = TERMS.get((query.get("id") or [""])[0])
+                kept = session.remember(self.rfile.read(length).decode("utf-8", "replace"), num("pos"), num("cols"), num("rows"))
+            except KeyError as exc:
+                return self._error(HTTPStatus.NOT_FOUND, str(exc).strip("'"))
+            except ValueError as exc:
+                return self._error(HTTPStatus.BAD_REQUEST, str(exc))
+            return self._send(200, {"kept": kept})
         if url.path == "/api/term-drop":  # raw file bytes, not JSON: read before _body() would refuse them
             try:
                 length = int(self.headers.get("Content-Length") or 0)
@@ -226,6 +251,8 @@ class Desk(BaseHTTPRequestHandler):
                 cols, rows = body.get("cols"), body.get("rows")
                 if not (isinstance(cols, int) and isinstance(rows, int) and 2 <= cols <= 1000 and 2 <= rows <= 500):
                     raise ValueError("cols and rows must be sane integers")
+                if cols < MIN_COLS or rows < MIN_ROWS:
+                    return self._send(200, {"ok": False, "ignored": "too small"})
                 TERMS.get(str(body.get("id"))).resize(cols, rows)
                 return self._send(200, {"ok": True})
             if method == "POST" and route == "term-close":
@@ -236,13 +263,33 @@ class Desk(BaseHTTPRequestHandler):
                 branch = (query.get("branch") or [""])[0]
                 return self._send(200, actions.preview(engine, WORKSPACE_ROOT, repo, branch))
             if method == "POST" and route == "pr-create":
-                return self._send(200, actions.create(engine, WORKSPACE_ROOT, body))
+                result = actions.create(engine, WORKSPACE_ROOT, body)
+                PROPOSALS.opened_elsewhere(body.get("repo"), body.get("branch"), result)
+                return self._send(200, result)
+            if method == "POST" and route == "propose":
+                return self._send(200, PROPOSALS.propose(engine, WORKSPACE_ROOT, body))
+            if method == "GET" and route == "proposal":
+                return self._send(200, PROPOSALS.get((query.get("id") or [""])[0]))
+            if method == "GET" and route == "proposals":
+                return self._send(200, {"proposals": PROPOSALS.list()})
+            if method == "POST" and route == "proposal-decide":
+                fields = body.get("fields") if isinstance(body.get("fields"), dict) else {}
+                return self._send(200, PROPOSALS.decide(engine, WORKSPACE_ROOT, str(body.get("id") or ""), body.get("action"), fields))
+            if method == "GET" and route == "branch-diff":
+                q = lambda k: (query.get(k) or [""])[0]  # noqa: E731
+                return self._send(200, actions.branch_diff(WORKSPACE_ROOT, q("repo"), q("branch"), q("dest")))
             if method == "POST" and route == "branch-delete":
                 return self._send(200, actions.delete_branch(engine, WORKSPACE_ROOT, body))
             if method == "POST" and route == "decline":
                 return self._send(200, actions.decline(engine, body))
             if method == "POST" and route == "merge":
                 return self._send(200, actions.merge(engine, body))
+            if method == "POST" and route == "sync":
+                return self._send(200, actions.sync(engine, WORKSPACE_ROOT, body))
+            if method == "GET" and route == "pr-sync":
+                repo = (query.get("repo") or [""])[0]
+                pr_id = int((query.get("id") or ["0"])[0])
+                return self._send(200, actions.sync_status(engine, WORKSPACE_ROOT, repo, pr_id))
             if method == "GET" and route == "projects":
                 return self._send(200, {"projects": engine.projects(), "project": engine.project()})
             if method == "POST" and route == "project":
@@ -268,6 +315,8 @@ class Desk(BaseHTTPRequestHandler):
                 return self._send(200, {"browser": opener.open_url(url)})
         except BitbucketError as exc:
             return self._error(HTTPStatus.BAD_GATEWAY, exc.message, upstream=exc.status, auth=engine.auth)
+        except actions.SyncConflict as exc:
+            return self._error(HTTPStatus.CONFLICT, str(exc), conflicts=exc.files)
         except KeyError as exc:
             return self._error(HTTPStatus.NOT_FOUND, str(exc).strip("'"))
         except PermissionError as exc:
@@ -298,6 +347,7 @@ class Desk(BaseHTTPRequestHandler):
             "root": str(WORKSPACE_ROOT),
             "platform": sys.platform,
             "terminal": terminals.UNAVAILABLE or "",
+            "features": FEATURES,
             "now": time.time(),
         }
 
@@ -338,15 +388,22 @@ class Desk(BaseHTTPRequestHandler):
                     lines.append({"id": sid, "gone": True})
                 known = set(current)
                 for sid, session in current.items():
+                    first = sid not in pos
                     with session.cond:
-                        start = max(pos.get(sid, 0), session.base)
+                        snap = session.snapshot if first else None
+                        if snap and snap["pos"] < session.base:
+                            snap = None  # its tail scrolled out of the buffer
+                        start = snap["pos"] if snap else max(pos.get(sid, 0), session.base)
                         data = bytes(session.buf[start - session.base:])
                         end = session.end
-                    if data:
-                        lines.append({"id": sid, "t": session.title, "p": end, "d": base64.b64encode(data).decode()})
-                        pos[sid] = end
-                    elif sid not in pos:
-                        lines.append({"id": sid, "t": session.title, "p": end, "d": ""})
+                        size = {"cols": session.cols, "rows": session.rows}
+                    if snap:
+                        lines.append({"id": sid, "t": session.title, "snap": snap["text"], "sp": snap["pos"], "cols": snap["cols"], "rows": snap["rows"]})
+                    if data or first:
+                        line = {"id": sid, "t": session.title, "p": end, "d": base64.b64encode(data).decode()}
+                        if first and not snap:
+                            line.update(size)  # replay at the size the output was written for
+                        lines.append(line)
                         pos[sid] = end
                     if not session.alive and sid not in reported_exit:
                         lines.append({"id": sid, "t": session.title, "exit": session.exit_code})
@@ -468,6 +525,17 @@ def shell_argv():
     return [os.environ.get("SHELL") or "/bin/sh", "-l"]
 
 
+def write_agent_key(port):
+    """Where pixeldeck.py --propose finds the propose-only key (and the port) of this run."""
+    path = config.folder("state") / "agent.key"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps({"port": port, "key": AGENT_KEY}))
+    if os.name != "nt":
+        os.chmod(path, 0o600)
+
+
 def main():
     parser = argparse.ArgumentParser(description="PixelDeck local server")
     parser.add_argument("--port", type=int, default=config.port())
@@ -476,6 +544,7 @@ def main():
 
     Desk.engine = Engine(WORKSPACE_ROOT)
     Desk.port = args.port
+    write_agent_key(args.port)
     if not args.no_refresh:
         Desk.engine.run_forever()
     httpd = ThreadingHTTPServer(("127.0.0.1", args.port), Desk)

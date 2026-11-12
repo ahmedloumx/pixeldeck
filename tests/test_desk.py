@@ -522,5 +522,281 @@ class FileMergedTest(unittest.TestCase):
         self.assertEqual([(p["id"], p["state"]) for p in entry["merged"]], [(42, "MERGED"), (7, "MERGED")])
 
 
+@unittest.skipUnless(shutil.which("git"), "git is not installed")
+class SyncTest(unittest.TestCase):
+    """Real git: a bare remote, a clone, a feature branch behind develop."""
+
+    def setUp(self):
+        import actions
+        self.actions = actions
+        self.tmp = Path(tempfile.mkdtemp(prefix="pixeldeck-sync-"))
+        os.environ["PIXELDECK_STATE_DIR"] = str(self.tmp / "state")
+        self.env = {**os.environ, "GIT_AUTHOR_NAME": "T", "GIT_AUTHOR_EMAIL": "t@example.com",
+                    "GIT_COMMITTER_NAME": "T", "GIT_COMMITTER_EMAIL": "t@example.com"}
+        remote, self.clone = self.tmp / "remote.git", self.tmp / "clone"
+        self.git(self.tmp, "init", "-q", "--bare", "-b", "develop", str(remote))
+        self.git(self.tmp, "clone", "-q", str(remote), str(self.clone))
+        # The sync's own merge commit runs through gitscan, whose environment is fixed at import:
+        # the identity lives in the clone's config, which its temporary worktree shares.
+        self.git(self.clone, "config", "user.name", "T")
+        self.git(self.clone, "config", "user.email", "t@example.com")
+        self.commit("app.txt", "one\n", "first")
+        self.git(self.clone, "push", "-q", "origin", "HEAD:develop")
+        self.git(self.clone, "switch", "-q", "-c", "feat/x")
+        self.commit("feature.txt", "feature\n", "feature")
+        self.git(self.clone, "push", "-q", "origin", "feat/x")
+        self.git(self.clone, "switch", "-q", "develop")
+        self.commit("app.txt", "one\ntwo\n", "develop moves on")
+        self.git(self.clone, "push", "-q", "origin", "develop")
+        actions._clone = lambda root, repo: self.clone
+        pr = model.slim_pr(raw_pr(author={"uuid": "{me}", "display_name": "Me"},
+                                  source={"branch": {"name": "feat/x"}, "commit": {"hash": "x"}},
+                                  destination={"branch": {"name": "develop"}, "repository": {"full_name": "acme/shop-api"}}))
+        self.engine = type("E", (), {})()
+        self.engine.find_pr = lambda repo, pr_id: pr
+        self.engine.me = lambda: {"uuid": "{me}"}
+        self.engine.refresh_person = lambda uuid: None
+        self.engine.pushed = lambda force=False: []
+        self.body = {"repo": pr["repo"], "id": pr["id"]}
+
+    def tearDown(self):
+        os.environ.pop("PIXELDECK_STATE_DIR", None)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def git(self, cwd, *args):
+        return subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True, text=True, env=self.env).stdout
+
+    def commit(self, name, text, message):
+        (self.clone / name).write_text(text)
+        self.git(self.clone, "add", name)
+        self.git(self.clone, "commit", "-q", "-m", message)
+
+    def remote_log(self, ref):
+        return self.git(self.clone, "log", "--format=%s", f"origin/{ref}")
+
+    def test_status_then_sync_merges_develop_and_pushes(self):
+        status = self.actions.sync_status(self.engine, self.tmp, "shop-api", 42)
+        self.assertEqual((status["behind"], status["ahead"]), (1, 1))
+        out = self.actions.sync(self.engine, self.tmp, self.body)
+        self.assertEqual((out["state"], out["merged"]), ("synced", 1))
+        self.git(self.clone, "fetch", "-q", "origin")
+        self.assertEqual(self.remote_log("feat/x").splitlines()[0], "Merged develop into feat/x")
+        self.assertEqual(self.actions.sync_status(self.engine, self.tmp, "shop-api", 42)["behind"], 0)
+        self.assertEqual(self.actions.sync(self.engine, self.tmp, self.body)["state"], "up to date")
+        self.assertEqual(self.git(self.clone, "branch", "--show-current").strip(), "develop", "your checkout is untouched")
+        self.assertEqual(list((self.tmp / "state" / "sync").iterdir()), [], "the temporary worktree is gone")
+
+    def test_a_conflict_pushes_nothing(self):
+        self.git(self.clone, "switch", "-q", "feat/x")
+        self.commit("app.txt", "one\nmine\n", "clash")
+        self.git(self.clone, "push", "-q", "origin", "feat/x")
+        before = self.remote_log("feat/x")
+        with self.assertRaises(self.actions.SyncConflict) as caught:
+            self.actions.sync(self.engine, self.tmp, self.body)
+        self.assertEqual(caught.exception.files, ["app.txt"])
+        self.git(self.clone, "fetch", "-q", "origin")
+        self.assertEqual(self.remote_log("feat/x"), before)
+
+    def test_only_your_own_pull_requests(self):
+        self.engine.me = lambda: {"uuid": "{someone-else}"}
+        with self.assertRaises(PermissionError):
+            self.actions.sync(self.engine, self.tmp, self.body)
+
+
+class ProposalTest(unittest.TestCase):
+    """The waiting room for pull requests an agent asks to open."""
+
+    def setUp(self):
+        import actions
+        import proposals
+        self.actions, self.store = actions, proposals.Proposals()
+        self.created, self.tip = [], "aaa111"
+        self.saved = (actions.preview, actions.create, actions.remote_tip)
+        actions.preview = lambda engine, root, repo, branch: {
+            "dest": "develop", "dests": ["develop", "main"], "title": "feat: from git", "description": "- one",
+            "tip": "aaa111", "ahead": 2, "behind": 0, "file_count": 3, "added": 10, "removed": 1}
+        actions.create = lambda engine, root, body: self.created.append(body) or {"id": 7, "url": "https://bitbucket.org/acme/shop-api/pull-requests/7", "reviewers": 1}
+        actions.remote_tip = lambda root, repo, branch: self.tip
+
+    def tearDown(self):
+        self.actions.preview, self.actions.create, self.actions.remote_tip = self.saved
+
+    def ask(self, **over):
+        return self.store.propose(None, "/root", {"repo": "shop-api", "branch": "feat/x", "title": "feat: asked", **over})
+
+    def test_asking_twice_returns_the_same_proposal(self):
+        a, b = self.ask(), self.ask(title="something else")
+        self.assertEqual(a["id"], b["id"])
+        self.assertEqual((a["title"], a["dest"], a["status"]), ("feat: asked", "develop", "pending"))
+
+    def test_approve_opens_it_once_with_the_fields_from_the_popup(self):
+        pid = self.ask()["id"]
+        out = self.store.decide(None, "/root", pid, "approve", {"dest": "main", "close_source_branch": False})
+        again = self.store.decide(None, "/root", pid, "approve")
+        self.assertEqual((out["status"], again["status"]), ("opened", "opened"))
+        self.assertEqual(len(self.created), 1, "a second click opens nothing")
+        self.assertEqual((self.created[0]["dest"], self.created[0]["close_source_branch"], self.created[0]["title"]), ("main", False, "feat: asked"))
+        self.assertEqual(self.ask()["status"], "opened", "the agent's next call reads the answer")
+
+    def test_refuses_when_the_branch_moved_since_it_was_shown(self):
+        pid = self.ask()["id"]
+        self.tip = "bbb222"
+        with self.assertRaises(ValueError):
+            self.store.decide(None, "/root", pid, "approve")
+        self.assertEqual(self.store.get(pid)["status"], "pending")
+        self.assertEqual(self.created, [])
+
+    def test_decline_and_other_paths_end_it(self):
+        pid = self.ask()["id"]
+        self.assertEqual(self.store.decide(None, "/root", pid, "decline")["status"], "declined")
+        other = self.store.propose(None, "/root", {"repo": "shop-api", "branch": "feat/y"})
+        self.store.opened_elsewhere("shop-api", "feat/y", {"id": 9})
+        self.assertEqual(self.store.get(other["id"])["status"], "opened")
+
+    def test_limits(self):
+        with self.assertRaises(ValueError):
+            self.ask(title="x" * 300)
+        with self.assertRaises(ValueError):
+            self.ask(dest="production")
+
+
+class ProposalRouteTest(unittest.TestCase):
+    """The real server in-process: what the propose key may and may not do, and the real command."""
+
+    @classmethod
+    def setUpClass(cls):
+        import threading
+        from http.server import ThreadingHTTPServer
+        import actions
+        import server
+        cls.server_mod, cls.actions = server, actions
+        cls.saved = (actions.preview, actions.create, actions.remote_tip)
+        actions.preview = lambda engine, root, repo, branch: {
+            "dest": "develop", "dests": ["develop"], "title": "t", "description": "", "tip": "aaa", "ahead": 1,
+            "behind": 0, "file_count": 1, "added": 1, "removed": 0}
+        actions.create = lambda engine, root, body: {"id": 11, "url": "https://bitbucket.org/acme/shop-api/pull-requests/11", "reviewers": 0}
+        actions.remote_tip = lambda root, repo, branch: "aaa"
+        cls.state = Path(tempfile.mkdtemp(prefix="pixeldeck-routes-"))
+        os.environ["PIXELDECK_STATE_DIR"] = str(cls.state)
+        server.Desk.engine = type("E", (), {"auth": {}, "me": lambda self: {"uuid": "{me}"}})()
+        cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Desk)
+        cls.httpd.daemon_threads = True
+        cls.port = cls.httpd.server_address[1]
+        server.Desk.port = cls.port
+        server.write_agent_key(cls.port)
+        threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+        cls.httpd.server_close()
+        cls.actions.preview, cls.actions.create, cls.actions.remote_tip = cls.saved
+        os.environ.pop("PIXELDECK_STATE_DIR", None)
+
+    def call(self, method, route, body=None, key=None, page=False):
+        import urllib.error
+        import urllib.request
+        headers = {"Content-Type": "application/json"}
+        if key:
+            headers["X-Agent-Key"] = key
+        if page:
+            headers["X-Desk-Token"] = self.server_mod.SECRET
+        req = urllib.request.Request(f"http://127.0.0.1:{self.port}/api/{route}", method=method, headers=headers,
+                                     data=json.dumps(body).encode() if body is not None else None)
+        try:
+            with urllib.request.urlopen(req, timeout=10) as res:
+                return res.status, json.loads(res.read())
+        except urllib.error.HTTPError as exc:
+            return exc.code, json.loads(exc.read() or b"{}")
+
+    def test_the_propose_key_can_ask_but_never_decide(self):
+        key = json.loads((self.state / "agent.key").read_text())["key"]
+        self.assertEqual((self.state / "agent.key").stat().st_mode & 0o777, 0o600)
+        code, item = self.call("POST", "propose", {"repo": "shop-api", "branch": "feat/k"}, key=key)
+        self.assertEqual(code, 200)
+        self.assertEqual(self.call("GET", f"proposal?id={item['id']}", key=key)[0], 200)
+        for method, route, body in (("POST", "proposal-decide", {"id": item["id"], "action": "approve"}),
+                                    ("GET", "proposals", None), ("POST", "merge", {"repo": "shop-api", "id": 1}),
+                                    ("POST", "pr-create", {"repo": "shop-api", "branch": "feat/k"})):
+            self.assertEqual(self.call(method, route, body, key=key)[0], 401, route)
+        self.assertEqual(self.call("POST", "proposal-decide", {"id": item["id"], "action": "decline"}, page=True)[1]["status"], "declined")
+
+    def run_cli(self, branch, *extra):
+        env = {**os.environ, "PIXELDECK_PORT": str(self.port), "PIXELDECK_STATE_DIR": str(self.state)}
+        root = Path(__file__).resolve().parent.parent
+        return subprocess.Popen([sys.executable, str(root / "pixeldeck.py"), "--propose", "--repo", "shop-api", "--branch", branch,
+                                 "--title", "feat: from the agent", *extra], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+    def wait_pending(self, branch):
+        for _ in range(50):
+            items = [p for p in self.call("GET", "proposals", page=True)[1]["proposals"] if p["branch"] == branch]
+            if items:
+                return items[0]["id"]
+            __import__("time").sleep(0.1)
+        self.fail("the proposal never arrived")
+
+    def test_the_command_waits_for_proceed_and_prints_the_link(self):
+        proc = self.run_cli("feat/cli")
+        pid = self.wait_pending("feat/cli")
+        self.call("POST", "proposal-decide", {"id": pid, "action": "approve"}, page=True)
+        out, _ = proc.communicate(timeout=20)
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("https://bitbucket.org/acme/shop-api/pull-requests/11", out)
+
+    def test_the_command_exits_3_while_waiting_and_2_when_declined(self):
+        proc = self.run_cli("feat/slow", "--wait", "1")
+        proc.communicate(timeout=20)
+        self.assertEqual(proc.returncode, 3)
+        pid = self.wait_pending("feat/slow")
+        self.call("POST", "proposal-decide", {"id": pid, "action": "decline"}, page=True)
+        again = self.run_cli("feat/slow", "--wait", "1")
+        again.communicate(timeout=20)
+        self.assertEqual(again.returncode, 2)
+
+
+class SnapshotTest(unittest.TestCase):
+    def session(self):
+        import threading
+        import terminals
+        s = terminals.Session.__new__(terminals.Session)
+        s.buf, s.base, s.cond, s.snapshot, s.exit_code = bytearray(b"0123456789"), 100, threading.Condition(), None, None
+        s.cols, s.rows, s.title = 120, 30, "Shell"
+        return s
+
+    def test_keeps_a_picture_only_while_its_tail_is_in_the_buffer(self):
+        s = self.session()  # offsets 100 to 110 are in the buffer
+        self.assertFalse(s.remember("old", 99, 80, 24), "its tail scrolled out")
+        self.assertFalse(s.remember("future", 111, 80, 24))
+        self.assertTrue(s.remember("screen at 105", 105, 200, 50))
+        self.assertFalse(s.remember("older", 103, 80, 24), "an older picture never replaces a newer one")
+        self.assertEqual(s.snapshot["pos"], 105)
+
+    def test_a_new_page_gets_the_picture_then_only_what_followed(self):
+        import base64
+        import urllib.request
+        import server
+        s = self.session()
+        s.remember("PICTURE", 105, 200, 50)
+        import threading
+        from http.server import ThreadingHTTPServer
+        server.TERMS.sessions["snap1"] = s
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Desk)
+        httpd.daemon_threads = True
+        server.Desk.port = httpd.server_address[1]
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        try:
+            req = urllib.request.Request(f"http://127.0.0.1:{server.Desk.port}/api/term-stream?cursors=", headers={"X-Desk-Token": server.SECRET})
+            with urllib.request.urlopen(req, timeout=10) as res:
+                lines = [json.loads(res.readline()), json.loads(res.readline())]
+        finally:
+            del server.TERMS.sessions["snap1"]
+            httpd.shutdown()
+            httpd.server_close()
+        snap = next(x for x in lines if "snap" in x)
+        data = next(x for x in lines if "d" in x)
+        self.assertEqual((snap["snap"], snap["sp"], snap["cols"], snap["rows"]), ("PICTURE", 105, 200, 50))
+        self.assertEqual(base64.b64decode(data["d"]), b"56789", "only the output after the picture")
+
+
 if __name__ == "__main__":
     unittest.main()

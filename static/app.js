@@ -87,6 +87,8 @@ async function api(path, { method = "GET", body } = {}) {
   if (!res.ok) {
     const err = new Error(data.error || `HTTP ${res.status}`);
     err.auth = data.auth;
+    err.data = data;
+    err.status = res.status;
     throw err;
   }
   return data;
@@ -1086,6 +1088,7 @@ function renderPr() {
           <span class="pr-mini" aria-hidden="true">${mini}</span>
           <div class="pr-tools" role="toolbar" aria-label="Pull request actions">${prTools(full)}</div>
         </div>
+        <div class="sync-slot" id="sync-slot">${syncBar()}</div>
         <div class="pr-body" id="pr-body">${{ overview: tabOverview, files: tabFiles, threads: tabThreads, commits: tabCommits, tasks: tabTasks }[tab]()}</div>
       </div>
     </div>`;
@@ -1155,6 +1158,48 @@ async function openPr(pr, { force = false, tab } = {}) {
   api(`pr-extra?${q}`).then((x) => { if (still()) { state.pr.extra = x; if (state.pr.tab !== "files") renderPr(); } }).catch(() => {});
   api(`pr-diff?${q}`).then((d) => { if (still()) { state.pr.diff = d; renderPr(); } })
     .catch((err) => { if (still()) { state.pr.diffError = err.message; if (state.pr.tab === "files") renderPr(); } });
+  if (pr.state === "OPEN" && isMeUuid(pr.author?.uuid) && (state.features || []).includes("sync")) loadSync(pr);
+}
+// How far the branch is behind its destination: a fetch in your clone, so it comes a moment
+// after the rest. Only the bar's own slot is redrawn, so a diff being read does not jump.
+function loadSync(pr) {
+  const key = prKey(pr);
+  api(`pr-sync?repo=${encodeURIComponent(pr.repo)}&id=${pr.id}`)
+    .then((s) => { if (state.pr && prKey(state.pr.pr) === key) { state.pr.sync = s; paintSync(); } })
+    .catch(() => { /* an older server, or no clone: no bar */ });
+}
+function syncBar() {
+  const s = state.pr?.sync;
+  if (!s?.available || !s.behind) return "";
+  const n = `${s.behind} ${s.behind === 1 ? "commit" : "commits"}`;
+  return `<div class="sync-bar" role="status">${Sprites.svg("sync", { scale: 2 })}
+    <span>This branch is <b>${n}</b> behind <code>${esc(s.dest)}</code>.</span>
+    <button class="btn sync-now" type="button" data-sync>Sync now</button></div>`;
+}
+function paintSync() {
+  const slot = $("#sync-slot");
+  if (slot) slot.innerHTML = syncBar();
+}
+const NEEDS_RESTART = "Restart PixelDeck once: close the window, run run.sh --stop in a terminal, then click the dock icon.";
+async function syncPr(button) {
+  const pr = state.pr?.detail?.pr || state.pr?.pr;
+  const s = state.pr?.sync;
+  if (!pr || !s || !armed(button, `Confirm: merge ${s.dest} into this branch and push`)) return;
+  try {
+    const res = await busy(button, () => api("sync", { method: "POST", body: { repo: pr.repo, id: pr.id } }));
+    state.pr.sync = { ...s, behind: 0 };
+    paintSync();
+    toast(res.state === "synced" ? `Synced: ${res.merged} ${res.merged === 1 ? "commit" : "commits"} from ${s.dest} merged into ${s.source}.` : "Already up to date.",
+      res.state === "synced" ? "Pushed to Bitbucket. You can merge now." : "");
+    openPr(pr, { force: true });
+  } catch (err) {
+    if (err.status === 409) {
+      const files = err.data?.conflicts || [];
+      toast(`Sync stopped: ${files.length} ${files.length === 1 ? "file conflicts" : "files conflict"} with ${s.dest}. Nothing was pushed.`,
+        `${files.slice(0, 6).join(", ")}${files.length > 6 ? ", ..." : ""}. Resolve them in your checkout, or ask Claude with the fix button.`, true);
+    } else if (/no route/.test(err.message)) toast("Sync needs the newer PixelDeck server.", NEEDS_RESTART, true);
+    else toast("Could not sync the branch.", err.message, true);
+  }
 }
 function closePr() {
   state.pr = null;
@@ -1215,6 +1260,8 @@ async function launch(button, event) {
   if (action === "fix_push" && !armed(button, "Confirm: fix and push")) return;
   clearTimeout(button._disarm);
   const where = event?.shiftKey ? "window" : "app";
+  // AI work: the green slime pops up here, then goes to build the new terminal tab.
+  const slime = where === "app" ? Sprites.agent(button) : null;
   button.disabled = true;
   button.classList.remove("btn--armed");
   button.classList.add("is-busy");
@@ -1223,9 +1270,14 @@ async function launch(button, event) {
   try {
     const record = await api("launch", { method: "POST", body: { repo: pr.repo, id: pr.id, action, where } });
     state.launches = [record, ...state.launches].slice(0, 30);
-    if (record.term) { Term.attach(record.term, record.title); Layout.activate("terminal"); }
+    if (record.term) {
+      Term.attach(record.term, record.title);
+      Layout.activate("terminal");
+      if (slime) Term.buildWith(slime, record.term); else Sprites.dismiss(slime);
+    } else Sprites.dismiss(slime);
     toast(record.term ? `Claude is running in the Terminal panel: ${ACTION_LABEL[action]}.` : `Claude is open in its own window: ${ACTION_LABEL[action]}.`, shortPath(record.cwd));
   } catch (err) {
+    Sprites.dismiss(slime);
     toast("Could not open Claude.", err.message, true);
   } finally {
     renderPr();
@@ -1272,7 +1324,11 @@ async function busy(button, work) {
   button.classList.remove("btn--armed");
   button.classList.add("is-busy");
   setLabel(button, `<span class="spin" aria-hidden="true"></span>Working`);
-  try { return await work(); } finally {
+  // Every confirmed action is deterministic PixelDeck work: the blue bot comes to do it.
+  const bot = Sprites.worker(button);
+  let ok = false;
+  try { const out = await work(); ok = true; return out; } finally {
+    bot.done(ok);
     button.disabled = false;
     button.classList.remove("is-busy");
     setLabel(button, restore);
@@ -1288,13 +1344,18 @@ async function reloadMine() {
 /* ------------------------------------------------- the potential pull request */
 
 let preview = null;
-async function openPreview(repo, branch) {
+async function openPreview(repo, branch, proposal = null) {
   const dialog = $("#pr-dialog");
   preview = null;
   $("#pr-dialog-body").innerHTML = `<header class="pr-dialog-head"><h2 id="pr-dialog-title">Potential pull request</h2><p class="id">${esc(repo)}</p></header><p class="empty">Fetching ${esc(branch)} and comparing it with its destination…</p>`;
   dialog.showModal();
   try {
     preview = await api(`branch?repo=${encodeURIComponent(repo)}&branch=${encodeURIComponent(branch)}`);
+    if (proposal) {
+      // What the agent asked for, over what the branch says; the popup still shows the branch's own facts.
+      Object.assign(preview, { proposal: proposal.id, title: proposal.title, description: proposal.description,
+        dest: proposal.dest, close_source_branch: proposal.close_source_branch });
+    }
     paintPreview();
   } catch (err) {
     $("#pr-dialog-body").innerHTML = `<header class="pr-dialog-head"><h2 id="pr-dialog-title">Potential pull request</h2></header><section class="notice" role="alert"><h2>Could not read the branch</h2><p>${esc(err.message)}</p></section><footer class="pr-dialog-foot"><button class="btn" type="button" data-action="close-preview">Close</button></footer>`;
@@ -1320,12 +1381,31 @@ function paintPreview() {
       <p class="pr-reviewers">${esc(reviewers)}</p></div>
     <details class="pr-more" open><summary>${plural(p.commits.length, "commit")}</summary><ol class="pr-commits">${commits}</ol></details>
     <details class="pr-more"><summary>${plural(p.file_count, "changed file")}${p.file_count > p.files.length ? `, the ${p.files.length} largest shown` : ""}</summary><table class="queue pr-files"><tbody>${files}</tbody></table></details>
+    <details class="pr-more" data-diff-lazy><summary>The diff</summary><div class="mini-diff"><p class="empty">Loading the diff...</p></div></details>
     <footer class="pr-dialog-foot">
-      <button class="btn btn--danger" type="button" data-preview-delete>Delete branch</button><span class="spacer"></span>
+      ${p.proposal ? `<button class="btn btn--danger" type="button" data-proposal-decline="${esc(p.proposal)}">Decline</button>`
+        : `<button class="btn btn--danger" type="button" data-preview-delete>Delete branch</button>`}<span class="spacer"></span>
       <button class="btn btn--quiet" type="button" data-action="close-preview">Cancel</button>
-      <button class="btn btn--primary" type="button" data-create-pr>Create pull request</button></footer>`;
+      <button class="btn btn--primary" type="button" data-create-pr>${p.proposal ? "Open pull request" : "Create pull request"}</button></footer>`;
+  const lazy = $("#pr-dialog-body [data-diff-lazy]");
+  lazy?.addEventListener("toggle", () => { if (lazy.open && !lazy.dataset.loaded) { lazy.dataset.loaded = "1"; loadMiniDiff(lazy); } });
+}
+// The diff the pull request would show, loaded when its section is opened. Every line is
+// text from the branch, so it is escaped like any other content from outside.
+async function loadMiniDiff(box) {
+  const out = box.querySelector(".mini-diff");
+  try {
+    const dest = $("#pr-dest")?.value || preview.dest;
+    const d = await api(`branch-diff?repo=${encodeURIComponent(preview.repo)}&branch=${encodeURIComponent(preview.branch)}&dest=${encodeURIComponent(dest)}`);
+    const row = ([sign, , , text]) => `<tr class="${sign === "+" ? "is-add" : sign === "-" ? "is-del" : ""}"><td class="mini-sign">${sign === " " ? "" : sign}</td><td class="mini-text">${esc(text)}</td></tr>`;
+    out.innerHTML = (d.files.map((f) => `<details class="mini-file"><summary><span class="branch">${esc(f.path)}</span>
+        <span class="num figure-cell plus">${f.binary ? "bin" : `+${f.added}`}</span><span class="num figure-cell minus">${f.binary ? "" : `-${f.removed}`}</span></summary>
+        ${f.binary ? '<p class="empty">Binary file.</p>' : `<table class="mini-lines"><tbody>${f.hunks.map((h) => `<tr class="mini-hunk"><td></td><td>${esc(h.header)}</td></tr>${h.lines.map(row).join("")}`).join("")}</tbody></table>`}
+      </details>`).join("") || '<p class="empty">No changes.</p>') + (d.cut ? '<p class="note">The diff is long: the first part is shown.</p>' : "");
+  } catch (err) { out.innerHTML = `<p class="empty">${esc(err.message)}</p>`; }
 }
 async function createPr(button) {
+  if (preview?.proposal) return decideProposal(button, preview.proposal, "approve", true);
   if (!preview || !armed(button, "Confirm: create it")) return;
   const body = { repo: preview.repo, branch: preview.branch, dest: $("#pr-dest").value, title: $("#pr-title").value, description: $("#pr-desc").value, close_source_branch: $("#pr-close").checked };
   try {
@@ -1362,7 +1442,15 @@ async function mergePr(button) {
     }
     await reloadMine();
     if (state.pr && prKey(state.pr.pr) === prKey(pr)) openPr(findPr(prKey(pr)) || state.pr.pr, { force: true });
-  } catch (err) { toast("Could not merge the pull request.", err.message, true); }
+  } catch (err) {
+    const behind = state.pr?.sync?.behind;
+    if (/no route/.test(err.message)) toast("Merge needs the newer PixelDeck server.", NEEDS_RESTART, true);
+    else if (behind) {
+      toast(`Could not merge: the branch is ${behind} ${behind === 1 ? "commit" : "commits"} behind ${state.pr.sync.dest}.`, `${err.message} Sync it first with the bar above.`, true);
+      const bar = $(".sync-bar");
+      if (bar) { bar.classList.remove("is-nudge"); void bar.offsetWidth; bar.classList.add("is-nudge"); }
+    } else toast("Could not merge the pull request.", err.message, true);
+  }
 }
 
 async function declinePr(button) {
@@ -1459,6 +1547,7 @@ function applyBoot(b) {
   state.budget = b.budget || state.budget; state.launches = b.launches || []; state.project = b.project || null;
   state.root = b.root || "";
   state.platform = b.platform || "";
+  state.features = b.features || []; // an older server has none: the page skips what it lacks
 }
 const signature = (d) => JSON.stringify([d.open, d.merged, d.declined, d.review_requests, d.pushed, d.synced_at, d.members, d.project]);
 async function loadPerson(uuid) {
@@ -1519,7 +1608,9 @@ function watchReviews(data) {
 function reviewBanner(pr, review) {
   const box = $("#notices");
   if (!box) return;
-  while (box.children.length >= 3) box.firstElementChild.remove();
+  // Three review banners at most; a pull request waiting for an answer is never pushed out.
+  const reviews = [...box.querySelectorAll(".review-banner:not(.proposal-banner)")];
+  while (reviews.length >= 3) reviews.shift().remove();
   const tone = review.state === "approved" ? "is-ok" : review.state === "changes_requested" ? "is-bad" : "is-info";
   const el = document.createElement("div");
   el.className = `review-banner ${tone}`;
@@ -1538,6 +1629,59 @@ function reviewBanner(pr, review) {
   el.addEventListener("mouseleave", () => { timer = setTimeout(leave, 4000); });
   box.append(el);
 }
+/* Pull requests an agent asks to open (pixeldeck.py --propose): a banner stays until you
+   decide. Proceed opens it as proposed; Review opens the popup; Decline tells the agent no. */
+const shownProposals = new Set();
+async function pollProposals() {
+  if (!(state.features || []).includes("proposals")) return;
+  let list;
+  try { list = (await api("proposals")).proposals; } catch { return; }
+  const pending = list.filter((p) => p.status === "pending");
+  for (const p of pending) if (!shownProposals.has(p.id)) proposalBanner(p);
+  for (const el of $$(".proposal-banner")) if (!pending.some((p) => p.id === el.dataset.proposal)) leaveBanner(el);
+}
+function leaveBanner(el) {
+  if (!el.isConnected || el.classList.contains("is-leaving")) return;
+  el.classList.add("is-leaving");
+  shownProposals.delete(el.dataset.proposal);
+  setTimeout(() => el.remove(), 420);
+}
+function proposalBanner(p) {
+  const box = $("#notices");
+  if (!box) return;
+  shownProposals.add(p.id);
+  const el = document.createElement("div");
+  el.className = "review-banner proposal-banner is-ask";
+  el.dataset.proposal = p.id;
+  el.setAttribute("role", "alertdialog");
+  el.setAttribute("aria-label", `Pull request to open: ${p.title}`);
+  const facts = `${plural(p.ahead, "commit")}, ${plural(p.file_count, "file")}, +${p.added} -${p.removed}${p.close_source_branch ? ", branch closes after the merge" : ""}${p.behind ? `, ${p.behind} behind` : ""}`;
+  el.innerHTML = `<div class="rb-open pb-body">
+      <span class="rb-bang" aria-hidden="true">?</span>
+      <span class="rb-face" aria-hidden="true">${Sprites.svg("buddy", { scale: 1 })}</span>
+      <span class="rb-text"><span class="rb-what">PULL REQUEST TO OPEN</span><b class="rb-who">${esc(p.title)}</b>
+        <span class="rb-pr"><span class="branch">${esc(p.repo)} ${esc(p.branch)}</span> into <b>${esc(p.dest)}</b></span>
+        <span class="rb-pr">${esc(facts)}</span></span></div>
+    <div class="pb-actions">
+      <button class="btn btn--primary" type="button" data-proposal-proceed="${esc(p.id)}">Proceed</button>
+      <button class="btn" type="button" data-proposal-review="${esc(p.id)}">Review</button>
+      <button class="btn btn--quiet" type="button" data-proposal-decline="${esc(p.id)}">Decline</button></div>`;
+  el._proposal = p;
+  box.append(el);
+}
+async function decideProposal(button, id, action, fromPopup = false) {
+  const fields = fromPopup ? { dest: $("#pr-dest").value, title: $("#pr-title").value, description: $("#pr-desc").value, close_source_branch: $("#pr-close").checked } : undefined;
+  try {
+    const res = await busy(button, () => api("proposal-decide", { method: "POST", body: { id, action, fields } }));
+    for (const el of $$(`.proposal-banner[data-proposal="${CSS.escape(id)}"]`)) leaveBanner(el);
+    if (fromPopup) $("#pr-dialog").close();
+    if (res.status === "opened") {
+      await reloadMine();
+      toast(`Pull request #${res.result.id} is open on ${res.repo}.`, `${plural(res.result.reviewers, "reviewer")} added. The agent has the link.`, false, { label: "Open it here", open: `${res.repo}#${res.result.id}` });
+    } else toast("Declined.", "The agent was told no.");
+  } catch (err) { toast(action === "approve" ? "Could not open the pull request." : "Could not decline.", err.message, true); }
+}
+
 function forgetOpen(pr) {
   try {
     const before = JSON.parse(localStorage.getItem(MINE_OPEN_KEY)) || [];
@@ -1700,6 +1844,13 @@ function bind() {
     if (t.closest("[data-create-pr]")) return createPr(t.closest("[data-create-pr]"));
     if (t.closest("[data-decline]")) return declinePr(t.closest("[data-decline]"));
     if (t.closest("[data-merge]")) return mergePr(t.closest("[data-merge]"));
+    if (t.closest("[data-sync]")) return syncPr(t.closest("[data-sync]"));
+    const proceed = t.closest("[data-proposal-proceed]");
+    if (proceed) return decideProposal(proceed, proceed.dataset.proposalProceed, "approve");
+    const refuse = t.closest("[data-proposal-decline]");
+    if (refuse) return decideProposal(refuse, refuse.dataset.proposalDecline, "decline", !!refuse.closest("#pr-dialog"));
+    const review = t.closest("[data-proposal-review]");
+    if (review) { const p = review.closest(".proposal-banner")?._proposal; if (p) openPreview(p.repo, p.branch, p); return; }
     const copyBtn = t.closest("[data-copy-threads]");
     if (copyBtn) return copyThreads(copyBtn);
     const launchBtn = t.closest("[data-launch]");
@@ -1864,6 +2015,8 @@ async function boot() {
   if (state.route.pr) { const pr = findPr(state.route.pr); if (pr) openPr(pr); }
   // The server re-reads your open pull requests every minute; the page asks it twice as often.
   setInterval(() => { if (!document.hidden) loadView({ silent: true }); }, 30000);
+  pollProposals();
+  setInterval(pollProposals, 3000);
 }
 
 boot();
