@@ -522,5 +522,86 @@ class FileMergedTest(unittest.TestCase):
         self.assertEqual([(p["id"], p["state"]) for p in entry["merged"]], [(42, "MERGED"), (7, "MERGED")])
 
 
+@unittest.skipUnless(shutil.which("git"), "git is not installed")
+class SyncTest(unittest.TestCase):
+    """Real git: a bare remote, a clone, a feature branch behind develop."""
+
+    def setUp(self):
+        import actions
+        self.actions = actions
+        self.tmp = Path(tempfile.mkdtemp(prefix="pixeldeck-sync-"))
+        os.environ["PIXELDECK_STATE_DIR"] = str(self.tmp / "state")
+        self.env = {**os.environ, "GIT_AUTHOR_NAME": "T", "GIT_AUTHOR_EMAIL": "t@example.com",
+                    "GIT_COMMITTER_NAME": "T", "GIT_COMMITTER_EMAIL": "t@example.com"}
+        remote, self.clone = self.tmp / "remote.git", self.tmp / "clone"
+        self.git(self.tmp, "init", "-q", "--bare", "-b", "develop", str(remote))
+        self.git(self.tmp, "clone", "-q", str(remote), str(self.clone))
+        # The sync's own merge commit runs through gitscan, whose environment is fixed at import:
+        # the identity lives in the clone's config, which its temporary worktree shares.
+        self.git(self.clone, "config", "user.name", "T")
+        self.git(self.clone, "config", "user.email", "t@example.com")
+        self.commit("app.txt", "one\n", "first")
+        self.git(self.clone, "push", "-q", "origin", "HEAD:develop")
+        self.git(self.clone, "switch", "-q", "-c", "feat/x")
+        self.commit("feature.txt", "feature\n", "feature")
+        self.git(self.clone, "push", "-q", "origin", "feat/x")
+        self.git(self.clone, "switch", "-q", "develop")
+        self.commit("app.txt", "one\ntwo\n", "develop moves on")
+        self.git(self.clone, "push", "-q", "origin", "develop")
+        actions._clone = lambda root, repo: self.clone
+        pr = model.slim_pr(raw_pr(author={"uuid": "{me}", "display_name": "Me"},
+                                  source={"branch": {"name": "feat/x"}, "commit": {"hash": "x"}},
+                                  destination={"branch": {"name": "develop"}, "repository": {"full_name": "acme/shop-api"}}))
+        self.engine = type("E", (), {})()
+        self.engine.find_pr = lambda repo, pr_id: pr
+        self.engine.me = lambda: {"uuid": "{me}"}
+        self.engine.refresh_person = lambda uuid: None
+        self.engine.pushed = lambda force=False: []
+        self.body = {"repo": pr["repo"], "id": pr["id"]}
+
+    def tearDown(self):
+        os.environ.pop("PIXELDECK_STATE_DIR", None)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def git(self, cwd, *args):
+        return subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True, text=True, env=self.env).stdout
+
+    def commit(self, name, text, message):
+        (self.clone / name).write_text(text)
+        self.git(self.clone, "add", name)
+        self.git(self.clone, "commit", "-q", "-m", message)
+
+    def remote_log(self, ref):
+        return self.git(self.clone, "log", "--format=%s", f"origin/{ref}")
+
+    def test_status_then_sync_merges_develop_and_pushes(self):
+        status = self.actions.sync_status(self.engine, self.tmp, "shop-api", 42)
+        self.assertEqual((status["behind"], status["ahead"]), (1, 1))
+        out = self.actions.sync(self.engine, self.tmp, self.body)
+        self.assertEqual((out["state"], out["merged"]), ("synced", 1))
+        self.git(self.clone, "fetch", "-q", "origin")
+        self.assertEqual(self.remote_log("feat/x").splitlines()[0], "Merged develop into feat/x")
+        self.assertEqual(self.actions.sync_status(self.engine, self.tmp, "shop-api", 42)["behind"], 0)
+        self.assertEqual(self.actions.sync(self.engine, self.tmp, self.body)["state"], "up to date")
+        self.assertEqual(self.git(self.clone, "branch", "--show-current").strip(), "develop", "your checkout is untouched")
+        self.assertEqual(list((self.tmp / "state" / "sync").iterdir()), [], "the temporary worktree is gone")
+
+    def test_a_conflict_pushes_nothing(self):
+        self.git(self.clone, "switch", "-q", "feat/x")
+        self.commit("app.txt", "one\nmine\n", "clash")
+        self.git(self.clone, "push", "-q", "origin", "feat/x")
+        before = self.remote_log("feat/x")
+        with self.assertRaises(self.actions.SyncConflict) as caught:
+            self.actions.sync(self.engine, self.tmp, self.body)
+        self.assertEqual(caught.exception.files, ["app.txt"])
+        self.git(self.clone, "fetch", "-q", "origin")
+        self.assertEqual(self.remote_log("feat/x"), before)
+
+    def test_only_your_own_pull_requests(self):
+        self.engine.me = lambda: {"uuid": "{someone-else}"}
+        with self.assertRaises(PermissionError):
+            self.actions.sync(self.engine, self.tmp, self.body)
+
+
 if __name__ == "__main__":
     unittest.main()

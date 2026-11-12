@@ -87,6 +87,8 @@ async function api(path, { method = "GET", body } = {}) {
   if (!res.ok) {
     const err = new Error(data.error || `HTTP ${res.status}`);
     err.auth = data.auth;
+    err.data = data;
+    err.status = res.status;
     throw err;
   }
   return data;
@@ -1086,6 +1088,7 @@ function renderPr() {
           <span class="pr-mini" aria-hidden="true">${mini}</span>
           <div class="pr-tools" role="toolbar" aria-label="Pull request actions">${prTools(full)}</div>
         </div>
+        <div class="sync-slot" id="sync-slot">${syncBar()}</div>
         <div class="pr-body" id="pr-body">${{ overview: tabOverview, files: tabFiles, threads: tabThreads, commits: tabCommits, tasks: tabTasks }[tab]()}</div>
       </div>
     </div>`;
@@ -1155,6 +1158,48 @@ async function openPr(pr, { force = false, tab } = {}) {
   api(`pr-extra?${q}`).then((x) => { if (still()) { state.pr.extra = x; if (state.pr.tab !== "files") renderPr(); } }).catch(() => {});
   api(`pr-diff?${q}`).then((d) => { if (still()) { state.pr.diff = d; renderPr(); } })
     .catch((err) => { if (still()) { state.pr.diffError = err.message; if (state.pr.tab === "files") renderPr(); } });
+  if (pr.state === "OPEN" && isMeUuid(pr.author?.uuid)) loadSync(pr);
+}
+// How far the branch is behind its destination: a fetch in your clone, so it comes a moment
+// after the rest. Only the bar's own slot is redrawn, so a diff being read does not jump.
+function loadSync(pr) {
+  const key = prKey(pr);
+  api(`pr-sync?repo=${encodeURIComponent(pr.repo)}&id=${pr.id}`)
+    .then((s) => { if (state.pr && prKey(state.pr.pr) === key) { state.pr.sync = s; paintSync(); } })
+    .catch(() => { /* an older server, or no clone: no bar */ });
+}
+function syncBar() {
+  const s = state.pr?.sync;
+  if (!s?.available || !s.behind) return "";
+  const n = `${s.behind} ${s.behind === 1 ? "commit" : "commits"}`;
+  return `<div class="sync-bar" role="status">${Sprites.svg("sync", { scale: 2 })}
+    <span>This branch is <b>${n}</b> behind <code>${esc(s.dest)}</code>.</span>
+    <button class="btn sync-now" type="button" data-sync>Sync now</button></div>`;
+}
+function paintSync() {
+  const slot = $("#sync-slot");
+  if (slot) slot.innerHTML = syncBar();
+}
+const NEEDS_RESTART = "Restart PixelDeck once: close the window, run run.sh --stop in a terminal, then click the dock icon.";
+async function syncPr(button) {
+  const pr = state.pr?.detail?.pr || state.pr?.pr;
+  const s = state.pr?.sync;
+  if (!pr || !s || !armed(button, `Confirm: merge ${s.dest} into this branch and push`)) return;
+  try {
+    const res = await busy(button, () => api("sync", { method: "POST", body: { repo: pr.repo, id: pr.id } }));
+    state.pr.sync = { ...s, behind: 0 };
+    paintSync();
+    toast(res.state === "synced" ? `Synced: ${res.merged} ${res.merged === 1 ? "commit" : "commits"} from ${s.dest} merged into ${s.source}.` : "Already up to date.",
+      res.state === "synced" ? "Pushed to Bitbucket. You can merge now." : "");
+    openPr(pr, { force: true });
+  } catch (err) {
+    if (err.status === 409) {
+      const files = err.data?.conflicts || [];
+      toast(`Sync stopped: ${files.length} ${files.length === 1 ? "file conflicts" : "files conflict"} with ${s.dest}. Nothing was pushed.`,
+        `${files.slice(0, 6).join(", ")}${files.length > 6 ? ", ..." : ""}. Resolve them in your checkout, or ask Claude with the fix button.`, true);
+    } else if (/no route/.test(err.message)) toast("Sync needs the newer PixelDeck server.", NEEDS_RESTART, true);
+    else toast("Could not sync the branch.", err.message, true);
+  }
 }
 function closePr() {
   state.pr = null;
@@ -1215,6 +1260,8 @@ async function launch(button, event) {
   if (action === "fix_push" && !armed(button, "Confirm: fix and push")) return;
   clearTimeout(button._disarm);
   const where = event?.shiftKey ? "window" : "app";
+  // AI work: the green slime pops up here, then goes to build the new terminal tab.
+  const slime = where === "app" ? Sprites.agent(button) : null;
   button.disabled = true;
   button.classList.remove("btn--armed");
   button.classList.add("is-busy");
@@ -1223,9 +1270,14 @@ async function launch(button, event) {
   try {
     const record = await api("launch", { method: "POST", body: { repo: pr.repo, id: pr.id, action, where } });
     state.launches = [record, ...state.launches].slice(0, 30);
-    if (record.term) { Term.attach(record.term, record.title); Layout.activate("terminal"); }
+    if (record.term) {
+      Term.attach(record.term, record.title);
+      Layout.activate("terminal");
+      if (slime) Term.buildWith(slime, record.term); else Sprites.dismiss(slime);
+    } else Sprites.dismiss(slime);
     toast(record.term ? `Claude is running in the Terminal panel: ${ACTION_LABEL[action]}.` : `Claude is open in its own window: ${ACTION_LABEL[action]}.`, shortPath(record.cwd));
   } catch (err) {
+    Sprites.dismiss(slime);
     toast("Could not open Claude.", err.message, true);
   } finally {
     renderPr();
@@ -1272,7 +1324,11 @@ async function busy(button, work) {
   button.classList.remove("btn--armed");
   button.classList.add("is-busy");
   setLabel(button, `<span class="spin" aria-hidden="true"></span>Working`);
-  try { return await work(); } finally {
+  // Every confirmed action is deterministic PixelDeck work: the blue bot comes to do it.
+  const bot = Sprites.worker(button);
+  let ok = false;
+  try { const out = await work(); ok = true; return out; } finally {
+    bot.done(ok);
     button.disabled = false;
     button.classList.remove("is-busy");
     setLabel(button, restore);
@@ -1362,7 +1418,15 @@ async function mergePr(button) {
     }
     await reloadMine();
     if (state.pr && prKey(state.pr.pr) === prKey(pr)) openPr(findPr(prKey(pr)) || state.pr.pr, { force: true });
-  } catch (err) { toast("Could not merge the pull request.", err.message, true); }
+  } catch (err) {
+    const behind = state.pr?.sync?.behind;
+    if (/no route/.test(err.message)) toast("Merge needs the newer PixelDeck server.", NEEDS_RESTART, true);
+    else if (behind) {
+      toast(`Could not merge: the branch is ${behind} ${behind === 1 ? "commit" : "commits"} behind ${state.pr.sync.dest}.`, `${err.message} Sync it first with the bar above.`, true);
+      const bar = $(".sync-bar");
+      if (bar) { bar.classList.remove("is-nudge"); void bar.offsetWidth; bar.classList.add("is-nudge"); }
+    } else toast("Could not merge the pull request.", err.message, true);
+  }
 }
 
 async function declinePr(button) {
@@ -1700,6 +1764,7 @@ function bind() {
     if (t.closest("[data-create-pr]")) return createPr(t.closest("[data-create-pr]"));
     if (t.closest("[data-decline]")) return declinePr(t.closest("[data-decline]"));
     if (t.closest("[data-merge]")) return mergePr(t.closest("[data-merge]"));
+    if (t.closest("[data-sync]")) return syncPr(t.closest("[data-sync]"));
     const copyBtn = t.closest("[data-copy-threads]");
     if (copyBtn) return copyThreads(copyBtn);
     const launchBtn = t.closest("[data-launch]");

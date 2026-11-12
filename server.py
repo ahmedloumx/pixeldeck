@@ -243,6 +243,12 @@ class Desk(BaseHTTPRequestHandler):
                 return self._send(200, actions.decline(engine, body))
             if method == "POST" and route == "merge":
                 return self._send(200, actions.merge(engine, body))
+            if method == "POST" and route == "sync":
+                return self._send(200, actions.sync(engine, WORKSPACE_ROOT, body))
+            if method == "GET" and route == "pr-sync":
+                repo = (query.get("repo") or [""])[0]
+                pr_id = int((query.get("id") or ["0"])[0])
+                return self._send(200, actions.sync_status(engine, WORKSPACE_ROOT, repo, pr_id))
             if method == "GET" and route == "projects":
                 return self._send(200, {"projects": engine.projects(), "project": engine.project()})
             if method == "POST" and route == "project":
@@ -268,6 +274,8 @@ class Desk(BaseHTTPRequestHandler):
                 return self._send(200, {"browser": opener.open_url(url)})
         except BitbucketError as exc:
             return self._error(HTTPStatus.BAD_GATEWAY, exc.message, upstream=exc.status, auth=engine.auth)
+        except actions.SyncConflict as exc:
+            return self._error(HTTPStatus.CONFLICT, str(exc), conflicts=exc.files)
         except KeyError as exc:
             return self._error(HTTPStatus.NOT_FOUND, str(exc).strip("'"))
         except PermissionError as exc:

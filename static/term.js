@@ -76,7 +76,7 @@ const Term = (() => {
     root = el;
     root.classList.add("term-root");
     root.innerHTML = `<div class="term-bar"><div class="term-tabs" role="tablist" aria-label="Terminals"></div>
-      <span class="term-mascot">${Sprites.svg("bot", { scale: 2, idle: "blink" })}</span>
+      <span class="term-mascot">${Sprites.svg("bot", { scale: 2, idle: "blink", follow: true })}</span>
       <button class="btn btn--quiet" type="button" data-term-new>New shell</button></div>
       <div class="term-panes"><div class="empty term-empty">${Sprites.svg("buddy", { scale: 3 })}<p>No terminal yet. The Claude button on a pull request opens one here, or start a shell.</p></div></div>`;
     tabsEl = root.querySelector(".term-tabs");
@@ -85,7 +85,7 @@ const Term = (() => {
       if (swallowClick) { swallowClick = false; return; } // the end of a tab drag, not a click
       if (e.target.closest("[data-term-new]")) return newShell();
       const close = e.target.closest("[data-term-close]");
-      if (close) { e.stopPropagation(); return closeSession(close.dataset.termClose); }
+      if (close) { e.stopPropagation(); return closeSession(close.dataset.termClose, close); }
       const tab = e.target.closest("[data-term-tab]");
       if (tab) select(tab.dataset.termTab);
     });
@@ -441,15 +441,30 @@ const Term = (() => {
     else if (id) Sprites.spawn(tabEl(id));
   }
   /** The help dialog's replay: the bot rebuilds the current tab. */
+  /** A Claude launch: the green slime that answered the button builds the new tab. */
+  function buildWith(actor, id) {
+    if (actor) build(actor, id);
+  }
   function showBuild() {
     const actor = Sprites.builder(root?.querySelector(".term-mascot"));
     if (actor) build(actor, current);
   }
 
-  async function closeSession(id) {
+  // Closing a live terminal stops what runs in it, so the first click only arms the x
+  // (the tab turns red and asks); a second click within 3 s closes it.
+  async function closeSession(id, button) {
     const s = sessions.get(id);
     if (!s) return;
-    if (s.alive && !confirm(`Close "${tabLabel(s)}"? The process in it will be stopped.`)) return;
+    const el = tabEl(id);
+    if (s.alive && button && el && !el.classList.contains("is-armed")) {
+      el.classList.add("is-armed");
+      button.textContent = "CLOSE?";
+      button.setAttribute("aria-label", `Click again to close ${tabLabel(s)} and stop what runs in it`);
+      clearTimeout(el._disarm);
+      el._disarm = setTimeout(() => { el.classList.remove("is-armed"); button.textContent = "×"; button.setAttribute("aria-label", `Close ${tabLabel(s)}`); }, 3000);
+      return;
+    }
+    if (el) clearTimeout(el._disarm);
     await api("term-close", { method: "POST", body: { id } }).catch(() => {});
     drop(id);
   }
@@ -514,7 +529,7 @@ const Term = (() => {
     }
   }
 
-  return { mount, attach, select, newShell, showBuild, fit: fitCurrent, count: () => sessions.size,
+  return { mount, attach, select, newShell, showBuild, buildWith, fit: fitCurrent, count: () => sessions.size,
     renderers: () => [...sessions.values()].map((s) => s.renderer), order: () => [...sessions.keys()],
     // The last lines of the current terminal as text: with WebGL the screen is not in the DOM.
     lines: (n = 5) => {

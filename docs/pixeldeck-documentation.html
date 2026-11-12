@@ -161,8 +161,8 @@ footer { margin-top: 72px; padding-top: 18px; border-top: 3px dashed var(--rule-
 <div class="grid cols-4">
   <div class="score"><b>0</b><span>third-party packages for the server: the Python standard library only (Windows adds pywinpty for the terminal)</span></div>
   <div class="score"><b class="cool">0</b><span>build steps: no bundler, no framework, no npm install</span></div>
-  <div class="score"><b class="amber">~7,500</b><span>lines: 3,000 Python, 3,200 JavaScript, 1,200 CSS</span></div>
-  <div class="score"><b>32</b><span>unit tests, run on Python 3.12 and 3.14, plus a WebKit self-test and browser scripts</span></div>
+  <div class="score"><b class="amber">~7,700</b><span>lines: 3,150 Python, 3,300 JavaScript, 1,250 CSS</span></div>
+  <div class="score"><b>35</b><span>unit tests, run on Python 3.12 and 3.14, plus a WebKit self-test and browser scripts</span></div>
 </div>
 <div class="grid cols-4" style="margin-top:18px">
   <div class="score"><b class="cool">95 MB</b><span>server memory, 0% CPU when idle (measured on Linux)</span></div>
@@ -181,7 +181,8 @@ footer { margin-top: 72px; padding-top: 18px; border-top: 3px dashed var(--rule-
       <li><strong>Pull request view</strong>: overview with the description rendered from Markdown, diff with per-file viewed marks, threads, commits, tasks. The header folds under the tab row (<code>f</code>) so the diff gets the room.</li>
       <li><strong>Copy review comments</strong>: every thread, the open ones, or one thread, copied as plain Markdown for a Claude prompt, with file, line and status.</li>
       <li><strong>Team and insights</strong>: teammates' queues, review load, merge history.</li>
-      <li><strong>Actions</strong>: open a pull request from a pushed branch, merge or decline your own, delete a pushed branch. Each asks for a second click.</li>
+      <li><strong>Actions</strong>: open a pull request from a pushed branch; sync, merge or decline your own; delete a pushed branch. Each asks for a second click.</li>
+      <li><strong>Sync</strong>: when your branch is behind its destination, a bar under the tabs says by how many commits and offers <strong>Sync now</strong>, like Bitbucket's. If a merge is refused while the branch is behind, the message points at that bar.</li>
     </ul>
   </div>
   <div class="card">
@@ -197,6 +198,8 @@ footer { margin-top: 72px; padding-top: 18px; border-top: 3px dashed var(--rule-
     <ul class="list">
       <li>A <strong>title screen</strong> while the first data loads: the icon drops in, the name waves, the desk bot walks a bar that fills with the real load steps. Any key skips it.</li>
       <li><strong>Game moments</strong>: a merge sets off fireworks (merged from PixelDeck, the pull request moves to Merged at once; merged elsewhere, it plays when a refresh sees it); a deleted branch's critter is knocked out; for a new shell the bot beams to the new tab, hammers it together and beams home. <code>?</code> replays them.</li>
+      <li><strong>Two mascots</strong>: the green slime does AI work (it pops up when you start Claude and builds its terminal tab); the blue bot does PixelDeck's own deterministic work (a new shell, and it stands by the button while a merge, sync, decline or delete runs, cheering or slumping at the end). The bot by New shell follows your pointer with its eyes.</li>
+      <li>Closing a live terminal asks in place: the first click turns its tab red with "CLOSE?", a second click within 3 seconds closes it.</li>
       <li>Reduced motion turns every animation off.</li>
     </ul>
   </div>
@@ -290,7 +293,7 @@ cp .env.example .env        # Windows: copy .env.example .env</code></pre>
       <tr><td>Storage</td><td>One JSON cache (mode 600, atomic writes), a settings file, a state folder, and the window profile, in each system's own folders.</td><td>One person's data fits in one file; no database to run.</td></tr>
       <tr><td>Page</td><td>Plain HTML, CSS and JavaScript: <code>app.js</code>, <code>layout.js</code>, <code>term.js</code>, <code>visuals.js</code>, <code>sprites.js</code>.</td><td>No build step: edit a file, reload.</td></tr>
       <tr><td>Look</td><td>Press Start 2P, Pixelify Sans and Host Grotesk (local woff2, 44 KB); pixel sprites drawn as SVG from small letter grids.</td><td>Everything is local: it works offline and loads no CDN.</td></tr>
-      <tr><td>Tests</td><td><code>unittest</code> (32 tests, including import tests that pretend to be Windows and macOS), a WebKit self-test mode, browser scripts.</td><td>The self-test runs headless, so checks never pop a window.</td></tr>
+      <tr><td>Tests</td><td><code>unittest</code> (35 tests, including sync against real git repositories, including import tests that pretend to be Windows and macOS), a WebKit self-test mode, browser scripts.</td><td>The self-test runs headless, so checks never pop a window.</td></tr>
     </tbody>
   </table>
 </div>
@@ -311,6 +314,7 @@ cp .env.example .env        # Windows: copy .env.example .env</code></pre>
     <ul class="list">
       <li>3 calls at start (who you are and your team, the project list, your pull requests), then a silent check every 30 seconds while the window is visible.</li>
       <li>Opening a pull request: detail, commits and diff in parallel. File bodies in the diff are drawn only when scrolled into view.</li>
+      <li>How far your branch is behind comes from git too: opening one of your open pull requests fetches its two branches in your clone and counts the commits, a moment after the rest of the page.</li>
       <li>Branches pushed without a pull request come from git, not the API: remote-tracking refs from the last 21 days in your clones, with prompts and SSH passwords disabled so a scan never hangs.</li>
     </ul>
   </div>
@@ -345,6 +349,7 @@ cp .env.example .env        # Windows: copy .env.example .env</code></pre>
     <h3>What it can change, and the guards</h3>
     <ul class="list">
       <li>Open a pull request, merge or decline one, delete a pushed branch, fix and push: each needs a second click.</li>
+      <li>Sync merges the destination into your branch in a throwaway worktree on the remote tip (no checkout of yours changes) and pushes without force: if someone pushed meanwhile, git refuses and nothing is lost. A conflict aborts and pushes nothing, and the page lists the files. Hooks are skipped for this one commit, as Bitbucket's own button runs none.</li>
       <li>A file dropped on a terminal is pasted as a quoted path, never run. Its copy keeps only the bare file name (no folders), never replaces an existing file, and reads no more than the size it announced.</li>
       <li>Merge and decline work only on your own open pull requests. A merge re-reads the pull request from Bitbucket first, uses the destination branch's default strategy, and Bitbucket's own merge checks (approvals, builds, tasks) still decide. Protected branches are never deleted. A branch is deleted with a lease on its exact commit, and each deletion is logged with the command that restores it.</li>
       <li>The token is read from <code>.env</code> and sent only to api.bitbucket.org. Give it read access plus pull request write; never admin or delete scopes. Branch deletion and Claude's pushes use your own git credentials.</li>
@@ -419,20 +424,20 @@ cp .env.example .env        # Windows: copy .env.example .env</code></pre>
     <tbody>
       <tr><td><code>pixeldeck.py</code></td><td class="n">165</td><td>Start, stop, status; picks the best window for the system.</td></tr>
       <tr><td><code>config.py</code></td><td class="n">167</td><td>The <code>.env</code>, and each system's folders.</td></tr>
-      <tr><td><code>server.py</code></td><td class="n">491</td><td>Routes, Host and token checks, CSP, the terminal stream, file drops.</td></tr>
+      <tr><td><code>server.py</code></td><td class="n">499</td><td>Routes, Host and token checks, CSP, the terminal stream, file drops.</td></tr>
       <tr><td><code>engine.py</code></td><td class="n">507</td><td>Cache, refresh loop, merged and declined windows, project scope.</td></tr>
       <tr><td><code>model.py</code></td><td class="n">298</td><td>Pull requests, reviews, threads, timelines, parsed diffs, ticket keys.</td></tr>
       <tr><td><code>app_window.py</code></td><td class="n">263</td><td>The Linux window: WebKit view, pop-outs, links to the browser, self-test.</td></tr>
       <tr><td><code>terminals.py</code></td><td class="n">242</td><td>Terminal sessions: pty on Linux and macOS, ConPTY on Windows.</td></tr>
       <tr><td><code>launcher.py</code></td><td class="n">232</td><td>Claude brief from templates, worktree, launch.</td></tr>
       <tr><td><code>bitbucket.py</code></td><td class="n">194</td><td>REST client, paging, the hourly call counter.</td></tr>
-      <tr><td><code>actions.py</code></td><td class="n">218</td><td>Open, merge and decline a pull request; delete a pushed branch.</td></tr>
+      <tr><td><code>actions.py</code></td><td class="n">319</td><td>Open, sync, merge and decline a pull request; delete a pushed branch.</td></tr>
       <tr><td><code>gitscan.py</code>, <code>opener.py</code>, <code>check_api.py</code></td><td class="n">261</td><td>Branches pushed without a pull request; opening links; an API shape check.</td></tr>
       <tr><td><code>briefs/</code></td><td class="n">62</td><td>The default Claude brief templates.</td></tr>
-      <tr><td><code>static/</code> scripts</td><td class="n">3,215</td><td><code>app.js</code> (queue, pull request view, Markdown, copy, title screen), <code>layout.js</code> (panels), <code>sprites.js</code> (pixel characters), <code>term.js</code> (terminal tabs), <code>visuals.js</code> (merge tree, age bars).</td></tr>
-      <tr><td><code>static/</code> styles</td><td class="n">1,227</td><td>Tokens, base, app, workspace, arcade.</td></tr>
+      <tr><td><code>static/</code> scripts</td><td class="n">3,281</td><td><code>app.js</code> (queue, pull request view, Markdown, copy, title screen), <code>layout.js</code> (panels), <code>sprites.js</code> (pixel characters), <code>term.js</code> (terminal tabs), <code>visuals.js</code> (merge tree, age bars).</td></tr>
+      <tr><td><code>static/</code> styles</td><td class="n">1,243</td><td>Tokens, base, app, workspace, arcade.</td></tr>
       <tr><td><code>run.sh</code>, <code>install-desktop.sh</code>, <code>PixelDeck.command</code>, <code>PixelDeck.cmd</code></td><td class="n">65</td><td>Launchers for each system; the Linux app grid and dock entry.</td></tr>
-      <tr><td><code>tests/test_desk.py</code></td><td class="n">526</td><td>32 tests.</td></tr>
+      <tr><td><code>tests/test_desk.py</code></td><td class="n">607</td><td>35 tests.</td></tr>
     </tbody>
   </table>
 </div>

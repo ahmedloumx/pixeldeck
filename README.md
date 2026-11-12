@@ -30,10 +30,14 @@ Full documentation, with the architecture, security model and measured performan
 - **Review banners.** When someone approves, asks for changes or comments on one of your pull
   requests, a banner drops in from the top with who it was.
 - **Team and insights.** Your teammates' queues, review load and merge history.
-- **Actions.** Open a pull request from a pushed branch, merge or decline your own pull request,
-  delete a pushed branch. Each asks for a second click.
+- **Actions.** Open a pull request from a pushed branch; sync, merge or decline your own pull
+  request; delete a pushed branch. Each asks for a second click. When your branch is behind its
+  target, a bar says by how much and offers **Sync now**, like Bitbucket's.
 - **Arcade layer.** A title screen while it loads, pixel sprites, and small game moments for
-  merges, deletions and new shells. Reduced motion turns them off.
+  merges, deletions and new shells. Two mascots: the green slime does AI work (it comes when you
+  start Claude and builds its terminal tab), the blue bot does PixelDeck's own work (it stands by
+  a button while a merge, sync, decline or delete runs) and its eyes follow your pointer. Reduced
+  motion turns them off.
 
 ## Requirements
 

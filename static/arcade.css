@@ -7,7 +7,8 @@
 .spr { display: inline-block; vertical-align: middle; flex-shrink: 0; overflow: visible; }
 .spr g[data-f] { display: none; }
 .spr[data-frame="0"] g[data-f="0"], .spr[data-frame="1"] g[data-f="1"], .spr[data-frame="2"] g[data-f="2"],
-.spr[data-frame="3"] g[data-f="3"], .spr[data-frame="4"] g[data-f="4"] { display: inline; }
+.spr[data-frame="3"] g[data-f="3"], .spr[data-frame="4"] g[data-f="4"], .spr[data-frame="5"] g[data-f="5"],
+.spr[data-frame="6"] g[data-f="6"], .spr[data-frame="7"] g[data-f="7"] { display: inline; }
 .p-orange { fill: var(--sprite-orange); } .p-orange-deep { fill: var(--sprite-orange-deep); }
 .p-dark { fill: var(--sprite-dark); } .p-white { fill: var(--sprite-white); }
 .p-blue { fill: var(--sprite-blue); } .p-blue-deep { fill: var(--sprite-blue-deep); }
@@ -290,3 +291,19 @@
 .term-tab.is-done:not(.is-busy) .term-tab-name::after { width: 5px; height: 5px; margin-left: var(--space-2xs); background: var(--color-ok); }
 @keyframes tab-busy { from { background-position: 0 0, 0 0; } to { background-position: 10px 0, 0 0; } }
 @media (prefers-reduced-motion: reduce) { .term-tab.is-busy .term-tab-name::after { animation: none; background: var(--color-accent); width: 5px; height: 5px; } }
+
+/* closing a live terminal: the first click arms the x */
+.term-tab.is-armed { border-color: var(--color-bad); box-shadow: 0 2px 0 var(--color-bad-deep); }
+.term-tab.is-armed .term-tab-close { color: var(--color-bad); font: 400 8px var(--font-num); padding-inline: var(--space-xs); }
+
+/* ------------------------------------------------- behind its destination: sync bar */
+.sync-bar {
+  display: flex; align-items: center; gap: var(--space-sm); margin: var(--space-xs) var(--space-lg) 0; padding: var(--space-xs) var(--space-sm);
+  border: var(--pixel) solid var(--color-cool); background: var(--color-cool-soft); color: var(--color-ink); font-size: var(--text-sm);
+}
+.sync-bar .spr { color: var(--color-cool); }
+.sync-bar code { font-family: var(--font-outlier); }
+.sync-bar .sync-now { margin-left: auto; border-color: var(--color-cool); }
+.sync-bar.is-nudge { animation: sync-nudge 420ms steps(6, end); }
+@keyframes sync-nudge { 20%, 60% { transform: translateX(-4px); } 40%, 80% { transform: translateX(4px); } }
+@media (prefers-reduced-motion: reduce) { .sync-bar.is-nudge { animation: none; } }

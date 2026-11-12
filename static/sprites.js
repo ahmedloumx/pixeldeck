@@ -45,6 +45,10 @@ const Sprites = (() => {
         [".....rr.....", ".....rr.....", "......B.....", "..bbbbbbbb..", ".ybbbbbbbbb.", ".ybwwbbbwwb.", ".ybwkbbbwkb.", ".ybbbbbbbbb.", ".ybbwwwwwbb.", ".ybbbbbbbbb.", "..bbbbbbbb..", "....B..B....", "....BB.BB..."],
         [".....rr.....", ".....rr.....", "......B.....", "..bbbbbbbb..", ".ybbbbbbbbb.", ".ybkbbbbkbb.", ".ybbkbbkbbb.", ".ybkbbbbkbb.", ".ybbwbwbwbb.", ".ybbbbbbbbb.", "..bbbbbbbb..", "...B....B...", "..BB....BB.."],
         [".....rr.....", ".....rr.....", "......B.....", "..bbbbbbbb..", ".ybbbbbbbbb.", ".ybbkbbbkbb.", ".ybkbkbkbkb.", ".ybbbbbbbbb.", ".ybbwwwwwbb.", ".ybbbwwwbbb.", "..bbbbbbbb..", "...B....B...", "..BB....BB.."],
+        // looking left, up and left, up and right (frame 0 looks down and right)
+        [".....rr.....", ".....rr.....", "......B.....", "..bbbbbbbb..", ".ybbbbbbbbb.", ".ybwwbbbwwb.", ".ybkwbbbkwb.", ".ybbbbbbbbb.", ".ybbwwwwwbb.", ".ybbbbbbbbb.", "..bbbbbbbb..", "...B....B...", "..BB....BB.."],
+        [".....rr.....", ".....rr.....", "......B.....", "..bbbbbbbb..", ".ybbbbbbbbb.", ".ybkwbbbkwb.", ".ybwwbbbwwb.", ".ybbbbbbbbb.", ".ybbwwwwwbb.", ".ybbbbbbbbb.", "..bbbbbbbb..", "...B....B...", "..BB....BB.."],
+        [".....rr.....", ".....rr.....", "......B.....", "..bbbbbbbb..", ".ybbbbbbbbb.", ".ybwkbbbwkb.", ".ybwwbbbwwb.", ".ybbbbbbbbb.", ".ybbwwwwwbb.", ".ybbbbbbbbb.", "..bbbbbbbb..", "...B....B...", "..BB....BB.."],
       ],
     },
     // a small critter that stands for a branch or a pull request when it is removed
@@ -68,6 +72,7 @@ const Sprites = (() => {
     decline: { frames: [["cc.....cc", "ccc...ccc", ".ccc.ccc.", "..ccccc..", "...ccc...", "..ccccc..", ".ccc.ccc.", "ccc...ccc", "cc.....cc"]] },
     up: { frames: [["....c....", "...ccc...", "..cc.cc..", ".cc...cc.", "cc.....cc"]] },
     down: { frames: [["cc.....cc", ".cc...cc.", "..cc.cc..", "...ccc...", "....c...."]] },
+    sync: { frames: [["..ccccc..", ".c.....cc", "c.....ccc", "c........", "c.......c", "........c", "ccc.....c", "cc.....c.", "..ccccc.."]] },
     merge: { frames: [["cc.....cc", "cc.....cc", ".cc...cc.", "..cc.cc..", "...ccc...", "...ccc...", "...ccc...", "...ccc...", "...ccc..."]] },
     copy: { frames: [["...cccccc", "...c....c", "cccccc..c", "c....c..c", "c....c..c", "c....cccc", "c....c...", "c....c...", "cccccc..."]] },
     // the builder's hammer: raised, then struck
@@ -107,10 +112,10 @@ const Sprites = (() => {
   }
 
   /** SVG markup for a sprite. scale is the size of one pixel in CSS px. */
-  function svg(name, { scale = 2, cls = "", idle = "", x = null, y = null, tip = "" } = {}) {
+  function svg(name, { scale = 2, cls = "", idle = "", x = null, y = null, tip = "", follow = false } = {}) {
     const { w, h, groups } = body(name);
     const pos = x != null ? ` x="${x}" y="${y}"` : "";
-    return `<svg class="spr spr-${name}${cls ? ` ${cls}` : ""}" viewBox="0 0 ${w} ${h}" width="${w * scale}" height="${h * scale}"${pos} shape-rendering="crispEdges" data-sprite="${name}" data-frame="0"${idle ? ` data-idle="${idle}"` : ""}${tip ? ` data-tip="${tip}"` : ""} aria-hidden="true">${groups}</svg>`;
+    return `<svg class="spr spr-${name}${cls ? ` ${cls}` : ""}" viewBox="0 0 ${w} ${h}" width="${w * scale}" height="${h * scale}"${pos} shape-rendering="crispEdges" data-sprite="${name}" data-frame="0"${idle ? ` data-idle="${idle}"` : ""}${follow ? " data-follow" : ""}${tip ? ` data-tip="${tip}"` : ""} aria-hidden="true">${groups}</svg>`;
   }
 
   /* --------------------------------------------------------- frame playback */
@@ -139,8 +144,27 @@ const Sprites = (() => {
   function flash(el, frame, ms = 160) {
     if (!el || el._timer || reduced()) return;
     el.dataset.frame = frame;
-    setTimeout(() => { if (!el._timer) el.dataset.frame = 0; }, ms);
+    setTimeout(() => { if (!el._timer) el.dataset.frame = el._look || 0; }, ms);
   }
+
+  // A bot marked data-follow watches the pointer: its pupils turn toward it.
+  const LOOK = { "down-right": 0, "down-left": 5, "up-left": 6, "up-right": 7 };
+  let lookQueued = false, pointerX = 0, pointerY = 0;
+  function look() {
+    lookQueued = false;
+    for (const el of document.querySelectorAll(".spr-bot[data-follow]")) {
+      const r = el.getBoundingClientRect();
+      if (!r.width || el._timer) continue;
+      const cx = r.left + r.width / 2, cy = r.top + r.height * 0.45;
+      el._look = LOOK[`${pointerY < cy - 4 ? "up" : "down"}-${pointerX < cx ? "left" : "right"}`];
+      if (el.dataset.frame !== "1") el.dataset.frame = el._look; // not in the middle of a blink
+    }
+  }
+  addEventListener("pointermove", (e) => {
+    pointerX = e.clientX;
+    pointerY = e.clientY;
+    if (!lookQueued && !reduced()) { lookQueued = true; requestAnimationFrame(look); }
+  }, { passive: true });
 
   // Hovering a button that carries a sprite plays it; leaving stops it on frame 0.
   function hoverables(root = document) {
@@ -249,6 +273,9 @@ const Sprites = (() => {
     await stepped(actor.body, [...SQUASH].reverse(), 240, 3);
     await stepped(actor.beam, [{ opacity: 1 }, { opacity: 0 }], 90, 2);
   }
+  // Two mascots. The green slime stands for AI work (Claude Code); the blue bot for PixelDeck's
+  // own deterministic actions (a new shell, merge, sync, decline, delete).
+  const ROLE = { bot: { work: [0, 2], happy: 4, ko: 3 }, buddy: { work: [0, 1], happy: 2, ko: 3 } };
   const moveTo = (actor, { x, y }) => { actor.el.style.left = `${Math.round(x)}px`; actor.el.style.top = `${Math.round(y)}px`; };
   const seatOf = (actor) => { const r = actor.home.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.bottom }; };
 
@@ -260,7 +287,7 @@ const Sprites = (() => {
     const el = document.createElement("div");
     el.className = "fx-actor";
     el.innerHTML = `<span class="fx-beam"></span><span class="fx-actor-body">${svg("bot", { scale: 2 })}</span><span class="fx-hammer" hidden>${svg("hammer", { scale: 2 })}</span>`;
-    const actor = { el, seat, home, beam: el.querySelector(".fx-beam"), body: el.querySelector(".fx-actor-body"), bot: el.querySelector(".spr-bot"), hammer: el.querySelector(".fx-hammer") };
+    const actor = { el, seat, home, kind: "bot", beam: el.querySelector(".fx-beam"), body: el.querySelector(".fx-actor-body"), bot: el.querySelector(".spr-bot"), hammer: el.querySelector(".fx-hammer") };
     moveTo(actor, seatOf(actor));
     layer().append(el);
     home.style.visibility = "hidden";
@@ -282,7 +309,7 @@ const Sprites = (() => {
     const timer = setInterval(() => {
       n++;
       swing.dataset.frame = n % 2;
-      actor.bot.dataset.frame = n % 2 ? 2 : 0;
+      actor.bot.dataset.frame = ROLE[actor.kind].work[n % 2];
       const now = spot();
       if (now) moveTo(actor, now);
       if (!(n % 2)) spark(target?.());
@@ -290,14 +317,15 @@ const Sprites = (() => {
     await sleep(960);
     clearInterval(timer);
     actor.hammer.hidden = true;
-    actor.bot.dataset.frame = 4;
+    actor.bot.dataset.frame = ROLE[actor.kind].happy;
     await sleep(260);
     actor.bot.dataset.frame = 0;
     await vanish(actor);
   }
-  /** Beams back onto the seat and hands it back. */
+  /** Beams back onto the seat and hands it back. An agent with no seat just leaves. */
   async function goHome(actor) {
     await actor.out;
+    if (!actor.home) { actor.el.remove(); return; }
     moveTo(actor, seatOf(actor));
     await appear(actor);
     actor.el.remove();
@@ -305,6 +333,56 @@ const Sprites = (() => {
     delete actor.seat.dataset.away;
     flash(actor.home, 4, 500);
   }
+  // An actor standing just left of a button, squashed flat until it beams in.
+  function actorBeside(button, kind) {
+    const r = button.getBoundingClientRect();
+    const el = document.createElement("div");
+    el.className = "fx-actor";
+    el.innerHTML = `<span class="fx-beam"></span><span class="fx-actor-body">${svg(kind, { scale: 2 })}</span><span class="fx-hammer" hidden>${svg("hammer", { scale: 2 })}</span>`;
+    const actor = { el, seat: null, home: null, kind, beam: el.querySelector(".fx-beam"), body: el.querySelector(".fx-actor-body"), bot: el.querySelector(`.spr-${kind}`), hammer: el.querySelector(".fx-hammer") };
+    actor.body.style.transform = "scale(0.08, 0.1)";
+    moveTo(actor, { x: r.left - 18, y: r.bottom });
+    layer().append(el);
+    return actor;
+  }
+  const usable = (button) => layer() && !reduced() && button?.isConnected && button.getBoundingClientRect().width;
+
+  /** The blue bot works beside a button while a deterministic action runs; done(ok) sends it off. */
+  function worker(button) {
+    if (!usable(button)) return { done() {} };
+    const actor = actorBeside(button, "bot");
+    const shown = appear(actor).then(() => play(actor.bot, [ROLE.bot.work, 140]));
+    return {
+      async done(ok = true) {
+        await shown;
+        stop(actor.bot, ok ? ROLE.bot.happy : ROLE.bot.ko);
+        await sleep(ok ? 450 : 700);
+        await vanish(actor);
+        actor.el.remove();
+      },
+    };
+  }
+
+  /** The green slime answers an AI action: it pops up at the button, then is handed to the
+      terminal to build the new tab (construct, then goHome, which lets it go). */
+  function agent(button) {
+    if (!usable(button)) return null;
+    const actor = actorBeside(button, "buddy");
+    actor.out = (async () => {
+      await appear(actor);
+      play(actor.bot, [ROLE.buddy.work, 130]);
+      await sleep(520);
+      stop(actor.bot);
+      await vanish(actor);
+    })();
+    return actor;
+  }
+  async function dismiss(actor) {
+    if (!actor) return;
+    await actor.out;
+    actor.el.remove();
+  }
+
   function spark(rect) {
     if (!rect || !rect.width || !layer()) return;
     const bit = document.createElement("span");
@@ -329,5 +407,5 @@ const Sprites = (() => {
 
   hoverables();
   idle();
-  return { svg, play, stop, flash, die, celebrate, builder, construct, goHome, spawn };
+  return { svg, play, stop, flash, die, celebrate, builder, construct, goHome, worker, agent, dismiss, spawn };
 })();
