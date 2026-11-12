@@ -195,7 +195,8 @@ function buckets(data, kind) {
     changes: open.filter((pr) => s(pr).changes.length).sort(byUrgency),
     open: [...open].sort(byUrgency),
     waiting: open.filter((pr) => !s(pr).needs && !s(pr).approved).sort(oldest),
-    approved: open.filter((pr) => !s(pr).needs && s(pr).approved).sort(oldest),
+    // Approved means approved: one with threads to answer is in Needs you as well, not instead.
+    approved: open.filter((pr) => s(pr).approved).sort(oldest),
     requests: kind === "me" ? data?.review_requests || [] : open.filter(youReview),
     pushed: kind === "me" ? data?.pushed || [] : [],
     merged: data?.merged || [],
@@ -824,6 +825,10 @@ function prTools(pr) {
       + tool("tool--quiet tool--push", 'data-launch="fix_push"', Sprites.svg("push", { scale: 2 }), "Fix and push", "Fix and push: Claude fixes, commits and pushes with a lease. Asks you to confirm.")
       + tool("tool--quiet", 'data-launch="summarize"', Sprites.svg("read", { scale: 2 }), "Read and summarize", `Read and summarize: Claude reads the threads and edits nothing. ${shift}`)
       + `<span class="tool-sep" aria-hidden="true"></span>`
+      + tool(`tool--merge${signals(pr).approved ? " is-ready" : ""}`, "data-merge", Sprites.svg("merge", { scale: 2 }), "Merge",
+        signals(pr).approved
+          ? `Merge into ${pr.dest} with the branch's default strategy. Asks you to confirm.`
+          : `Not approved yet. Bitbucket's merge checks decide whether it can merge into ${pr.dest}. Asks you to confirm.`)
       + tool("tool--danger", "data-decline", Sprites.svg("decline", { scale: 2 }), "Decline", "Decline this pull request. Asks you to confirm.")
     : tool("tool--agent", 'data-launch="review"', buddy, "Review with the rubric", `Review with the rubric: Claude reviews it in the Terminal panel. ${shift}`)
       + tool("tool--quiet", 'data-launch="summarize"', Sprites.svg("read", { scale: 2 }), "Summarize the threads", `Summarize the threads, edit nothing. ${shift}`);
@@ -1340,6 +1345,24 @@ async function deleteBranch(button, repo, branch, sha) {
     await reloadMine();
   } catch (err) { toast("Could not delete the branch.", err.message, true); }
 }
+async function mergePr(button) {
+  const pr = state.pr?.detail?.pr || state.pr?.pr;
+  if (!pr || !armed(button, `Confirm: merge #${pr.id} into ${pr.dest}`)) return;
+  try {
+    const res = await busy(button, () => api("merge", { method: "POST", body: { repo: pr.repo, id: pr.id } }));
+    const how = res.strategy ? `Strategy: ${res.strategy.replace(/_/g, " ")}.` : "";
+    if (res.state === "MERGED") {
+      forgetOpen(pr); // the merge moment plays now, not a second time on the next refresh
+      Sprites.celebrate(pr);
+      toast(`Merged #${pr.id} into ${pr.dest}.`, how);
+    } else {
+      toast(`Merging #${pr.id}: Bitbucket is finishing it.`, `${how} It moves to Merged on the next refresh.`);
+    }
+    closePr();
+    await reloadMine();
+  } catch (err) { toast("Could not merge the pull request.", err.message, true); }
+}
+
 async function declinePr(button) {
   const pr = state.pr?.detail?.pr || state.pr?.pr;
   if (!pr || !armed(button, `Confirm: decline #${pr.id}`)) return;
@@ -1449,6 +1472,12 @@ async function loadPerson(uuid) {
 // A pull request that was open last time and is merged now gets the merge moment, once.
 // The first load only records what is open, so history never fires.
 const MINE_OPEN_KEY = "prdesk.mine.open.v1";
+function forgetOpen(pr) {
+  try {
+    const before = JSON.parse(localStorage.getItem(MINE_OPEN_KEY)) || [];
+    localStorage.setItem(MINE_OPEN_KEY, JSON.stringify(before.filter((key) => key !== prKey(pr))));
+  } catch { /* private window */ }
+}
 function watchMerges(data) {
   let before = null;
   try { before = JSON.parse(localStorage.getItem(MINE_OPEN_KEY)); } catch { /* none yet */ }
@@ -1604,6 +1633,7 @@ function bind() {
     if (t.closest("[data-preview-delete]") && preview) return deleteBranch(t.closest("[data-preview-delete]"), preview.repo, preview.branch, preview.tip);
     if (t.closest("[data-create-pr]")) return createPr(t.closest("[data-create-pr]"));
     if (t.closest("[data-decline]")) return declinePr(t.closest("[data-decline]"));
+    if (t.closest("[data-merge]")) return mergePr(t.closest("[data-merge]"));
     const copyBtn = t.closest("[data-copy-threads]");
     if (copyBtn) return copyThreads(copyBtn);
     const launchBtn = t.closest("[data-launch]");
@@ -1766,7 +1796,8 @@ async function boot() {
   await loadView();
   BootScreen.finish(state.me ? "" : "NO CONNECTION");
   if (state.route.pr) { const pr = findPr(state.route.pr); if (pr) openPr(pr); }
-  setInterval(() => { if (!document.hidden) loadView({ silent: true }); }, 60000);
+  // The server re-reads your open pull requests every minute; the page asks it twice as often.
+  setInterval(() => { if (!document.hidden) loadView({ silent: true }); }, 30000);
 }
 
 boot();

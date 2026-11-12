@@ -174,6 +174,37 @@ def decline(engine, body):
     return {"repo": repo, "id": pr_id}
 
 
+def merge(engine, body):
+    """Merge one of your own open pull requests, with its destination's default strategy.
+
+    The pull request is read fresh first: the cache can be minutes old, and the destination
+    branch says which strategies it allows. Bitbucket still runs its own merge checks
+    (approvals, builds, tasks) and its refusal comes back as the error.
+    """
+    repo, pr_id = body.get("repo"), body.get("id")
+    if not isinstance(repo, str) or not isinstance(pr_id, int):
+        raise ValueError("repo and id are required")
+    pr = engine.find_pr(repo, pr_id)
+    me = (engine.me() or {}).get("uuid")
+    if pr is None:
+        raise ValueError("unknown pull request; refresh first")
+    if pr["author"]["uuid"] != me:
+        raise PermissionError("only your own pull requests can be merged from here")
+    base = f"/repositories/{engine.client.workspace}/{repo}/pullrequests/{pr_id}"
+    live = engine.client.get(base)
+    if live.get("state") != "OPEN":
+        raise ValueError(f"#{pr_id} is {str(live.get('state', 'unknown')).lower()} on Bitbucket, not open")
+    branch = (live.get("destination") or {}).get("branch") or {}
+    strategy = branch.get("default_merge_strategy")
+    payload = {"type": "pullrequest"}
+    if strategy:
+        payload["merge_strategy"] = strategy
+    result = engine.client.send("POST", f"{base}/merge", payload)
+    _after_change(engine)
+    # A slow merge answers 202 with no body: Bitbucket finishes it, and the next refresh files it.
+    return {"repo": repo, "id": pr_id, "state": result.get("state") or "PENDING", "strategy": strategy}
+
+
 def _after_change(engine):
     me = (engine.me() or {}).get("uuid")
     if me:

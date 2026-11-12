@@ -380,5 +380,90 @@ class ServerErrorTest(unittest.TestCase):
         self.assertNotIn("_error(HTTPStatus.BAD_GATEWAY, exc.message, status=", source)
 
 
+class _FakeClient:
+    workspace = "acme"
+
+    def __init__(self, live_state="OPEN", strategy="squash", open_lists=()):
+        self.calls, self.live_state, self.strategy = [], live_state, strategy
+        self.open_lists = list(open_lists)
+
+    def get(self, path, params=None):
+        self.calls.append(("GET", path, None))
+        return {"state": self.live_state, "destination": {"branch": {"name": "develop", "default_merge_strategy": self.strategy}}}
+
+    def send(self, method, path, body=None, params=None):
+        self.calls.append((method, path, body))
+        return {"state": "MERGED"}
+
+    def user_prs(self, uuid, state, **kw):
+        return self.open_lists.pop(0)
+
+    def calls_last_hour(self):
+        return 0
+
+
+class MergeTest(unittest.TestCase):
+    def _engine(self, author="{me}", **client):
+        import actions
+        pr = model.slim_pr(raw_pr(author={"uuid": author, "display_name": "Someone"}))
+        engine = type("E", (), {})()
+        engine.client = _FakeClient(**client)
+        engine.find_pr = lambda repo, pr_id: pr if (repo, pr_id) == (pr["repo"], pr["id"]) else None
+        engine.me = lambda: {"uuid": "{me}"}
+        engine.refresh_person = lambda uuid: None
+        engine.pushed = lambda force=False: []
+        return actions, engine, pr
+
+    def test_merges_with_the_destination_default_strategy(self):
+        actions, engine, pr = self._engine()
+        out = actions.merge(engine, {"repo": pr["repo"], "id": pr["id"]})
+        self.assertEqual(out["state"], "MERGED")
+        method, path, body = engine.client.calls[-1]
+        self.assertEqual((method, path), ("POST", "/repositories/acme/shop-api/pullrequests/42/merge"))
+        self.assertEqual(body, {"type": "pullrequest", "merge_strategy": "squash"})
+
+    def test_refuses_someone_elses_pull_request(self):
+        actions, engine, pr = self._engine(author="{other}")
+        with self.assertRaises(PermissionError):
+            actions.merge(engine, {"repo": pr["repo"], "id": pr["id"]})
+        self.assertEqual(engine.client.calls, [])
+
+    def test_refuses_one_that_bitbucket_no_longer_has_open(self):
+        actions, engine, pr = self._engine(live_state="MERGED")
+        with self.assertRaises(ValueError):
+            actions.merge(engine, {"repo": pr["repo"], "id": pr["id"]})
+        self.assertNotIn("POST", [c[0] for c in engine.client.calls])
+
+
+class OpenLaneTest(unittest.TestCase):
+    def _engine(self, open_lists):
+        import engine as engine_mod
+        eng = engine_mod.Engine.__new__(engine_mod.Engine)
+        eng.lock = __import__("threading").RLock()
+        eng.client = _FakeClient(open_lists=open_lists)
+        a, b = model.slim_pr(raw_pr()), model.slim_pr(raw_pr(id=43))
+        eng.data = {"people": {"{me}": {"open": [a, b], "merged": [], "synced_at": 1, "open_at": 1}}}
+        eng.saved = 0
+        eng._save = lambda: setattr(eng, "saved", eng.saved + 1)
+        eng.full = 0
+        eng.refresh_person = lambda uuid: setattr(eng, "full", eng.full + 1)
+        return eng, a, b
+
+    def test_a_new_approval_is_taken_in_one_call(self):
+        eng, a, b = self._engine([])
+        approved = raw_pr(participants=[{"user": ALICE, "role": "REVIEWER", "approved": True, "state": "approved"}])
+        eng.client.open_lists = [[approved, raw_pr(id=43)]]
+        eng.refresh_open("{me}")
+        reviews = {r["name"]: r["state"] for r in eng.data["people"]["{me}"]["open"][0]["reviews"]}
+        self.assertEqual(reviews["Alice Reviewer"], "approved")
+        self.assertEqual((eng.saved, eng.full), (1, 0))
+
+    def test_a_pull_request_that_left_the_list_gets_the_full_refresh(self):
+        eng, a, b = self._engine([])
+        eng.client.open_lists = [[raw_pr()]]
+        eng.refresh_open("{me}")
+        self.assertEqual(eng.full, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

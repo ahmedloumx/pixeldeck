@@ -69,7 +69,7 @@ class Client:
         headers = {
             "Accept": "application/json",
             "Authorization": self._auth_header(),
-            "User-Agent": "pr-desk/1.0",
+            "User-Agent": "pixeldeck/1.0",
         }
         data = None
         if body is not None:

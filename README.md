@@ -26,8 +26,8 @@ Full documentation, with the architecture, security model and measured performan
 - **Terminal panel.** Real shells in tabs, named after what runs in them, renamable, and still
   there after you close the window.
 - **Team and insights.** Your teammates' queues, review load and merge history.
-- **Actions.** Open a pull request from a pushed branch, decline your own pull request, delete a
-  pushed branch. Each asks for a second click.
+- **Actions.** Open a pull request from a pushed branch, merge or decline your own pull request,
+  delete a pushed branch. Each asks for a second click.
 - **Arcade layer.** A title screen while it loads, pixel sprites, and small game moments for
   merges, deletions and new shells. Reduced motion turns them off.
 
@@ -76,7 +76,7 @@ off. `--status` tells you whether it runs; `--server` runs the server in the con
 Create an Atlassian API token with Bitbucket scopes at
 <https://id.atlassian.com/manage-profile/security/api-tokens>. Give it the least it needs:
 read access to your user, the workspace, repositories and pull requests, plus pull request write
-if you want to open and decline pull requests from PixelDeck. Nothing more: PixelDeck never needs
+if you want to open, merge and decline pull requests from PixelDeck. Nothing more: PixelDeck never needs
 admin or delete scopes. Deleting a pushed branch and the Claude fixes go through git with your own
 git credentials, not through the token.
 
@@ -117,9 +117,10 @@ folder. Files you leave out come from `briefs/`. Placeholders such as `{source}`
 - Pull request text is untrusted: descriptions and comments are rendered by an escape-first
   Markdown renderer that only builds a fixed set of tags, and the Claude brief fences reviewer
   text as data. Tests feed both hostile input.
-- Destructive actions need a second click. Decline works only on your own open pull requests,
-  protected branches are never deleted, and a deleted branch is logged with the command that
-  restores it.
+- Destructive actions need a second click. Merge and decline work only on your own open pull
+  requests. A merge re-reads the pull request first, and Bitbucket's own merge checks still
+  decide. Protected branches are never deleted, and a deleted branch is logged with the command
+  that restores it.
 - Fix and push tells Claude to push with `--force-with-lease` on the exact remote commit. That
   is an instruction to Claude, not a check PixelDeck enforces.
 

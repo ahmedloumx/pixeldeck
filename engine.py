@@ -19,6 +19,7 @@ import model
 from bitbucket import HOURLY_LIMIT, BitbucketError, Client
 
 ME_EVERY = 300
+OPEN_EVERY = 60  # your open pull requests alone: one call, so an approval shows within a minute or two
 TEAM_EVERY = 900
 DETAIL_MAX_AGE = 900
 MERGED_WINDOW_DAYS = 120
@@ -193,11 +194,30 @@ class Engine:
                 "declined": declined,
                 "merged_total": meta.get("size") or previous.get("merged_total"),
                 "synced_at": time.time(),
+                "open_at": time.time(),
                 "full_at": full_at,
                 "error": None,
             }
         self._save()
         return self.data["people"][uuid]
+
+    def refresh_open(self, uuid):
+        """Only the open pull requests, in one call. One that left the list was merged or
+        declined somewhere else, so the full refresh files it straight away."""
+        open_prs = [model.slim_pr(p) for p in self.client.user_prs(uuid, "OPEN", max_pages=4)]
+        with self.lock:
+            entry = self.data["people"].get(uuid)
+            if entry is None:
+                return None
+            before = entry.get("open", [])
+            entry["open_at"] = time.time()
+            changed = json.dumps(before, sort_keys=True) != json.dumps(open_prs, sort_keys=True)
+            entry["open"] = open_prs
+        if {(p["repo"], p["id"]) for p in before} - {(p["repo"], p["id"]) for p in open_prs}:
+            return self.refresh_person(uuid)
+        if changed:
+            self._save()
+        return entry
 
     def person(self, uuid):
         with self.lock:
@@ -392,6 +412,9 @@ class Engine:
             me = self.me()["uuid"]
             if self._due(me, ME_EVERY):
                 self.refresh_person(me)
+                self.warm_details(me)
+            elif time.time() - ((self.person(me) or {}).get("open_at") or 0) > OPEN_EVERY:
+                self.refresh_open(me)
                 self.warm_details(me)
             for mate in self.team():
                 if self._due(mate["uuid"], TEAM_EVERY):

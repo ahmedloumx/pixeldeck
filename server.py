@@ -195,6 +195,8 @@ class Desk(BaseHTTPRequestHandler):
                 return self._send(200, actions.delete_branch(engine, WORKSPACE_ROOT, body))
             if method == "POST" and route == "decline":
                 return self._send(200, actions.decline(engine, body))
+            if method == "POST" and route == "merge":
+                return self._send(200, actions.merge(engine, body))
             if method == "GET" and route == "projects":
                 return self._send(200, {"projects": engine.projects(), "project": engine.project()})
             if method == "POST" and route == "project":

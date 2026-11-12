@@ -52,6 +52,9 @@
 .tool--quiet.btn { background: transparent; border-color: transparent; color: var(--color-ink-2); }
 .tool--quiet.btn:hover { background: var(--color-paper-2); border-color: var(--color-rule); color: var(--color-ink); }
 .tool--push.btn { color: var(--color-accent); }
+.tool--merge.btn { background: transparent; border-color: transparent; color: var(--color-muted); }
+.tool--merge.btn.is-ready { color: var(--color-ok); }
+.tool--merge.btn:hover { background: var(--color-ok-soft); border-color: var(--color-ok); color: var(--color-ok); }
 .tool--danger.btn { background: transparent; border-color: transparent; color: var(--color-bad); }
 .tool--danger.btn:hover { background: var(--color-bad-soft); border-color: var(--color-bad); }
 .tool--fold.btn { background: transparent; border-color: var(--color-rule); color: var(--color-ink-2); }
