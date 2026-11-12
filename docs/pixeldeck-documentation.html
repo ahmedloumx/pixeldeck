@@ -161,13 +161,13 @@ footer { margin-top: 72px; padding-top: 18px; border-top: 3px dashed var(--rule-
 <div class="grid cols-4">
   <div class="score"><b>0</b><span>third-party packages for the server: the Python standard library only (Windows adds pywinpty for the terminal)</span></div>
   <div class="score"><b class="cool">0</b><span>build steps: no bundler, no framework, no npm install</span></div>
-  <div class="score"><b class="amber">~7,000</b><span>lines: 2,900 Python, 2,900 JavaScript, 1,200 CSS</span></div>
-  <div class="score"><b>28</b><span>unit tests, run on Python 3.12 and 3.14, plus a WebKit self-test and browser scripts</span></div>
+  <div class="score"><b class="amber">~7,500</b><span>lines: 3,000 Python, 3,200 JavaScript, 1,200 CSS</span></div>
+  <div class="score"><b>32</b><span>unit tests, run on Python 3.12 and 3.14, plus a WebKit self-test and browser scripts</span></div>
 </div>
 <div class="grid cols-4" style="margin-top:18px">
   <div class="score"><b class="cool">95 MB</b><span>server memory, 0% CPU when idle (measured on Linux)</span></div>
   <div class="score"><b class="cool">336 MB</b><span>Linux app window memory, for its 3 processes</span></div>
-  <div class="score"><b class="amber">606 KB</b><span>everything the page loads, fonts and terminal included</span></div>
+  <div class="score"><b class="amber">740 KB</b><span>everything the page loads, fonts and terminal included</span></div>
   <div class="score"><b>1000/h</b><span>Bitbucket call limit it stays under; background work stops at 80%</span></div>
 </div>
 
@@ -188,13 +188,15 @@ footer { margin-top: 72px; padding-top: 18px; border-top: 3px dashed var(--rule-
     <h3>Claude Code and the terminal</h3>
     <ul class="list">
       <li><strong>Fix</strong>, <strong>Fix and push</strong>, <strong>Read and summarize</strong> and <strong>Review</strong> start Claude Code on a pull request, in a worktree on its branch, briefed with the open threads.</li>
-      <li><strong>Terminal panel</strong>: real shells in tabs. A tab takes the title its program sets (a shell's folder, "Claude Code"), numbers duplicates, and can be renamed with a double-click or F2.</li>
+      <li><strong>Terminal panel</strong>: real shells in tabs, drawn with WebGL. A tab takes the title its program sets (a shell's folder, "Claude Code"), numbers duplicates, and can be renamed with a double-click or F2. Drag tabs into any order (or Alt and an arrow key); the order survives a reload. While output keeps coming in a tab (Claude Code at work, a build), it shows a small pixel loader; when that ends in a tab you are not looking at, a green square waits until you open it.</li>
+      <li><strong>Drop files on a terminal</strong> to paste their paths at the prompt, quoted and never run. Handy for giving Claude a screenshot.</li>
+      <li><strong>Review banners</strong>: when someone approves, asks for changes or comments on one of your open pull requests, a banner drops in from the top with who it was. Click it to open the pull request.</li>
       <li>Closing the window leaves the server and its terminals running, so a Claude run is never cut off.</li>
     </ul>
     <h3 style="margin-top:18px">The arcade layer</h3>
     <ul class="list">
       <li>A <strong>title screen</strong> while the first data loads: the icon drops in, the name waves, the desk bot walks a bar that fills with the real load steps. Any key skips it.</li>
-      <li><strong>Game moments</strong>: a merge seen on refresh sets off fireworks; a deleted branch's critter is knocked out; for a new shell the bot beams to the new tab, hammers it together and beams home. <code>?</code> replays them.</li>
+      <li><strong>Game moments</strong>: a merge sets off fireworks (merged from PixelDeck, the pull request moves to Merged at once; merged elsewhere, it plays when a refresh sees it); a deleted branch's critter is knocked out; for a new shell the bot beams to the new tab, hammers it together and beams home. <code>?</code> replays them.</li>
       <li>Reduced motion turns every animation off.</li>
     </ul>
   </div>
@@ -249,7 +251,7 @@ cp .env.example .env        # Windows: copy .env.example .env</code></pre>
     <text x="40" y="100">Linux: GTK 4 + WebKitGTK 6</text>
     <text x="40" y="122">all: Chrome, Edge or Brave app mode</text>
     <text x="40" y="144">page: HTML, CSS, plain JavaScript</text>
-    <text x="40" y="166">xterm.js for the terminals</text>
+    <text x="40" y="166">xterm.js with WebGL for the terminals</text>
     <rect class="box hot" x="400" y="40" width="310" height="370"/>
     <text class="t" x="420" y="72">SERVER 127.0.0.1:8642</text>
     <text x="420" y="100">server.py: routes, token on every call</text>
@@ -283,12 +285,12 @@ cp .env.example .env        # Windows: copy .env.example .env</code></pre>
     <tbody>
       <tr><td>Window</td><td>Linux: Python with PyGObject, GTK 4 and WebKitGTK 6 (<code>app_window.py</code>). Elsewhere: a Chromium-family browser in <code>--app</code> mode with a profile of its own, else the default browser.</td><td>A real app window with its own dock icon and no browser bars, using the web engine the system already has: nothing bundled. Electron would ship a whole Chromium for the same result.</td></tr>
       <tr><td>Server</td><td>Python standard library: <code>http.server</code>, <code>urllib</code>, <code>json</code>, <code>pty</code>, <code>subprocess</code>, <code>threading</code>.</td><td>Nothing to install or upgrade. It idles at 0% CPU, so the language is not the cost.</td></tr>
-      <tr><td>Terminal</td><td>Linux and macOS: <code>pty</code>. Windows: ConPTY through <code>pywinpty</code>. In the page: xterm.js 5.5.0 and its fit addon.</td><td>Real shells, and Claude Code's interface draws correctly in xterm.js.</td></tr>
+      <tr><td>Terminal</td><td>Linux and macOS: <code>pty</code>. Windows: ConPTY through <code>pywinpty</code>. In the page: xterm.js 5.5.0 with its fit, WebGL and Unicode 11 add-ons.</td><td>xterm.js is the open source terminal VS Code uses. WebGL draws it on the GPU for smooth scrolling and fast output, and falls back to the plain renderer if the GPU context is lost; Unicode 11 gets emoji and symbol widths right.</td></tr>
       <tr><td>Data</td><td>Bitbucket Cloud REST 2.0 with an Atlassian API token (Basic auth with your email), read from <code>.env</code>.</td><td>A rolling counter keeps it under the 1,000 calls an hour limit.</td></tr>
       <tr><td>Storage</td><td>One JSON cache (mode 600, atomic writes), a settings file, a state folder, and the window profile, in each system's own folders.</td><td>One person's data fits in one file; no database to run.</td></tr>
       <tr><td>Page</td><td>Plain HTML, CSS and JavaScript: <code>app.js</code>, <code>layout.js</code>, <code>term.js</code>, <code>visuals.js</code>, <code>sprites.js</code>.</td><td>No build step: edit a file, reload.</td></tr>
       <tr><td>Look</td><td>Press Start 2P, Pixelify Sans and Host Grotesk (local woff2, 44 KB); pixel sprites drawn as SVG from small letter grids.</td><td>Everything is local: it works offline and loads no CDN.</td></tr>
-      <tr><td>Tests</td><td><code>unittest</code> (28 tests, including import tests that pretend to be Windows and macOS), a WebKit self-test mode, browser scripts.</td><td>The self-test runs headless, so checks never pop a window.</td></tr>
+      <tr><td>Tests</td><td><code>unittest</code> (32 tests, including import tests that pretend to be Windows and macOS), a WebKit self-test mode, browser scripts.</td><td>The self-test runs headless, so checks never pop a window.</td></tr>
     </tbody>
   </table>
 </div>
@@ -317,7 +319,9 @@ cp .env.example .env        # Windows: copy .env.example .env</code></pre>
 <h2 id="terminal"><span class="lvl">3-2</span>Terminal and Claude</h2>
 <div class="card">
   <ul class="list">
-    <li>Each terminal is a real pseudo-terminal on the server, with 2 MB of scrollback, at most 10 at a time. All of them share one long streamed request, because a browser allows only 6 connections per host.</li>
+    <li>Each terminal is a real pseudo-terminal on the server, with 2 MB of scrollback, at most 10 at a time. All of them share one long streamed request, because a browser allows only 6 connections per host. Typing reaches the shell and echoes back in about 25 ms (measured in WebKit, one and three terminals).</li>
+    <li><strong>Renderer.</strong> WebGL by default, with the plain DOM renderer as fallback. If a graphics driver misbehaves, set the browser storage key <code>prdesk.term.renderer</code> to <code>dom</code> and reload.</li>
+    <li><strong>Dropped files.</strong> When the file manager hands over real paths, those are pasted. Otherwise the file is copied into PixelDeck's state folder (<code>drops/</code>, files readable only by you, cleared after a week, 50 MB at most) and that copy's path is pasted.</li>
     <li>The Claude actions build a brief from the pull request and its open threads, prepare a worktree under <code>worktrees/pr/&lt;repo&gt;-&lt;id&gt;</code> (or reuse the clone already on that branch), and start <code>claude</code> in a terminal. Shift-click opens your system's own terminal instead.</li>
     <li>Reviewer text is fenced as data in the brief, never as instructions. On Linux and macOS the brief is one argument, so no shell ever reads it. Windows caps a command line at 32,767 characters, so there the brief is written to a file and Claude is pointed at it.</li>
     <li><strong>Your own briefs.</strong> The brief is <code>briefs/head.md</code> plus <code>summarize.md</code>, <code>review.md</code>, <code>fix.md</code> or <code>fix_push.md</code>. Copy any of them to a folder, add your house rules (a review rubric, commit conventions) and set <code>PIXELDECK_BRIEFS_DIR</code>. Placeholders such as <code>{source}</code>, <code>{dest}</code>, <code>{cwd}</code> and <code>{ticket}</code> are filled in; the threads follow the template.</li>
@@ -341,6 +345,7 @@ cp .env.example .env        # Windows: copy .env.example .env</code></pre>
     <h3>What it can change, and the guards</h3>
     <ul class="list">
       <li>Open a pull request, merge or decline one, delete a pushed branch, fix and push: each needs a second click.</li>
+      <li>A file dropped on a terminal is pasted as a quoted path, never run. Its copy keeps only the bare file name (no folders), never replaces an existing file, and reads no more than the size it announced.</li>
       <li>Merge and decline work only on your own open pull requests. A merge re-reads the pull request from Bitbucket first, uses the destination branch's default strategy, and Bitbucket's own merge checks (approvals, builds, tasks) still decide. Protected branches are never deleted. A branch is deleted with a lease on its exact commit, and each deletion is logged with the command that restores it.</li>
       <li>The token is read from <code>.env</code> and sent only to api.bitbucket.org. Give it read access plus pull request write; never admin or delete scopes. Branch deletion and Claude's pushes use your own git credentials.</li>
     </ul>
@@ -366,9 +371,9 @@ cp .env.example .env        # Windows: copy .env.example .env</code></pre>
   <div class="card scroll">
     <h3>Page weight and speed</h3>
     <table><tbody>
-      <tr><td>Files the page loads</td><td class="n">606 KB</td></tr>
-      <tr><td>xterm (script, addon, styles)</td><td class="n">290 KB</td></tr>
-      <tr><td>Our JavaScript (5 files)</td><td class="n">160 KB</td></tr>
+      <tr><td>Files the page loads</td><td class="n">740 KB</td></tr>
+      <tr><td>xterm (script, 3 add-ons, styles)</td><td class="n">409 KB</td></tr>
+      <tr><td>Our JavaScript (5 files)</td><td class="n">176 KB</td></tr>
       <tr><td>Fonts (3 woff2)</td><td class="n">44 KB</td></tr>
       <tr><td>DOM ready / loaded (before the title screen was added)</td><td class="n">46 to 58 / 165 to 177 ms</td></tr>
       <tr><td>Redraw: queue / merge tree</td><td class="n">1 / 14 to 24 ms</td></tr>
@@ -414,20 +419,20 @@ cp .env.example .env        # Windows: copy .env.example .env</code></pre>
     <tbody>
       <tr><td><code>pixeldeck.py</code></td><td class="n">165</td><td>Start, stop, status; picks the best window for the system.</td></tr>
       <tr><td><code>config.py</code></td><td class="n">167</td><td>The <code>.env</code>, and each system's folders.</td></tr>
-      <tr><td><code>server.py</code></td><td class="n">443</td><td>Routes, Host and token checks, CSP, the terminal stream.</td></tr>
-      <tr><td><code>engine.py</code></td><td class="n">470</td><td>Cache, refresh loop, merged and declined windows, project scope.</td></tr>
+      <tr><td><code>server.py</code></td><td class="n">491</td><td>Routes, Host and token checks, CSP, the terminal stream, file drops.</td></tr>
+      <tr><td><code>engine.py</code></td><td class="n">507</td><td>Cache, refresh loop, merged and declined windows, project scope.</td></tr>
       <tr><td><code>model.py</code></td><td class="n">298</td><td>Pull requests, reviews, threads, timelines, parsed diffs, ticket keys.</td></tr>
       <tr><td><code>app_window.py</code></td><td class="n">263</td><td>The Linux window: WebKit view, pop-outs, links to the browser, self-test.</td></tr>
       <tr><td><code>terminals.py</code></td><td class="n">242</td><td>Terminal sessions: pty on Linux and macOS, ConPTY on Windows.</td></tr>
       <tr><td><code>launcher.py</code></td><td class="n">232</td><td>Claude brief from templates, worktree, launch.</td></tr>
       <tr><td><code>bitbucket.py</code></td><td class="n">194</td><td>REST client, paging, the hourly call counter.</td></tr>
-      <tr><td><code>actions.py</code></td><td class="n">215</td><td>Open, merge and decline a pull request; delete a pushed branch.</td></tr>
+      <tr><td><code>actions.py</code></td><td class="n">218</td><td>Open, merge and decline a pull request; delete a pushed branch.</td></tr>
       <tr><td><code>gitscan.py</code>, <code>opener.py</code>, <code>check_api.py</code></td><td class="n">261</td><td>Branches pushed without a pull request; opening links; an API shape check.</td></tr>
       <tr><td><code>briefs/</code></td><td class="n">62</td><td>The default Claude brief templates.</td></tr>
-      <tr><td><code>static/</code> scripts</td><td class="n">2,910</td><td><code>app.js</code> (queue, pull request view, Markdown, copy, title screen), <code>layout.js</code> (panels), <code>sprites.js</code> (pixel characters), <code>term.js</code> (terminal tabs), <code>visuals.js</code> (merge tree, age bars).</td></tr>
-      <tr><td><code>static/</code> styles</td><td class="n">1,175</td><td>Tokens, base, app, workspace, arcade.</td></tr>
+      <tr><td><code>static/</code> scripts</td><td class="n">3,215</td><td><code>app.js</code> (queue, pull request view, Markdown, copy, title screen), <code>layout.js</code> (panels), <code>sprites.js</code> (pixel characters), <code>term.js</code> (terminal tabs), <code>visuals.js</code> (merge tree, age bars).</td></tr>
+      <tr><td><code>static/</code> styles</td><td class="n">1,227</td><td>Tokens, base, app, workspace, arcade.</td></tr>
       <tr><td><code>run.sh</code>, <code>install-desktop.sh</code>, <code>PixelDeck.command</code>, <code>PixelDeck.cmd</code></td><td class="n">65</td><td>Launchers for each system; the Linux app grid and dock entry.</td></tr>
-      <tr><td><code>tests/test_desk.py</code></td><td class="n">469</td><td>28 tests.</td></tr>
+      <tr><td><code>tests/test_desk.py</code></td><td class="n">526</td><td>32 tests.</td></tr>
     </tbody>
   </table>
 </div>

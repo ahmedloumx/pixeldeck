@@ -11,6 +11,7 @@ Security model, because this server can open a terminal that pushes code:
 """
 
 import argparse
+import re
 import base64
 import os
 import json
@@ -23,7 +24,7 @@ import traceback
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -42,6 +43,44 @@ WORKSPACE_ROOT = config.workspace_root()
 SECRET = secrets.token_urlsafe(32)
 TERMS = terminals.Terminals()
 MAX_BODY = 64 * 1024
+DROP_MAX = 50 * 1024 * 1024
+DROP_KEEP_DAYS = 7
+
+
+def save_drop(folder, name, stream, length):
+    """Write one file dropped on a terminal into folder and return its path.
+
+    Only a bare file name survives (never a path), an existing file is never replaced, and
+    no more than length bytes are read. Drops older than a week are cleared on the way in.
+    """
+    base = os.path.basename(str(name).replace("\\", "/")).strip()
+    if not base or base in (".", "..") or len(base) > 200 or any(ord(c) < 32 or ord(c) == 127 for c in base):
+        raise ValueError("unusable file name")
+    base = re.sub(r'[<>:"|?*]', "_", base)  # characters Windows will not take in a name
+    if not 0 < length <= DROP_MAX:
+        raise ValueError(f"a dropped file must be between 1 byte and {DROP_MAX // 1048576} MB")
+    folder.mkdir(parents=True, exist_ok=True)
+    if os.name != "nt":
+        os.chmod(folder, 0o700)
+    cutoff = time.time() - DROP_KEEP_DAYS * 86400
+    for old in folder.iterdir():
+        if old.is_file() and old.stat().st_mtime < cutoff:
+            old.unlink(missing_ok=True)
+    path = folder / f"{time.strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(3)}-{base}"
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)
+    left = length
+    try:
+        with os.fdopen(fd, "wb") as out:
+            while left:
+                chunk = stream.read(min(65536, left))
+                if not chunk:
+                    raise ValueError("the upload ended early")
+                out.write(chunk)
+                left -= len(chunk)
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
+    return path
 
 
 class Desk(BaseHTTPRequestHandler):
@@ -116,6 +155,13 @@ class Desk(BaseHTTPRequestHandler):
             return self._error(HTTPStatus.NOT_FOUND, "not found")
         if not self._authorized():
             return self._error(HTTPStatus.UNAUTHORIZED, "stale page token")
+        if url.path == "/api/term-drop":  # raw file bytes, not JSON: read before _body() would refuse them
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                path = save_drop(config.folder("state") / "drops", unquote(self.headers.get("X-File-Name") or ""), self.rfile, length)
+            except (ValueError, OSError) as exc:
+                return self._error(HTTPStatus.BAD_REQUEST, str(exc))
+            return self._send(200, {"path": str(path)})
         try:
             body = self._body()
         except (ValueError, json.JSONDecodeError) as exc:

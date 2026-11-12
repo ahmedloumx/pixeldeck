@@ -412,12 +412,16 @@ class MergeTest(unittest.TestCase):
         engine.me = lambda: {"uuid": "{me}"}
         engine.refresh_person = lambda uuid: None
         engine.pushed = lambda force=False: []
+        engine.filed = []
+        engine.file_merged = lambda uuid, raw: engine.filed.append((uuid, raw)) or {"id": pr["id"], "state": "MERGED"}
         return actions, engine, pr
 
     def test_merges_with_the_destination_default_strategy(self):
         actions, engine, pr = self._engine()
         out = actions.merge(engine, {"repo": pr["repo"], "id": pr["id"]})
         self.assertEqual(out["state"], "MERGED")
+        self.assertEqual(out["pr"]["state"], "MERGED", "the merged pull request comes back to show at once")
+        self.assertEqual(engine.filed[0][0], "{me}")
         method, path, body = engine.client.calls[-1]
         self.assertEqual((method, path), ("POST", "/repositories/acme/shop-api/pullrequests/42/merge"))
         self.assertEqual(body, {"type": "pullrequest", "merge_strategy": "squash"})
@@ -463,6 +467,59 @@ class OpenLaneTest(unittest.TestCase):
         eng.client.open_lists = [[raw_pr()]]
         eng.refresh_open("{me}")
         self.assertEqual(eng.full, 1)
+
+
+class DropTest(unittest.TestCase):
+    def setUp(self):
+        import io
+        import server
+        self.server, self.io = server, io
+        self.folder = Path(tempfile.mkdtemp(prefix="pixeldeck-drops-")) / "drops"
+
+    def save(self, name, data, length=None):
+        return self.server.save_drop(self.folder, name, self.io.BytesIO(data), len(data) if length is None else length)
+
+    def test_keeps_only_the_file_name(self):
+        path = self.save("../../etc/passwd", b"x")
+        self.assertEqual(path.parent, self.folder)
+        self.assertTrue(path.name.endswith("-passwd"))
+        path = self.save("C:\\Users\\me\\shot.png", b"png")
+        self.assertTrue(path.name.endswith("-shot.png"))
+        self.assertEqual(path.read_bytes(), b"png")
+
+    def test_refuses_bad_names_sizes_and_short_uploads(self):
+        for name in ("", "..", "a\nb.txt", "tab\tname"):
+            with self.assertRaises(ValueError):
+                self.save(name, b"x")
+        with self.assertRaises(ValueError):
+            self.save("empty.txt", b"")
+        with self.assertRaises(ValueError):
+            self.save("big.bin", b"x", length=self.server.DROP_MAX + 1)
+        with self.assertRaises(ValueError):
+            self.save("cut.txt", b"abc", length=10)
+        self.assertEqual([p.name for p in self.folder.iterdir()], [], "a failed upload leaves nothing behind")
+
+    def test_never_reads_past_the_length_and_never_replaces(self):
+        a = self.save("same.txt", b"hello world", length=5)
+        b = self.save("same.txt", b"other")
+        self.assertEqual(a.read_bytes(), b"hello")
+        self.assertNotEqual(a, b)
+        if os.name != "nt":
+            self.assertEqual(a.stat().st_mode & 0o777, 0o600)
+
+
+class FileMergedTest(unittest.TestCase):
+    def test_moves_the_pull_request_from_open_to_merged(self):
+        import engine as engine_mod
+        eng = engine_mod.Engine.__new__(engine_mod.Engine)
+        eng.lock = __import__("threading").RLock()
+        a, b = model.slim_pr(raw_pr()), model.slim_pr(raw_pr(id=43))
+        eng.data = {"people": {"{me}": {"open": [a, b], "merged": [model.slim_pr(raw_pr(id=7, state="MERGED"))]}}}
+        eng._save = lambda: None
+        eng.file_merged("{me}", raw_pr(state="MERGED"))
+        entry = eng.data["people"]["{me}"]
+        self.assertEqual([p["id"] for p in entry["open"]], [43])
+        self.assertEqual([(p["id"], p["state"]) for p in entry["merged"]], [(42, "MERGED"), (7, "MERGED")])
 
 
 if __name__ == "__main__":

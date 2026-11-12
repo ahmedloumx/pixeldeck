@@ -23,8 +23,12 @@ Full documentation, with the architecture, security model and measured performan
   prepares a worktree on the branch, briefs Claude with the open threads (quoted as data, never as
   instructions) and starts it in the built-in terminal. The brief comes from templates you can
   replace with your own.
-- **Terminal panel.** Real shells in tabs, named after what runs in them, renamable, and still
-  there after you close the window.
+- **Terminal panel.** Real shells in tabs, drawn with WebGL for smooth scrolling. Tabs are named
+  after what runs in them, can be renamed and dragged into any order, and show a small loader
+  while something is working in them. Drop files on a terminal to paste their paths. The shells
+  stay alive after you close the window.
+- **Review banners.** When someone approves, asks for changes or comments on one of your pull
+  requests, a banner drops in from the top with who it was.
 - **Team and insights.** Your teammates' queues, review load and merge history.
 - **Actions.** Open a pull request from a pushed branch, merge or decline your own pull request,
   delete a pushed branch. Each asks for a second click.
@@ -135,7 +139,7 @@ on every request, so a reload shows a change. The documentation describes each f
 
 ## Credits
 
-- [xterm.js](https://xtermjs.org/) and its fit addon, MIT license.
+- [xterm.js](https://xtermjs.org/) and its fit, WebGL and Unicode 11 add-ons, MIT license.
 - Fonts: Press Start 2P, Pixelify Sans and Host Grotesk, SIL Open Font License 1.1.
 
 Their license texts are in [licenses/](licenses/).
@@ -143,6 +147,11 @@ Their license texts are in [licenses/](licenses/).
 PixelDeck is an independent project. It is not affiliated with or endorsed by Atlassian or
 Anthropic. Bitbucket and Jira are trademarks of Atlassian; Claude and Claude Code are
 trademarks of Anthropic.
+
+## Contributing
+
+`main` holds the released version and `develop` the next one. Open pull requests against
+`develop`; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

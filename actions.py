@@ -200,9 +200,12 @@ def merge(engine, body):
     if strategy:
         payload["merge_strategy"] = strategy
     result = engine.client.send("POST", f"{base}/merge", payload)
+    merged = None
+    if result.get("state") == "MERGED":
+        merged = engine.file_merged(me, result)
     _after_change(engine)
     # A slow merge answers 202 with no body: Bitbucket finishes it, and the next refresh files it.
-    return {"repo": repo, "id": pr_id, "state": result.get("state") or "PENDING", "strategy": strategy}
+    return {"repo": repo, "id": pr_id, "state": result.get("state") or "PENDING", "strategy": strategy, "pr": merged}
 
 
 def _after_change(engine):
