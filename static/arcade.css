@@ -1,0 +1,240 @@
+/* Arcade layer: pixel sprites, the pull request header that folds away, icon tools,
+   and the small game moments (a knock-out on delete, fireworks on merge, the bot
+   running off when a shell opens). Motion is transform and opacity only, stepped
+   so it reads as 8-bit, and switched off under reduced motion. */
+
+/* ------------------------------------------------------------------ sprites */
+.spr { display: inline-block; vertical-align: middle; flex-shrink: 0; overflow: visible; }
+.spr g[data-f] { display: none; }
+.spr[data-frame="0"] g[data-f="0"], .spr[data-frame="1"] g[data-f="1"], .spr[data-frame="2"] g[data-f="2"],
+.spr[data-frame="3"] g[data-f="3"], .spr[data-frame="4"] g[data-f="4"] { display: inline; }
+.p-orange { fill: var(--sprite-orange); } .p-orange-deep { fill: var(--sprite-orange-deep); }
+.p-dark { fill: var(--sprite-dark); } .p-white { fill: var(--sprite-white); }
+.p-blue { fill: var(--sprite-blue); } .p-blue-deep { fill: var(--sprite-blue-deep); }
+.p-yellow { fill: var(--sprite-yellow); } .p-red { fill: var(--sprite-red); }
+.p-stone { fill: var(--sprite-stone); } .p-stone-deep { fill: var(--sprite-stone-deep); }
+.p-grass { fill: var(--sprite-grass); } .p-amber { fill: var(--critter, var(--sprite-amber)); }
+.p-ink { fill: currentColor; }
+.chip .spr-tomb { width: 10px; height: 12px; }
+
+/* ------------------------------------------------- the pull request view folds */
+.pr-view { position: relative; height: 100%; overflow: hidden; display: block; }
+.pr-view .pr-head { position: absolute; inset: 0 0 auto 0; z-index: 0; border-bottom: 0; transition: opacity var(--dur-fold) var(--ease-out), transform var(--dur-fold) var(--ease-out); }
+.pr-view.is-folded .pr-head { opacity: 0; transform: translateY(-14px); }
+.pr-launches { margin-top: var(--space-sm); }
+.pr-stage {
+  position: absolute; inset: 0; z-index: 1; display: flex; flex-direction: column;
+  background: var(--color-paper); transform: translateY(var(--head-h, 0px));
+  transition: transform var(--dur-fold) var(--ease-in-out);
+}
+.pr-view.is-folded .pr-stage { transform: translateY(0); }
+.pr-view .pr-body { padding-bottom: calc(var(--space-lg) + var(--head-h, 0px)); }
+.pr-view.is-folded .pr-body { padding-bottom: var(--space-lg); }
+.pr-view.no-anim .pr-stage, .pr-view.no-anim .pr-head { transition: none; }
+
+.pr-bar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0 var(--space-sm); padding: 0 var(--space-md); border-top: var(--rule-hair) solid var(--color-rule); border-bottom: var(--rule-hair) solid var(--color-rule); background: var(--color-paper); }
+.pr-view.is-folded .pr-bar { border-top-color: transparent; }
+.pr-bar .tabs { flex: 0 1 auto; min-width: 0; padding: var(--space-xs) 0 0; border-bottom: 0; }
+.pr-mini { align-self: center; display: inline-flex; align-items: center; gap: var(--space-xs); min-width: 0; font-family: var(--font-outlier); font-size: var(--text-sm); color: var(--color-muted); white-space: nowrap; opacity: 0; transform: translateY(8px); transition: opacity var(--dur-fold) var(--ease-out), transform var(--dur-fold) var(--ease-out); }
+.pr-view.is-folded .pr-mini { opacity: 1; transform: translateY(0); }
+.pr-mini .tree-ticket { font-size: var(--text-xs); }
+
+/* icon tools on the tab row */
+.pr-tools { display: flex; align-items: center; gap: var(--space-2xs); margin-left: auto; padding: var(--space-2xs) 0; }
+.tool.btn { min-height: 34px; min-width: 34px; padding: 0 var(--space-2xs); gap: var(--space-2xs); }
+.tool .tool-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.tool.btn--armed .tool-label, .tool.is-busy .tool-label { position: static; width: auto; height: auto; overflow: visible; clip-path: none; padding-right: var(--space-2xs); font-size: var(--text-sm); }
+.tool--agent.btn { padding-inline: var(--space-xs); border-color: color-mix(in oklch, var(--sprite-grass) 55%, var(--color-paper)); background: var(--color-paper-2); }
+.tool--agent.btn:hover, .tool--agent.btn:focus-visible { border-color: var(--sprite-grass); background: var(--color-paper-3); }
+.tool--agent .spr-sparkle { width: 0; opacity: 0; transition: opacity var(--dur-micro) var(--ease-out); }
+.tool--agent:hover .spr-sparkle, .tool--agent:focus-visible .spr-sparkle, .tool--agent.is-busy .spr-sparkle { width: 14px; opacity: 1; }
+.tool--agent:hover .spr-buddy, .tool--agent.is-busy .spr-buddy { animation: spr-bob 260ms steps(2, jump-none) infinite; }
+.tool--quiet.btn { background: transparent; border-color: transparent; color: var(--color-ink-2); }
+.tool--quiet.btn:hover { background: var(--color-paper-2); border-color: var(--color-rule); color: var(--color-ink); }
+.tool--push.btn { color: var(--color-accent); }
+.tool--danger.btn { background: transparent; border-color: transparent; color: var(--color-bad); }
+.tool--danger.btn:hover { background: var(--color-bad-soft); border-color: var(--color-bad); }
+.tool--fold.btn { background: transparent; border-color: var(--color-rule); color: var(--color-ink-2); }
+.tool--fold.btn:hover { border-color: var(--color-rule-2); color: var(--color-ink); }
+.tool-sep { width: 1px; height: 22px; margin-inline: var(--space-2xs); background: var(--color-rule); }
+@keyframes spr-bob { from { transform: translateY(0); } to { transform: translateY(-2px); } }
+
+/* ---------------------------------------------------------- merge tree cast */
+.tree-graph .trunk { stroke: var(--color-ink-2); }
+.tree-graph .branch.is-open { stroke: var(--color-cool); stroke-dasharray: 4 3; }
+.tree-graph .branch.is-pushed { stroke: var(--color-accent); stroke-dasharray: 2 3; }
+.tree-graph .branch.is-declined { stroke: var(--color-bad); stroke-dasharray: 5 2; }
+.tree-graph .node.declined { fill: var(--color-bad); }
+.tree-ticket.is-open { border-color: var(--color-cool); color: var(--color-cool); }
+.tree-ticket.is-pushed { border-color: var(--color-accent); color: var(--color-accent); }
+.tree-ticket.is-declined { border-color: var(--color-bad); color: var(--color-bad); text-decoration: line-through; }
+.tree-row.is-open, .tree-row.is-pushed, .tree-row.is-declined { color: var(--color-ink); font-size: var(--text-sm); }
+.tree-legend { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2xs) var(--space-md); margin-top: var(--space-sm); font-size: var(--text-xs); color: var(--color-muted); }
+.tree-legend span { display: inline-flex; align-items: center; gap: var(--space-2xs); }
+.tree-legend .swatch-line { width: 16px; height: 3px; background: var(--heat-4); }
+
+/* ------------------------------------------------------------ terminal bot */
+.term-mascot { display: inline-flex; align-items: flex-end; padding-inline: var(--space-2xs); }
+/* The builder bot: it beams around in the fx layer while its seat stays empty. */
+.fx-actor { position: absolute; line-height: 0; transform: translate(-50%, -100%); }
+.fx-actor-body { display: block; transform-origin: 50% 100%; }
+.fx-beam {
+  position: absolute; left: 50%; bottom: 0; width: 8px; height: 56px; margin-left: -4px; opacity: 0; transform-origin: 50% 100%;
+  background: linear-gradient(90deg, var(--sprite-blue) 0 2px, var(--sprite-white) 2px 6px, var(--sprite-blue) 6px);
+  box-shadow: 0 0 0 2px oklch(78% 0.11 262 / 0.35);
+}
+.fx-hammer { position: absolute; right: calc(100% - 3px); bottom: 7px; }
+.fx-spark { position: absolute; line-height: 0; animation: spark-fly 420ms steps(4, end) forwards; }
+@keyframes spark-fly { to { transform: translate(var(--sx), var(--sy)); opacity: 0; } }
+/* A tab under construction is a dashed frame; its name fills in block by block. */
+.term-tab.is-scaffold { border-style: dashed; border-color: var(--color-cool); background: transparent; box-shadow: none; }
+.term-tab.is-scaffold > * { clip-path: inset(0 100% 0 0); }
+.term-tab.is-building > * { animation: tab-build 960ms steps(6, end) forwards; }
+@keyframes tab-build { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+.term-tab-label { display: inline-block; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+.term-tab-input { width: auto; min-width: 8ch; margin: 2px var(--space-2xs); padding: 0 var(--space-2xs); border: var(--rule-hair) solid var(--color-accent); border-radius: 2px; background: var(--color-paper-3); color: var(--color-ink); font: inherit; font-size: var(--text-sm); }
+.term-tab-name .spr { margin-right: var(--space-2xs); }
+.term-tab.is-spawning { animation: tab-pop 500ms steps(5, jump-none) both; }
+@keyframes tab-pop { 0% { transform: scale(0.6); opacity: 0; } 60% { transform: scale(1.08); opacity: 1; } 100% { transform: scale(1); } }
+.term-empty .spr { display: block; margin-bottom: var(--space-sm); }
+
+/* ------------------------------------------------------------- the fx layer */
+.fx-layer { position: fixed; inset: 0; z-index: var(--z-toast); pointer-events: none; overflow: clip; }
+
+.fx-die { position: absolute; left: var(--x); top: var(--y); width: 0; height: 0; }
+.fx-die.is-branch { --critter: var(--sprite-amber); }
+.fx-die.is-pr { --critter: var(--sprite-blue); }
+.fx-die .fx-body, .fx-die .fx-tomb { position: absolute; left: 0; top: 0; transform: translate(-50%, -50%); }
+.fx-die .fx-body { animation: fx-blink 140ms steps(1, end) 3; }
+.fx-die .fx-tomb { opacity: 0; }
+.fx-die.is-hit .fx-body { animation: fx-fall 1300ms forwards; }
+.fx-die.is-hit .fx-tomb { animation: fx-tomb 1650ms steps(6, end) forwards; }
+@keyframes fx-blink { 0% { opacity: 1; } 50% { opacity: 0; } }
+@keyframes fx-fall {
+  0% { transform: translate(-50%, -50%); animation-timing-function: steps(4, end); }
+  20% { transform: translate(-50%, -110%); animation-timing-function: steps(14, end); }
+  100% { transform: translate(-50%, 520%) scaleY(-1); opacity: 0; }
+}
+@keyframes fx-tomb {
+  0% { opacity: 0; transform: translate(-50%, -20%); }
+  25% { opacity: 1; transform: translate(-50%, -50%); }
+  80% { opacity: 1; transform: translate(-50%, -50%); }
+  100% { opacity: 0; transform: translate(-50%, -50%); }
+}
+
+.fx-merge { position: absolute; left: 50%; top: 120px; display: grid; justify-items: center; gap: var(--space-xs); transform: translateX(-50%); animation: fx-drop 360ms steps(6, end) both; }
+.fx-merge.is-leaving { animation: fx-out 480ms steps(6, end) forwards; }
+.fx-banner { display: grid; justify-items: center; gap: var(--space-2xs); padding: var(--space-sm) var(--space-lg); background: var(--color-paper-3); border: 3px solid var(--sprite-yellow); box-shadow: 6px 6px 0 var(--sprite-dark); }
+.fx-word { font-family: var(--font-num); font-size: 1.5rem; letter-spacing: 0.08em; color: var(--sprite-yellow); text-shadow: 3px 3px 0 var(--sprite-red); animation: fx-flash 260ms steps(1, end) 5; }
+.fx-pr { display: inline-flex; gap: var(--space-xs); font-family: var(--font-num); font-size: 0.7rem; color: var(--color-ink); }
+.fx-ticket { color: var(--color-cool); }
+.fx-title { max-width: 44ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-sm); color: var(--color-ink-2); }
+.fx-hero { animation: fx-jump 560ms steps(7, jump-none) 4; }
+.fx-plus { font-family: var(--font-num); font-size: 0.8rem; color: var(--sprite-yellow); opacity: 0; animation: fx-rise 1300ms steps(8, end) 500ms both; }
+.fx-burst { position: absolute; left: calc(50% + var(--bx)); top: calc(70px + var(--by)); width: 0; height: 0; }
+.fx-burst i { position: absolute; left: -3px; top: -3px; width: 6px; height: 6px; background: var(--c); opacity: 0; animation: fx-spark 950ms steps(8, end) var(--d) forwards; }
+@keyframes fx-drop { from { transform: translate(-50%, -40px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+@keyframes fx-out { to { transform: translate(-50%, -30px); opacity: 0; } }
+@keyframes fx-flash { 0% { opacity: 1; } 50% { opacity: 0.35; } }
+@keyframes fx-jump { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-30px); } }
+@keyframes fx-rise { 0% { opacity: 0; transform: translateY(10px); } 20% { opacity: 1; } 100% { opacity: 0; transform: translateY(-40px); } }
+@keyframes fx-spark { 0% { opacity: 1; transform: translate(0, 0); } 75% { opacity: 1; } 100% { opacity: 0; transform: translate(var(--dx), calc(var(--dy) + 18px)); } }
+
+/* help: replay the moments */
+.arcade-row { display: flex; flex-wrap: wrap; gap: var(--space-xs); margin-top: var(--space-xs); }
+
+@media (prefers-reduced-motion: reduce) {
+  .pr-stage, .pr-head, .pr-mini { transition: none; }
+  .fx-die .fx-body, .fx-die.is-hit .fx-body, .fx-die.is-hit .fx-tomb, .fx-merge, .fx-word, .fx-hero, .fx-plus,
+  .term-tab.is-spawning, .term-tab.is-building > *, .tool--agent:hover .spr-buddy { animation: none; }
+  .fx-die.is-hit .fx-tomb { opacity: 1; }
+}
+
+/* narrow panels: the title keeps its room, the repo and number give way first */
+.tree-row .tree-title { flex: 0 1 auto; min-width: 8ch; }
+.tree-row .id { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+@container (max-width: 46rem) { .tree-row .id { display: none; } }
+/* Beside the section rail the list column is narrow: merged rows give their ticket chip to the
+   title (the ticket is in most titles anyway); open, pushed and declined rows keep theirs. */
+@container (max-width: 30rem) {
+  .tree-row.is-merge .tree-ticket { display: none; }
+  .section-visual { padding: var(--space-sm) var(--space-2xs); }
+  .tree { column-gap: var(--space-xs); }
+  .tree-row .tree-title { min-width: 5ch; }
+}
+
+/* ------------------------------------------------------- copy review comments */
+.threads-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-xs) var(--space-sm); margin-bottom: var(--space-lg); padding-bottom: var(--space-sm); border-bottom: var(--rule-hair) dashed var(--color-rule-2); }
+.threads-sum { margin: 0 auto 0 0; font-size: var(--text-sm); color: var(--color-muted); }
+.tool-copy { display: inline-flex; align-items: center; gap: var(--space-xs); }
+.tool-copy .spr { color: var(--color-ink-2); }
+.tool-copy.is-copied { border-color: var(--color-ok); color: var(--color-ok); }
+.tool-copy.is-copied .spr { color: var(--color-ok); animation: copy-pop 320ms steps(3, end); }
+.tool-copy.is-icon { min-height: 28px; padding: 0 var(--space-2xs); }
+@keyframes copy-pop { 0% { transform: scale(0.6); } 60% { transform: scale(1.25); } 100% { transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .tool-copy.is-copied .spr { animation: none; } }
+
+/* ------------------------------------------------------------- loading screen
+   A title screen while the first data loads: the icon drops in and bobs, the name waves,
+   and the desk bot walks a segmented bar that fills with the real load steps. It leaves
+   through venetian blinds. A pure CSS failsafe hides it if the script never runs. */
+.boot {
+  position: fixed; inset: 0; z-index: calc(var(--z-tooltip) + 10); display: grid; place-items: center; overflow: hidden;
+  color: var(--color-ink); font-family: var(--font-num); letter-spacing: 0;
+  animation: boot-failsafe 1ms linear 15s forwards;
+}
+.boot::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(0deg, oklch(0% 0 0 / 0.16) 0 1px, transparent 1px 3px); transition: opacity 120ms steps(2, end); }
+.boot-blinds { position: absolute; inset: 0; display: grid; grid-template-rows: repeat(8, 1fr); }
+.boot-blinds i { display: block; margin-bottom: -1px; background: var(--color-paper); transform-origin: 50% 0; }
+.boot-blinds i:nth-child(even) { transform-origin: 50% 100%; }
+.boot-blinds i:nth-child(2) { --k: 1; } .boot-blinds i:nth-child(3) { --k: 2; } .boot-blinds i:nth-child(4) { --k: 3; }
+.boot-blinds i:nth-child(5) { --k: 4; } .boot-blinds i:nth-child(6) { --k: 5; } .boot-blinds i:nth-child(7) { --k: 6; } .boot-blinds i:nth-child(8) { --k: 7; }
+.boot-stars { position: absolute; inset: 0; pointer-events: none; }
+.boot-stars::before, .boot-stars::after { content: ""; position: absolute; top: 0; left: 0; width: 3px; height: 3px; }
+.boot-stars::before {
+  box-shadow: 8vw 12vh var(--color-ink-2), 22vw 70vh var(--color-cool), 35vw 22vh var(--color-ink-2), 48vw 88vh var(--color-accent), 61vw 9vh var(--color-cool),
+    74vw 64vh var(--color-ink-2), 88vw 30vh var(--color-ink-2), 93vw 84vh var(--color-cool), 15vw 44vh var(--color-accent), 80vw 47vh var(--color-ink-2);
+  animation: boot-twinkle 1.6s steps(1, end) infinite;
+}
+.boot-stars::after {
+  box-shadow: 4vw 86vh var(--color-cool), 18vw 8vh var(--color-ink-2), 29vw 53vh var(--color-ink-2), 42vw 4vh var(--color-cool), 55vw 76vh var(--color-ink-2),
+    67vw 36vh var(--color-accent), 84vw 13vh var(--color-cool), 96vw 58vh var(--color-ink-2), 38vw 94vh var(--color-ink-2), 70vw 92vh var(--color-cool);
+  animation: boot-twinkle 1.6s steps(1, end) 0.8s infinite;
+}
+.boot-stage { position: relative; display: flex; flex-direction: column; align-items: center; gap: var(--space-lg); padding: var(--space-xl) var(--space-md); text-align: center; }
+.boot-hero { display: grid; justify-items: center; gap: var(--space-sm); }
+.boot-hero img { display: block; width: 112px; height: 112px; animation: boot-drop 640ms steps(8, end) both, boot-bob 900ms steps(1, end) 640ms infinite; }
+.boot-shadow { width: 72px; height: 8px; background: oklch(0% 0 0 / 0.5); animation: boot-shadow 900ms steps(1, end) 640ms infinite; }
+.boot-title { margin: 0; font-size: clamp(18px, 4.2vw, 30px); line-height: 1; color: var(--color-ink); text-shadow: 3px 3px 0 var(--sprite-blue-deep); white-space: nowrap; }
+.boot-title span { display: inline-block; animation: boot-letter 1ms steps(1, end) calc(300ms + var(--i) * 70ms) both, boot-wave 1.4s steps(1, end) calc(1s + var(--i) * 90ms) infinite; }
+.boot-bar { position: relative; width: min(320px, 72vw); height: 22px; margin-top: 46px; padding: 3px; border: 3px solid var(--color-ink-2); box-shadow: 0 0 0 3px var(--color-paper), 0 0 0 6px var(--color-rule-2); }
+.boot-fill { display: block; height: 100%; width: calc(var(--p, 0) * 100%); background: repeating-linear-gradient(90deg, var(--color-cool) 0 11px, transparent 11px 14px); transition: width 360ms steps(6, end); }
+.boot-runner { position: absolute; bottom: calc(100% + 6px); left: calc(3px + var(--p, 0) * (100% - 6px)); transform: translateX(-50%); transition: left 360ms steps(6, end); line-height: 0; }
+.boot-status { margin: 0; min-height: 1.4em; font-size: 10px; line-height: 1.4; color: var(--color-muted); }
+.boot-dots { display: inline-block; width: 3ch; overflow: hidden; vertical-align: bottom; text-align: left; animation: boot-dots 1.2s steps(4, jump-none) infinite; }
+.boot-hint { margin: 0; font-size: 9px; color: var(--color-accent); visibility: hidden; }
+.boot.is-ready .boot-status { color: var(--color-ok); }
+.boot.is-ready .boot-dots { visibility: hidden; }
+.boot.is-ready .boot-hint { visibility: visible; animation: boot-blink 700ms steps(1, end) infinite; }
+.boot.is-error .boot-status { color: var(--color-bad); }
+.boot.is-leaving { pointer-events: none; }
+.boot.is-leaving::after, .boot.is-leaving .boot-stars { opacity: 0; }
+.boot.is-leaving .boot-stage { animation: boot-out 180ms steps(2, end) forwards; }
+.boot.is-leaving .boot-blinds i { animation: boot-blind 300ms steps(4, end) calc(140ms + var(--k, 0) * 35ms) forwards; }
+@keyframes boot-failsafe { to { visibility: hidden; pointer-events: none; } }
+@keyframes boot-drop { from { transform: translateY(-55vh); } 75% { transform: translateY(10px); } to { transform: translateY(0); } }
+@keyframes boot-bob { 50% { transform: translateY(-6px); } }
+@keyframes boot-shadow { 50% { transform: scaleX(0.78); opacity: 0.7; } }
+@keyframes boot-letter { from { visibility: hidden; } to { visibility: visible; } }
+@keyframes boot-wave { 0%, 40%, 100% { transform: none; } 10% { transform: translateY(-6px); } 20% { transform: translateY(-3px); } }
+@keyframes boot-dots { from { width: 0; } to { width: 3ch; } }
+@keyframes boot-blink { 50% { visibility: hidden; } }
+@keyframes boot-twinkle { 50% { opacity: 0.25; } }
+@keyframes boot-out { to { opacity: 0; transform: scale(0.96); } }
+@keyframes boot-blind { to { transform: scaleY(0); } }
+@media (prefers-reduced-motion: reduce) {
+  .boot-hero img, .boot-shadow, .boot-title span, .boot-stars::before, .boot-stars::after, .boot-dots, .boot.is-ready .boot-hint { animation: none; }
+  .boot-fill, .boot-runner { transition: none; }
+  .boot.is-leaving { opacity: 0; transition: opacity 150ms linear; }
+  .boot.is-leaving .boot-stage, .boot.is-leaving .boot-blinds i { animation: none; }
+}

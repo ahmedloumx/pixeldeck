@@ -1,0 +1,17 @@
+# Your settings and token. Never commit them: .env.example is the template.
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Local work that is not part of PixelDeck
+.hallmark/
+proposals/
+*.log
+.DS_Store
+Thumbs.db

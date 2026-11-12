@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="desk-token" content="__DESK_TOKEN__">
+<meta name="description" content="Your Bitbucket pull requests, diffs, review threads and merges, with Claude running in the same window.">
+<meta name="color-scheme" content="dark">
+<title>PixelDeck</title>
+<link rel="icon" href="/static/app-icon.svg" type="image/svg+xml">
+<link rel="preload" href="/static/fonts/press-start-2p.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/static/vendor/xterm.css">
+<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/static/workspace.css">
+<link rel="stylesheet" href="/static/arcade.css">
+<script src="/static/vendor/xterm.js" defer></script>
+<script src="/static/vendor/addon-fit.js" defer></script>
+<script src="/static/layout.js" defer></script>
+<script src="/static/sprites.js" defer></script>
+<script src="/static/visuals.js" defer></script>
+<script src="/static/term.js" defer></script>
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+<div class="boot" id="boot" role="status" aria-live="polite" style="--p:0.12">
+  <div class="boot-blinds" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+  <div class="boot-stars" aria-hidden="true"></div>
+  <div class="boot-stage">
+    <div class="boot-hero" aria-hidden="true"><img src="/static/app-icon.svg" alt="" width="112" height="112"><span class="boot-shadow"></span></div>
+    <p class="boot-title" aria-label="PixelDeck"><span style="--i:0">P</span><span style="--i:1">I</span><span style="--i:2">X</span><span style="--i:3">E</span><span style="--i:4">L</span><span style="--i:5">D</span><span style="--i:6">E</span><span style="--i:7">C</span><span style="--i:8">K</span></p>
+    <div class="boot-bar" aria-hidden="true"><span class="boot-fill"></span><span class="boot-runner"></span></div>
+    <p class="boot-status"><span id="boot-step">LOADING ASSETS</span><span class="boot-dots" aria-hidden="true">...</span></p>
+    <p class="boot-hint" aria-hidden="true">PRESS ANY KEY</p>
+  </div>
+</div>
+<header class="bar">
+  <div class="bar-inner">
+    <a class="brand" href="#/me/needs" aria-label="PixelDeck">
+      <img src="/static/app-icon.svg" alt="" width="30" height="30">
+      <span>PixelDeck</span>
+    </a>
+    <label class="field"><span class="visually-hidden">Project</span><select id="project"></select></label>
+    <label class="field"><span class="visually-hidden">Whose pull requests to show</span><select id="person"></select></label>
+    <label class="field search"><span class="visually-hidden">Filter pull requests</span>
+      <input type="search" id="filter" placeholder="Filter: repo, branch, title, ticket" autocomplete="off"></label>
+    <details class="menu" id="layout-menu">
+      <summary class="btn btn--quiet">Layout</summary>
+      <div class="menu-pop">
+        <p class="menu-label">Arrange</p>
+        <div class="menu-row">
+          <button class="btn" type="button" data-action="preset-split">Split</button>
+          <button class="btn" type="button" data-action="preset-compact">Tabs</button>
+        </div>
+        <p class="menu-label">Panels</p>
+        <div class="menu-list" id="panels-menu-list"></div>
+        <p class="menu-hint">Drag a panel's tab onto another area to move it. Drag the dividers to resize.</p>
+      </div>
+    </details>
+    <div class="sync">
+      <span class="energy" id="energy" role="img" aria-label="Bitbucket API calls left this hour"></span>
+      <span class="sync-text" id="sync-text">not synced</span>
+      <button class="btn btn--quiet" id="refresh" type="button"><span class="spin" aria-hidden="true"></span>Refresh</button>
+    </div>
+  </div>
+</header>
+
+<main class="workspace" id="workspace" aria-label="Workspace"></main>
+
+<dialog class="team-dialog" id="team-dialog" aria-labelledby="team-title">
+  <form method="dialog" class="team-form" id="team-form">
+    <header class="team-head"><h2 id="team-title">Your team</h2><p>Their pull requests refresh every 15 minutes.</p></header>
+    <label class="field"><span class="visually-hidden">Search people</span><input type="search" id="team-search" placeholder="Search people" autocomplete="off"></label>
+    <div class="team-list" id="team-list"></div>
+    <footer class="team-foot">
+      <span id="team-count"></span>
+      <button class="btn btn--quiet" value="cancel" type="submit">Cancel</button>
+      <button class="btn btn--primary" id="team-save" type="button">Save team</button>
+    </footer>
+  </form>
+</dialog>
+
+<dialog class="pr-dialog" id="pr-dialog" aria-labelledby="pr-dialog-title"><div class="pr-dialog-body" id="pr-dialog-body"></div></dialog>
+
+<dialog class="help-dialog" id="help-dialog" aria-labelledby="help-title">
+  <h2 id="help-title">Keys</h2>
+  <dl class="keys">
+    <div><dt><kbd>j</kbd> <kbd>k</kbd></dt><dd>Move through the queue</dd></div>
+    <div><dt><kbd>Enter</kbd></dt><dd>Open the pull request</dd></div>
+    <div><dt><kbd>1</kbd> to <kbd>5</kbd></dt><dd>Overview, files, threads, commits, tasks</dd></div>
+    <div><dt><kbd>n</kbd> <kbd>b</kbd></dt><dd>Next and previous file in the diff</dd></div>
+    <div><dt><kbd>v</kbd></dt><dd>Mark the file viewed and jump to the next</dd></div>
+    <div><dt><kbd>f</kbd></dt><dd>Fold the pull request header away, or bring it back</dd></div>
+    <div><dt><kbd>q</kbd> <kbd>p</kbd> <kbd>i</kbd> <kbd>t</kbd></dt><dd>Queue, pull request, insights, terminal</dd></div>
+    <div><dt><kbd>/</kbd></dt><dd>Filter</dd></div>
+    <div><dt><kbd>r</kbd></dt><dd>Refresh from Bitbucket</dd></div>
+    <div><dt><kbd>?</kbd></dt><dd>This list</dd></div>
+  </dl>
+  <p class="menu-hint">Shift-click a Claude button to open it in its own terminal window.</p>
+  <p class="menu-label">Arcade</p>
+  <div class="arcade-row">
+    <button class="btn btn--quiet" type="button" data-action="fx-merge">Play the merge</button>
+    <button class="btn btn--quiet" type="button" data-action="fx-die">Play a delete</button>
+    <button class="btn btn--quiet" type="button" data-action="fx-run">Play a new shell</button>
+  </div>
+  <button class="btn" type="button" data-action="close-help">Close</button>
+</dialog>
+
+<div class="tooltip" id="tooltip" role="tooltip" hidden></div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+<div class="fx-layer" id="fx" aria-hidden="true"></div>
+</body>
+</html>

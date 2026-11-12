@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>PixelDeck documentation</title>
+<meta name="description" content="How PixelDeck is built, how to set it up on Linux, macOS and Windows, its security model, and what it costs to run.">
+<link rel="icon" href="../static/app-icon.svg" type="image/svg+xml">
+<style>
+@font-face { font-family: "Press Start 2P"; src: url("../static/fonts/press-start-2p.woff2") format("woff2"); font-display: swap; }
+@font-face { font-family: "Pixelify Sans"; src: url("../static/fonts/pixelify-sans.woff2") format("woff2"); font-weight: 400 700; font-display: swap; }
+@font-face { font-family: "Host Grotesk"; src: url("../static/fonts/host-grotesk.woff2") format("woff2"); font-weight: 400 500; font-display: swap; }
+
+:root {
+  --paper: oklch(17% 0.008 250);
+  --paper-2: oklch(21% 0.009 250);
+  --paper-3: oklch(13.5% 0.007 250);
+  --ink: oklch(95% 0.005 250);
+  --ink-2: oklch(83% 0.008 250);
+  --muted: oklch(71% 0.01 250);
+  --rule: oklch(31% 0.01 250);
+  --rule-2: oklch(42% 0.012 250);
+  --blue: oklch(54% 0.2 263);
+  --blue-deep: oklch(38% 0.15 263);
+  --cool: oklch(78% 0.11 262);
+  --amber: oklch(82% 0.15 80);
+  --green: oklch(76% 0.15 150);
+  --red: oklch(70% 0.17 25);
+  --pixel: "Press Start 2P", "Pixelify Sans", monospace;
+  --block: "Pixelify Sans", system-ui, sans-serif;
+  --body: "Host Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --mono: "Adwaita Mono", "SF Mono", "Cascadia Mono", "Noto Sans Mono", ui-monospace, monospace;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0; background: var(--paper-3); color: var(--ink); font: 400 16px/1.6 var(--body);
+  background-image: linear-gradient(var(--paper) 1px, transparent 1px), linear-gradient(90deg, var(--paper) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+/* CRT scanlines over everything, never in the way of a click */
+body::after { content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 10; background: repeating-linear-gradient(0deg, oklch(0% 0 0 / 0.12) 0 1px, transparent 1px 3px); }
+a { color: var(--cool); text-underline-offset: 3px; }
+a:hover { color: var(--amber); }
+code { font-family: var(--mono); font-size: 0.88em; padding: 1px 5px; background: var(--paper-3); border: 1px solid var(--rule); }
+pre { margin: 12px 0; padding: 14px 16px; overflow-x: auto; background: var(--paper-3); border: 3px solid var(--rule-2); font: 14px/1.5 var(--mono); }
+pre code { padding: 0; border: 0; background: none; }
+strong { color: var(--ink); font-weight: 500; }
+.wrap { width: min(1080px, 100% - 32px); margin: 0 auto; padding: 40px 0 80px; }
+
+/* ---------------------------------------------------------- title screen */
+.hero { position: relative; display: grid; justify-items: center; gap: 18px; padding: 56px 16px 40px; text-align: center; border: 4px solid var(--ink-2); background: var(--paper); box-shadow: 0 0 0 4px var(--paper-3), 0 0 0 8px var(--rule-2), 10px 10px 0 8px oklch(0% 0 0 / 0.5); }
+.hero img { width: 96px; height: 96px; animation: bob 1s steps(1, end) infinite; }
+.hero h1 { margin: 0; font: 400 clamp(22px, 5vw, 44px)/1.15 var(--pixel); letter-spacing: 1px; text-shadow: 4px 4px 0 var(--blue-deep); }
+.hero .sub { max-width: 46ch; margin: 0; color: var(--ink-2); font: 400 19px/1.45 var(--block); }
+.hero .start { margin: 6px 0 0; color: var(--amber); font: 400 12px var(--pixel); animation: blink 1.1s steps(1, end) infinite; }
+.hero .meta { margin: 0; color: var(--muted); font: 400 9px/1.8 var(--pixel); }
+.stars { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.stars i { position: absolute; width: 3px; height: 3px; background: var(--ink-2); animation: twinkle 1.6s steps(1, end) infinite; }
+@keyframes bob { 50% { transform: translateY(-6px); } }
+@keyframes blink { 50% { visibility: hidden; } }
+@keyframes twinkle { 50% { opacity: 0.2; } }
+
+/* ---------------------------------------------------------- level select */
+.levels { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; margin: 36px 0 12px; padding: 0; list-style: none; }
+.levels a { display: flex; align-items: center; gap: 10px; padding: 10px 12px; color: var(--ink-2); text-decoration: none; background: var(--paper); border: 3px solid var(--rule-2); font: 500 15px var(--body); }
+.levels a span { flex: none; color: var(--amber); font: 400 9px var(--pixel); white-space: nowrap; }
+.levels a:hover, .levels a:focus-visible { color: var(--ink); border-color: var(--ink-2); box-shadow: 4px 4px 0 var(--blue-deep); transform: translate(-2px, -2px); outline: none; }
+
+/* ---------------------------------------------------------- stages */
+h2 { display: flex; align-items: baseline; gap: 14px; margin: 64px 0 18px; font: 400 clamp(14px, 2.4vw, 18px)/1.4 var(--pixel); scroll-margin-top: 20px; }
+h2 .lvl { flex: none; padding: 6px 8px; color: var(--paper-3); background: var(--amber); font-size: 9px; }
+h3 { margin: 0 0 10px; color: var(--cool); font: 500 18px/1.3 var(--block); }
+p { margin: 0 0 12px; max-width: 72ch; }
+.card { margin-bottom: 18px; padding: 20px 22px; background: var(--paper); border: 3px solid var(--rule-2); box-shadow: 6px 6px 0 oklch(0% 0 0 / 0.45); }
+.card > :last-child { margin-bottom: 0; }
+.grid { display: grid; gap: 18px; }
+.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 760px) { .cols-2, .cols-4 { grid-template-columns: minmax(0, 1fr); } }
+ul.list { margin: 0; padding-left: 1.3em; list-style: square; }
+ul.list li { margin: 0 0 8px; max-width: 74ch; }
+ul.list li::marker { color: var(--amber); }
+.note { padding: 14px 18px; border: 3px dashed var(--amber); background: oklch(29% 0.05 80 / 0.35); }
+.note.warn { border-color: var(--red); background: oklch(24.5% 0.035 25 / 0.5); }
+.muted { color: var(--muted); }
+.small { font-size: 14px; }
+
+/* hi-score tiles */
+.score { padding: 16px; background: var(--paper); border: 3px solid var(--rule-2); }
+.score b { display: block; color: var(--green); font: 400 clamp(16px, 2.6vw, 22px)/1.3 var(--pixel); }
+.score b.amber { color: var(--amber); } .score b.cool { color: var(--cool); }
+.score span { display: block; margin-top: 8px; color: var(--ink-2); font-size: 14px; line-height: 1.4; }
+
+/* tables */
+.scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 15px; }
+th, td { padding: 9px 12px; text-align: left; vertical-align: top; border: 2px solid var(--rule); }
+th { color: var(--amber); background: var(--paper-2); font: 400 9px/1.6 var(--pixel); text-transform: uppercase; }
+td.n { text-align: right; white-space: nowrap; font-family: var(--mono); }
+tbody tr:nth-child(even) td { background: oklch(21% 0.009 250 / 0.5); }
+.bar { height: 12px; background: repeating-linear-gradient(90deg, var(--cool) 0 9px, transparent 9px 12px); }
+.bar.amber { background: repeating-linear-gradient(90deg, var(--amber) 0 9px, transparent 9px 12px); }
+.bar.red { background: repeating-linear-gradient(90deg, var(--red) 0 9px, transparent 9px 12px); }
+.bar.green { background: repeating-linear-gradient(90deg, var(--green) 0 9px, transparent 9px 12px); }
+.yes { color: var(--green); } .part { color: var(--amber); } .no { color: var(--red); }
+
+/* architecture diagram */
+.diagram { width: 100%; height: auto; }
+.diagram .box { fill: var(--paper-2); stroke: var(--rule-2); stroke-width: 3; }
+.diagram .box.hot { stroke: var(--cool); }
+.diagram text { fill: var(--ink-2); font: 400 14px var(--body); }
+.diagram .t { fill: var(--amber); font: 400 11px var(--pixel); }
+.diagram .ln { fill: none; stroke: var(--cool); stroke-width: 3; stroke-dasharray: 6 4; marker-end: url(#arrow); }
+
+.sprite { image-rendering: pixelated; shape-rendering: crispEdges; vertical-align: middle; }
+footer { margin-top: 72px; padding-top: 18px; border-top: 3px dashed var(--rule-2); color: var(--muted); font: 400 9px/2 var(--pixel); text-align: center; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .hero img, .hero .start, .stars i { animation: none; }
+  .levels a:hover { transform: none; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="stars" aria-hidden="true">
+    <i style="left:6%;top:18%"></i><i style="left:18%;top:72%;animation-delay:.5s"></i><i style="left:31%;top:30%;background:var(--cool)"></i>
+    <i style="left:64%;top:14%;animation-delay:.8s"></i><i style="left:79%;top:64%;background:var(--amber)"></i><i style="left:91%;top:26%;animation-delay:.3s"></i>
+    <i style="left:46%;top:86%;background:var(--cool);animation-delay:1s"></i><i style="left:87%;top:88%"></i>
+  </div>
+  <img src="../static/app-icon.svg" alt="" width="96" height="96">
+  <h1>PIXELDECK</h1>
+  <p class="sub">A retro desk for your Bitbucket pull requests, with Claude Code running next to the diff.</p>
+  <p class="start">PRESS START</p>
+  <p class="meta">DOCUMENTATION &middot; LINUX MACOS WINDOWS &middot; 12 NOV 2026</p>
+</header>
+
+<nav aria-label="Sections">
+  <ul class="levels">
+    <li><a href="#glance"><span>1-1</span>At a glance</a></li>
+    <li><a href="#features"><span>1-2</span>What it does</a></li>
+    <li><a href="#setup"><span>1-3</span>Set it up</a></li>
+    <li><a href="#config"><span>2-1</span>The .env file</a></li>
+    <li><a href="#arch"><span>2-2</span>Architecture</a></li>
+    <li><a href="#stack"><span>2-3</span>Tech stack</a></li>
+    <li><a href="#flow"><span>3-1</span>Data and refresh</a></li>
+    <li><a href="#terminal"><span>3-2</span>Terminal and Claude</a></li>
+    <li><a href="#security"><span>3-3</span>Security</a></li>
+    <li><a href="#perf"><span>4-1</span>Performance</a></li>
+    <li><a href="#platforms"><span>4-2</span>Platforms</a></li>
+    <li><a href="#files"><span>4-3</span>Files</a></li>
+    <li><a href="#limits"><span>5-1</span>Limits and next</a></li>
+  </ul>
+</nav>
+
+<h2 id="glance"><span class="lvl">1-1</span>At a glance</h2>
+<div class="grid cols-4">
+  <div class="score"><b>0</b><span>third-party packages for the server: the Python standard library only (Windows adds pywinpty for the terminal)</span></div>
+  <div class="score"><b class="cool">0</b><span>build steps: no bundler, no framework, no npm install</span></div>
+  <div class="score"><b class="amber">~7,000</b><span>lines: 2,900 Python, 2,900 JavaScript, 1,200 CSS</span></div>
+  <div class="score"><b>23</b><span>unit tests, run on Python 3.12 and 3.14, plus a WebKit self-test and browser scripts</span></div>
+</div>
+<div class="grid cols-4" style="margin-top:18px">
+  <div class="score"><b class="cool">95 MB</b><span>server memory, 0% CPU when idle (measured on Linux)</span></div>
+  <div class="score"><b class="cool">336 MB</b><span>Linux app window memory, for its 3 processes</span></div>
+  <div class="score"><b class="amber">606 KB</b><span>everything the page loads, fonts and terminal included</span></div>
+  <div class="score"><b>1000/h</b><span>Bitbucket call limit it stays under; background work stops at 80%</span></div>
+</div>
+
+<h2 id="features"><span class="lvl">1-2</span>What it does</h2>
+<div class="grid cols-2">
+  <div class="card">
+    <h3>Pull requests</h3>
+    <ul class="list">
+      <li><strong>Queue</strong> by state: needs you, changes requested, open, waiting, approved, your review, pushed without a pull request, merged, declined. The sections sit in a rail beside the list and wrap above it in a narrow panel.</li>
+      <li><strong>Merge tree</strong>, colour coded: merged lanes, open pull requests (a bot stands on them), branches pushed without a pull request (a flag), declined ones (a tombstone).</li>
+      <li><strong>Pull request view</strong>: overview with the description rendered from Markdown, diff with per-file viewed marks, threads, commits, tasks. The header folds under the tab row (<code>f</code>) so the diff gets the room.</li>
+      <li><strong>Copy review comments</strong>: every thread, the open ones, or one thread, copied as plain Markdown for a Claude prompt, with file, line and status.</li>
+      <li><strong>Team and insights</strong>: teammates' queues, review load, merge history.</li>
+      <li><strong>Actions</strong>: open a pull request from a pushed branch, decline your own, delete a pushed branch. Each asks for a second click.</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Claude Code and the terminal</h3>
+    <ul class="list">
+      <li><strong>Fix</strong>, <strong>Fix and push</strong>, <strong>Read and summarize</strong> and <strong>Review</strong> start Claude Code on a pull request, in a worktree on its branch, briefed with the open threads.</li>
+      <li><strong>Terminal panel</strong>: real shells in tabs. A tab takes the title its program sets (a shell's folder, "Claude Code"), numbers duplicates, and can be renamed with a double-click or F2.</li>
+      <li>Closing the window leaves the server and its terminals running, so a Claude run is never cut off.</li>
+    </ul>
+    <h3 style="margin-top:18px">The arcade layer</h3>
+    <ul class="list">
+      <li>A <strong>title screen</strong> while the first data loads: the icon drops in, the name waves, the desk bot walks a bar that fills with the real load steps. Any key skips it.</li>
+      <li><strong>Game moments</strong>: a merge seen on refresh sets off fireworks; a deleted branch's critter is knocked out; for a new shell the bot beams to the new tab, hammers it together and beams home. <code>?</code> replays them.</li>
+      <li>Reduced motion turns every animation off.</li>
+    </ul>
+  </div>
+</div>
+
+<h2 id="setup"><span class="lvl">1-3</span>Set it up</h2>
+<div class="card">
+  <h3>1. Get it and fill in the .env</h3>
+<pre><code>git clone https://github.com/ahmedloumx/pixeldeck.git
+cd pixeldeck
+cp .env.example .env        # Windows: copy .env.example .env</code></pre>
+  <p>Set <code>BITBUCKET_EMAIL</code>, <code>BITBUCKET_TOKEN</code>, <code>BITBUCKET_WORKSPACE</code>, and <code>PIXELDECK_WORKSPACE_ROOT</code> (the folder with your clones). Create the token at <a href="https://id.atlassian.com/manage-profile/security/api-tokens">id.atlassian.com</a> with Bitbucket read access to your user, the workspace, repositories and pull requests, plus pull request write if you want to open and decline pull requests from PixelDeck. It never needs admin or delete scopes.</p>
+  <h3 style="margin-top:18px">2. Start it</h3>
+  <div class="scroll"><table>
+    <thead><tr><th>System</th><th>Start</th><th>Stop</th><th>Extras</th></tr></thead>
+    <tbody>
+      <tr><td>Linux</td><td><code>python3 pixeldeck.py</code> or <code>./run.sh</code></td><td><code>python3 pixeldeck.py --stop</code></td><td><code>./install-desktop.sh</code> adds it to the app grid and the GNOME dock. For its own window: PyGObject, GTK 4 and WebKitGTK 6 (Fedora: <code>webkitgtk6.0</code>).</td></tr>
+      <tr><td>macOS</td><td>double-click <code>PixelDeck.command</code>, or <code>python3 pixeldeck.py</code></td><td><code>python3 pixeldeck.py --stop</code></td><td>Chrome, Edge or Brave gives it an app window; otherwise it opens in your default browser.</td></tr>
+      <tr><td>Windows</td><td>double-click <code>PixelDeck.cmd</code>, or <code>py pixeldeck.py</code></td><td><code>py pixeldeck.py --stop</code></td><td><code>py -m pip install pywinpty</code> for the terminal panel. Edge, built in, gives it an app window.</td></tr>
+    </tbody>
+  </table></div>
+  <p class="small muted" style="margin-top:12px"><code>--status</code> says whether the server runs. <code>--server</code> runs it in the console, for debugging.</p>
+</div>
+
+<h2 id="config"><span class="lvl">2-1</span>The .env file</h2>
+<div class="card">
+  <p>Every setting is in one <code>.env</code> next to <code>pixeldeck.py</code>; <code>.env.example</code> lists them all with comments. A value in the real environment wins over the file. The file is re-read when it changes, so a new token works without a restart. <code>.gitignore</code> keeps <code>.env</code> out of git.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Key</th><th>What it is</th></tr></thead>
+    <tbody>
+      <tr><td><code>BITBUCKET_EMAIL</code>, <code>BITBUCKET_TOKEN</code></td><td>Your Atlassian account email and API token. Required.</td></tr>
+      <tr><td><code>BITBUCKET_WORKSPACE</code></td><td>The workspace slug, as in <code>bitbucket.org/&lt;workspace&gt;/&lt;repo&gt;</code>. Required.</td></tr>
+      <tr><td><code>BITBUCKET_PROJECT</code></td><td>Start scoped to one project key. Empty: every project. You can switch in the app.</td></tr>
+      <tr><td><code>JIRA_SITE</code>, <code>TICKET_PREFIXES</code></td><td>Turn ticket keys such as <code>ABC-123</code> in branches and titles into Jira links. With no prefixes, any key that looks like one counts, so set them when you can.</td></tr>
+      <tr><td><code>PIXELDECK_WORKSPACE_ROOT</code></td><td>The folder with your local clones: for pushed branches, worktrees and the terminal's start folder. Default: the folder PixelDeck sits in.</td></tr>
+      <tr><td><code>PIXELDECK_RELEASE_REPOS</code></td><td>Glob patterns of repos whose pull requests target master or main before develop.</td></tr>
+      <tr><td><code>PIXELDECK_BRIEFS_DIR</code></td><td>A folder of your own Claude brief templates (see Terminal and Claude).</td></tr>
+      <tr><td><code>PIXELDECK_CLAUDE</code></td><td>Path to the <code>claude</code> CLI when it is not on PATH.</td></tr>
+      <tr><td><code>PIXELDECK_BROWSER</code></td><td>A command for Bitbucket and Jira links, such as <code>firefox --new-tab</code>. Default: the system browser.</td></tr>
+      <tr><td><code>PIXELDECK_PORT</code></td><td>The local port. Default 8642.</td></tr>
+      <tr><td><code>PIXELDECK_CACHE_DIR</code>, <code>_STATE_DIR</code>, <code>_DATA_DIR</code>, <code>_CONFIG_DIR</code>, <code>PIXELDECK_SETTINGS_FILE</code></td><td>Where PixelDeck keeps things. Defaults follow each system: <code>~/.cache</code> and <code>~/.local</code> on Linux, <code>~/Library</code> on macOS, <code>%LOCALAPPDATA%</code> and <code>%APPDATA%</code> on Windows.</td></tr>
+    </tbody>
+  </table></div>
+</div>
+
+<h2 id="arch"><span class="lvl">2-2</span>Architecture</h2>
+<div class="card">
+  <svg class="diagram" viewBox="0 0 1100 440" role="img" aria-label="The window talks to a local server over loopback; the server talks to Bitbucket, git, the terminals and your browser">
+    <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="oklch(78% 0.11 262)"/></marker></defs>
+    <rect class="box hot" x="20" y="40" width="290" height="160"/>
+    <text class="t" x="40" y="72">WINDOW</text>
+    <text x="40" y="100">Linux: GTK 4 + WebKitGTK 6</text>
+    <text x="40" y="122">all: Chrome, Edge or Brave app mode</text>
+    <text x="40" y="144">page: HTML, CSS, plain JavaScript</text>
+    <text x="40" y="166">xterm.js for the terminals</text>
+    <rect class="box hot" x="400" y="40" width="310" height="370"/>
+    <text class="t" x="420" y="72">SERVER 127.0.0.1:8642</text>
+    <text x="420" y="100">server.py: routes, token on every call</text>
+    <text x="420" y="134">engine.py: cache, refresh loop, scope</text>
+    <text x="420" y="156">model.py: PRs, reviews, threads, diff</text>
+    <text x="420" y="190">gitscan.py: branches pushed, no PR</text>
+    <text x="420" y="212">actions.py: preview, create, decline</text>
+    <text x="420" y="246">launcher.py: Claude brief, worktree</text>
+    <text x="420" y="268">terminals.py: PTY or ConPTY sessions</text>
+    <text x="420" y="302">opener.py: Bitbucket and Jira links</text>
+    <text x="420" y="336">config.py: .env and folders per system</text>
+    <text x="420" y="370">bitbucket.py: REST client, call budget</text>
+    <rect class="box" x="810" y="30" width="270" height="70"/><text class="t" x="830" y="60">BITBUCKET API</text><text x="830" y="84">REST 2.0, API token</text>
+    <rect class="box" x="810" y="130" width="270" height="70"/><text class="t" x="830" y="160">GIT</text><text x="830" y="184">your clones and worktrees</text>
+    <rect class="box" x="810" y="230" width="270" height="70"/><text class="t" x="830" y="260">SHELL AND CLAUDE</text><text x="830" y="284">in pseudo-terminals</text>
+    <rect class="box" x="810" y="330" width="270" height="70"/><text class="t" x="830" y="360">YOUR BROWSER</text><text x="830" y="384">only for links you click</text>
+    <path class="ln" d="M310,104 H398"/><text x="318" y="94">HTTP</text>
+    <path class="ln" d="M398,140 H312"/><text x="318" y="162">JSON</text>
+    <path class="ln" d="M710,370 C760,370 760,65 808,65"/>
+    <path class="ln" d="M710,196 C760,196 760,165 808,165"/>
+    <path class="ln" d="M710,262 C760,262 760,265 808,265"/>
+    <path class="ln" d="M710,300 C760,300 760,365 808,365"/>
+  </svg>
+  <p class="small" style="margin-top:12px"><code>pixeldeck.py</code> starts the server if it is not already up, then opens the window. Closing the window leaves the server, its cache and its terminals alive, so the next open is instant.</p>
+</div>
+
+<h2 id="stack"><span class="lvl">2-3</span>Tech stack</h2>
+<div class="card scroll">
+  <table>
+    <thead><tr><th>Layer</th><th>What</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td>Window</td><td>Linux: Python with PyGObject, GTK 4 and WebKitGTK 6 (<code>app_window.py</code>). Elsewhere: a Chromium-family browser in <code>--app</code> mode with a profile of its own, else the default browser.</td><td>A real app window with its own dock icon and no browser bars, using the web engine the system already has: nothing bundled. Electron would ship a whole Chromium for the same result.</td></tr>
+      <tr><td>Server</td><td>Python standard library: <code>http.server</code>, <code>urllib</code>, <code>json</code>, <code>pty</code>, <code>subprocess</code>, <code>threading</code>.</td><td>Nothing to install or upgrade. It idles at 0% CPU, so the language is not the cost.</td></tr>
+      <tr><td>Terminal</td><td>Linux and macOS: <code>pty</code>. Windows: ConPTY through <code>pywinpty</code>. In the page: xterm.js 5.5.0 and its fit addon.</td><td>Real shells, and Claude Code's interface draws correctly in xterm.js.</td></tr>
+      <tr><td>Data</td><td>Bitbucket Cloud REST 2.0 with an Atlassian API token (Basic auth with your email), read from <code>.env</code>.</td><td>A rolling counter keeps it under the 1,000 calls an hour limit.</td></tr>
+      <tr><td>Storage</td><td>One JSON cache (mode 600, atomic writes), a settings file, a state folder, and the window profile, in each system's own folders.</td><td>One person's data fits in one file; no database to run.</td></tr>
+      <tr><td>Page</td><td>Plain HTML, CSS and JavaScript: <code>app.js</code>, <code>layout.js</code>, <code>term.js</code>, <code>visuals.js</code>, <code>sprites.js</code>.</td><td>No build step: edit a file, reload.</td></tr>
+      <tr><td>Look</td><td>Press Start 2P, Pixelify Sans and Host Grotesk (local woff2, 44 KB); pixel sprites drawn as SVG from small letter grids.</td><td>Everything is local: it works offline and loads no CDN.</td></tr>
+      <tr><td>Tests</td><td><code>unittest</code> (23 tests, including import tests that pretend to be Windows and macOS), a WebKit self-test mode, browser scripts.</td><td>The self-test runs headless, so checks never pop a window.</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<h2 id="flow"><span class="lvl">3-1</span>Data and refresh</h2>
+<div class="grid cols-2">
+  <div class="card">
+    <h3>What is fetched, and how often</h3>
+    <ul class="list">
+      <li>Your pull requests every 5 minutes. Teammates every 15 minutes, one per tick, so calls spread out.</li>
+      <li>Merged pull requests incrementally, with a full walk every 6 hours, over the last 120 days. Declined: the last 90 days.</li>
+      <li>Pull request detail (threads, tasks, activity) is kept 15 minutes. Diff and commits are kept per source commit, so only a new push refetches them.</li>
+      <li>The project list and each project's repositories are kept a day. Switching project costs no API calls.</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>What the page asks</h3>
+    <ul class="list">
+      <li>3 calls at start (who you are and your team, the project list, your pull requests), then a silent check every 60 seconds while the window is visible.</li>
+      <li>Opening a pull request: detail, commits and diff in parallel. File bodies in the diff are drawn only when scrolled into view.</li>
+      <li>Branches pushed without a pull request come from git, not the API: remote-tracking refs from the last 21 days in your clones, with prompts and SSH passwords disabled so a scan never hangs.</li>
+    </ul>
+  </div>
+</div>
+
+<h2 id="terminal"><span class="lvl">3-2</span>Terminal and Claude</h2>
+<div class="card">
+  <ul class="list">
+    <li>Each terminal is a real pseudo-terminal on the server, with 2 MB of scrollback, at most 10 at a time. All of them share one long streamed request, because a browser allows only 6 connections per host.</li>
+    <li>The Claude actions build a brief from the pull request and its open threads, prepare a worktree under <code>worktrees/pr/&lt;repo&gt;-&lt;id&gt;</code> (or reuse the clone already on that branch), and start <code>claude</code> in a terminal. Shift-click opens your system's own terminal instead.</li>
+    <li>Reviewer text is fenced as data in the brief, never as instructions. On Linux and macOS the brief is one argument, so no shell ever reads it. Windows caps a command line at 32,767 characters, so there the brief is written to a file and Claude is pointed at it.</li>
+    <li><strong>Your own briefs.</strong> The brief is <code>briefs/head.md</code> plus <code>summarize.md</code>, <code>review.md</code>, <code>fix.md</code> or <code>fix_push.md</code>. Copy any of them to a folder, add your house rules (a review rubric, commit conventions) and set <code>PIXELDECK_BRIEFS_DIR</code>. Placeholders such as <code>{source}</code>, <code>{dest}</code>, <code>{cwd}</code> and <code>{ticket}</code> are filled in; the threads follow the template.</li>
+    <li>Fix and Fix and push are offered only on your own pull requests. The terminals drop the variables of any Claude session the server was started from, so a nested <code>claude</code> starts cleanly.</li>
+  </ul>
+</div>
+
+<h2 id="security"><span class="lvl">3-3</span>Security</h2>
+<div class="grid cols-2">
+  <div class="card">
+    <h3>Who can talk to the server</h3>
+    <ul class="list">
+      <li>It listens on 127.0.0.1 only and refuses any other Host header, or an Origin that is not PixelDeck.</li>
+      <li>A secret made at each start is written into the page and required on every API call, so another website open in your browser cannot drive it.</li>
+      <li>Content Security Policy: scripts, styles, fonts and connections from PixelDeck only. Hidden files are never served.</li>
+      <li>Pull request text is untrusted and the window drives terminals, so the Markdown renderer escapes every character first and builds only a fixed set of tags; links must be http, https or mailto. A test feeds it hostile input.</li>
+      <li>In the Linux window, any page that is not PixelDeck opens in your browser. The server opens only https links to bitbucket.org and your Jira site.</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>What it can change, and the guards</h3>
+    <ul class="list">
+      <li>Open a pull request, decline one, delete a pushed branch, fix and push: each needs a second click.</li>
+      <li>Decline works only on your own open pull requests. Protected branches are never deleted. A branch is deleted with a lease on its exact commit, and each deletion is logged with the command that restores it.</li>
+      <li>The token is read from <code>.env</code> and sent only to api.bitbucket.org. Give it read access plus pull request write; never admin or delete scopes. Branch deletion and Claude's pushes use your own git credentials.</li>
+    </ul>
+    <p class="note warn small" style="margin-top:14px">Fix and push tells Claude to push with <code>--force-with-lease</code> on the exact remote commit, never a blind force. That is an instruction to Claude, not a check PixelDeck enforces.</p>
+  </div>
+</div>
+
+<h2 id="perf"><span class="lvl">4-1</span>Performance</h2>
+<p class="note small">Measured on Linux (Fedora, Python 3.14, WebKitGTK 2.54). Memory is PSS from <code>/proc/&lt;pid&gt;/smaps_rollup</code>, summed over each process tree, so shared libraries are split fairly. Each window loaded the same page, settled for 25 s, then CPU was sampled for 15 s, under Xvfb with software rendering: on a real desktop the GPU path shifts the numbers, the ranking holds.</p>
+<div class="card scroll" style="margin-top:18px">
+  <h3>Memory and idle CPU</h3>
+  <table>
+    <thead><tr><th>Process</th><th>Memory</th><th style="width:30%"></th><th>Idle CPU</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>Server</td><td class="n">95 MB</td><td><div class="bar green" style="width:12%"></div></td><td class="n">0.0%</td><td>Python itself is about 14 MB and the cache held as objects about 22 MB.</td></tr>
+      <tr><td><strong>Linux app window</strong></td><td class="n">336 MB</td><td><div class="bar" style="width:42%"></div></td><td class="n">3.0%</td><td>Web content 170 MB, GTK 145 MB, network 20 MB.</td></tr>
+      <tr><td>Chrome app mode</td><td class="n">370 MB</td><td><div class="bar amber" style="width:46%"></div></td><td class="n">5.0%</td><td>13 processes, with a profile of its own.</td></tr>
+      <tr><td>Firefox, fresh instance</td><td class="n">797 MB</td><td><div class="bar red" style="width:100%"></div></td><td class="n">39.9%</td><td>14 processes, measured while a new profile was still starting up.</td></tr>
+    </tbody>
+  </table>
+</div>
+<div class="grid cols-2">
+  <div class="card scroll">
+    <h3>Page weight and speed</h3>
+    <table><tbody>
+      <tr><td>Files the page loads</td><td class="n">606 KB</td></tr>
+      <tr><td>xterm (script, addon, styles)</td><td class="n">290 KB</td></tr>
+      <tr><td>Our JavaScript (5 files)</td><td class="n">160 KB</td></tr>
+      <tr><td>Fonts (3 woff2)</td><td class="n">44 KB</td></tr>
+      <tr><td>DOM ready / loaded (before the title screen was added)</td><td class="n">46 to 58 / 165 to 177 ms</td></tr>
+      <tr><td>Redraw: queue / merge tree</td><td class="n">1 / 14 to 24 ms</td></tr>
+    </tbody></table>
+    <p class="small muted" style="margin-top:10px">The title screen holds the page for at least 1.3 s by design; any key skips it.</p>
+  </div>
+  <div class="card scroll">
+    <h3>Server response, warm</h3>
+    <table>
+      <thead><tr><th>Call</th><th>Time</th><th>Size</th></tr></thead>
+      <tbody>
+        <tr><td>bootstrap</td><td class="n">5 ms</td><td class="n">3 KB</td></tr>
+        <tr><td>your pull requests</td><td class="n">13 ms</td><td class="n">1.25 MB</td></tr>
+        <tr><td>a team of 9</td><td class="n">50 ms</td><td class="n">6.7 MB</td></tr>
+        <tr><td>pull request detail</td><td class="n">0.8 ms</td><td class="n">3.5 KB</td></tr>
+        <tr><td>a 19-file diff</td><td class="n">1.5 ms</td><td class="n">144 KB</td></tr>
+      </tbody>
+    </table>
+    <p class="small muted" style="margin-top:10px">A detail not cached yet took 1.5 s: that is Bitbucket, not the server.</p>
+  </div>
+</div>
+
+<h2 id="platforms"><span class="lvl">4-2</span>Platforms</h2>
+<div class="card scroll">
+  <table>
+    <thead><tr><th>Part</th><th>Linux</th><th>macOS</th><th>Windows</th></tr></thead>
+    <tbody>
+      <tr><td>Server, queue, pull requests, actions</td><td class="yes">tested</td><td class="part">written, import-tested</td><td class="part">written, import-tested</td></tr>
+      <tr><td>Window</td><td class="yes">own GTK window and Chrome app mode, tested</td><td class="part">Chrome, Edge or Brave app mode (the code path tested on Linux)</td><td class="part">Edge app mode (the code path tested on Linux)</td></tr>
+      <tr><td>Terminal panel</td><td class="yes">pty, tested</td><td class="part">pty (same code as Linux)</td><td class="part">ConPTY via pywinpty</td></tr>
+      <tr><td>Shift-click terminal</td><td class="yes">Ptyxis, tested; <span class="part">GNOME Terminal, Konsole, Xfce written</span></td><td class="part">Terminal.app</td><td class="part">Windows Terminal, else cmd</td></tr>
+      <tr><td>Launcher</td><td class="yes"><code>run.sh</code>, app grid, dock</td><td class="part"><code>PixelDeck.command</code></td><td class="part"><code>PixelDeck.cmd</code></td></tr>
+      <tr><td>Folders</td><td>XDG</td><td><code>~/Library</code></td><td><code>%APPDATA%</code>, <code>%LOCALAPPDATA%</code></td></tr>
+    </tbody>
+  </table>
+  <p class="note small" style="margin-top:14px">"Import-tested" means a test loads every module while pretending to be that system (with the Unix-only modules blocked for Windows) and checks the folders, the terminal backend and the shell it picks. The macOS and Windows paths have not yet run on a real Mac or Windows machine.</p>
+</div>
+
+<h2 id="files"><span class="lvl">4-3</span>Files</h2>
+<div class="card scroll">
+  <table>
+    <thead><tr><th>File</th><th>Lines</th><th>Role</th></tr></thead>
+    <tbody>
+      <tr><td><code>pixeldeck.py</code></td><td class="n">165</td><td>Start, stop, status; picks the best window for the system.</td></tr>
+      <tr><td><code>config.py</code></td><td class="n">167</td><td>The <code>.env</code>, and each system's folders.</td></tr>
+      <tr><td><code>server.py</code></td><td class="n">443</td><td>Routes, Host and token checks, CSP, the terminal stream.</td></tr>
+      <tr><td><code>engine.py</code></td><td class="n">470</td><td>Cache, refresh loop, merged and declined windows, project scope.</td></tr>
+      <tr><td><code>model.py</code></td><td class="n">298</td><td>Pull requests, reviews, threads, timelines, parsed diffs, ticket keys.</td></tr>
+      <tr><td><code>app_window.py</code></td><td class="n">263</td><td>The Linux window: WebKit view, pop-outs, links to the browser, self-test.</td></tr>
+      <tr><td><code>terminals.py</code></td><td class="n">242</td><td>Terminal sessions: pty on Linux and macOS, ConPTY on Windows.</td></tr>
+      <tr><td><code>launcher.py</code></td><td class="n">232</td><td>Claude brief from templates, worktree, launch.</td></tr>
+      <tr><td><code>bitbucket.py</code></td><td class="n">194</td><td>REST client, paging, the hourly call counter.</td></tr>
+      <tr><td><code>actions.py</code></td><td class="n">184</td><td>Open a pull request, delete a pushed branch, decline.</td></tr>
+      <tr><td><code>gitscan.py</code>, <code>opener.py</code>, <code>check_api.py</code></td><td class="n">261</td><td>Branches pushed without a pull request; opening links; an API shape check.</td></tr>
+      <tr><td><code>briefs/</code></td><td class="n">62</td><td>The default Claude brief templates.</td></tr>
+      <tr><td><code>static/</code> scripts</td><td class="n">2,910</td><td><code>app.js</code> (queue, pull request view, Markdown, copy, title screen), <code>layout.js</code> (panels), <code>sprites.js</code> (pixel characters), <code>term.js</code> (terminal tabs), <code>visuals.js</code> (merge tree, age bars).</td></tr>
+      <tr><td><code>static/</code> styles</td><td class="n">1,175</td><td>Tokens, base, app, workspace, arcade.</td></tr>
+      <tr><td><code>run.sh</code>, <code>install-desktop.sh</code>, <code>PixelDeck.command</code>, <code>PixelDeck.cmd</code></td><td class="n">65</td><td>Launchers for each system; the Linux app grid and dock entry.</td></tr>
+      <tr><td><code>tests/test_desk.py</code></td><td class="n">384</td><td>23 tests.</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<h2 id="limits"><span class="lvl">5-1</span>Limits and next</h2>
+<div class="card">
+  <ul class="list">
+    <li>Run it on a real Mac and a real Windows machine, and fix what turns up.</li>
+    <li>Compress API responses, or slim the team payload to what the views draw: 6.7 MB of JSON would be 374 KB compressed.</li>
+    <li>Two windows showing the same terminal fight over its size: the last one to resize wins.</li>
+    <li>Bitbucket Cloud only. Bitbucket Data Center, GitHub and GitLab are not supported.</li>
+  </ul>
+</div>
+
+<footer>
+  PIXELDECK &middot; MIT LICENSE &middot; FONTS UNDER THE SIL OPEN FONT LICENSE &middot; XTERM.JS UNDER MIT<br>
+  NOT AFFILIATED WITH ATLASSIAN OR ANTHROPIC
+</footer>
+
+</div>
+</body>
+</html>

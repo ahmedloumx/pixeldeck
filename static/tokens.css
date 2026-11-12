@@ -1,0 +1,42 @@
+@font-face { font-family: "Host Grotesk"; src: url("fonts/host-grotesk.woff2") format("woff2"); font-weight: 400 500; font-display: swap; }
+@font-face { font-family: "Pixelify Sans"; src: url("fonts/pixelify-sans.woff2") format("woff2"); font-weight: 400 700; font-display: swap; }
+@font-face { font-family: "Press Start 2P"; src: url("fonts/press-start-2p.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+:root {
+  color-scheme: dark;
+  --space-3xs: 2px; --space-2xs: 4px; --space-xs: 8px; --space-sm: 12px; --space-md: 16px; --space-lg: 24px; --space-xl: 40px; --space-2xl: 64px; --space-3xl: 96px; --space-4xl: 144px;
+  --text-xs: 0.75rem; --text-sm: 0.875rem; --text-md: 1rem; --text-lg: 1.2rem; --text-xl: 1.44rem; --text-2xl: 1.728rem; --text-3xl: 2.074rem;
+  --text-display-s: 1.44rem; --text-display: 1.728rem; --text-section: 1.2rem; --text-title: 1rem; --text-lead: 1rem;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1); --ease-in: cubic-bezier(0.7, 0, 0.84, 0); --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-micro: 120ms; --dur-short: 220ms; --dur-long: 420ms;
+  --color-error: oklch(72% 0.15 27); --color-success: oklch(76% 0.13 150);
+  --container: 1440px; --gutter: 64px; --gap-columns: 32px; --section-gap-s: 120px; --section-gap: 144px; --section-gap-l: 176px;
+  --z-base: 1; --z-raised: 10; --z-dropdown: 100; --z-sticky: 200; --z-sticky-nav: 300; --z-modal: 400; --z-toast: 500; --z-tooltip: 600;
+  --color-paper: oklch(17% 0.008 250); --color-paper-2: oklch(21% 0.009 250); --color-paper-3: oklch(13.5% 0.007 250);
+  --color-ink: oklch(95% 0.005 250); --color-ink-2: oklch(83% 0.008 250); --color-muted: oklch(71% 0.01 250);
+  --color-rule: oklch(31% 0.01 250); --color-rule-2: oklch(42% 0.012 250);
+  --color-accent: oklch(82% 0.15 80); --color-accent-ink: oklch(18% 0.04 75); --color-accent-soft: oklch(29% 0.05 80); --color-focus: oklch(82% 0.15 80);
+  --color-cool: oklch(78% 0.11 262); --color-cool-soft: oklch(29% 0.05 262);
+  --color-ok: oklch(76% 0.15 150); --color-ok-soft: oklch(24.5% 0.03 150); --color-bad: oklch(70% 0.17 25); --color-bad-soft: oklch(24.5% 0.035 25);
+  --font-display: "Host Grotesk", ui-sans-serif, system-ui, sans-serif; --font-body: var(--font-display);
+  --font-outlier: "Adwaita Mono", "Noto Sans Mono", "Liberation Mono", ui-monospace, monospace;
+  --radius-card: 10px; --radius-pill: 6px; --rule-hair: 1px;
+  --shadow-card: none;
+  --tracking-display: -0.03em; --display-weight: 500;
+  --bar-height: 60px; --drawer-width: min(640px, 100%); --control: 36px;
+  --font-pixel: "Pixelify Sans", var(--font-display);
+  --font-num: "Press Start 2P", var(--font-pixel);
+  --font-term: var(--font-outlier);
+  --slot-head: 38px;
+  --color-accent-deep: oklch(58% 0.13 68); --color-cool-deep: oklch(52% 0.12 262); --color-bad-deep: oklch(50% 0.15 25);
+  --color-scan: oklch(95% 0.005 250 / 0.025);
+  --pixel: 2px;
+  --heat-0: oklch(23% 0.012 262); --heat-1: oklch(38% 0.07 262); --heat-2: oklch(52% 0.1 262); --heat-3: oklch(66% 0.12 262); --heat-4: oklch(82% 0.11 262);
+  --color-scrim: oklch(10% 0.006 250 / 0.6);
+  --sprite-orange: oklch(68% 0.135 41); --sprite-orange-deep: oklch(55% 0.13 38);
+  --sprite-blue: oklch(54% 0.2 263); --sprite-blue-deep: oklch(38% 0.15 263);
+  --sprite-yellow: oklch(84% 0.165 85); --sprite-red: oklch(62% 0.2 27);
+  --sprite-white: oklch(97% 0.005 250); --sprite-dark: oklch(16% 0.01 250);
+  --sprite-stone: oklch(64% 0.01 250); --sprite-stone-deep: oklch(44% 0.01 250);
+  --sprite-grass: oklch(64% 0.15 145); --sprite-amber: oklch(82% 0.15 80);
+  --dur-fold: 420ms;
+}
