@@ -39,6 +39,29 @@ def _repo_dir(root, repo):
     return repo_dir
 
 
+def remote_tip(root, repo, branch):
+    """The branch's commit on the remote right now, after a fetch."""
+    repo_dir = _repo_dir(root, repo)
+    gitscan.git(repo_dir, "fetch", "--quiet", "origin", branch, timeout=90)
+    return gitscan.git(repo_dir, "rev-parse", f"origin/{branch}").strip()
+
+
+DIFF_MAX = 400_000  # bytes of diff text read for the popup; a larger diff is cut and says so
+
+
+def branch_diff(root, repo, branch, dest):
+    """The diff a pull request from branch into dest would show, parsed, for the popup."""
+    repo_dir = _repo_dir(root, repo)
+    for ref in (branch, dest):
+        if not isinstance(ref, str) or not ref or ref.startswith("-") or not _ref_exists(repo_dir, f"refs/remotes/origin/{ref}"):
+            raise ValueError(f"unknown branch {ref!r}")
+    text = gitscan.git(repo_dir, "diff", "--no-color", "--no-ext-diff", f"origin/{dest}...origin/{branch}", timeout=60)
+    cut = len(text) > DIFF_MAX
+    if cut:
+        text = text[:DIFF_MAX].rsplit("\ndiff --git ", 1)[0]
+    return {"files": model.parse_diff(text), "cut": cut}
+
+
 def _ref_exists(repo_dir, ref):
     try:
         gitscan.git(repo_dir, "rev-parse", "--verify", "--quiet", ref)

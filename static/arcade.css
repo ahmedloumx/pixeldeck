@@ -307,3 +307,17 @@
 .sync-bar.is-nudge { animation: sync-nudge 420ms steps(6, end); }
 @keyframes sync-nudge { 20%, 60% { transform: translateX(-4px); } 40%, 80% { transform: translateX(4px); } }
 @media (prefers-reduced-motion: reduce) { .sync-bar.is-nudge { animation: none; } }
+
+/* ------------------------------------------------- a pull request waiting for your answer */
+.proposal-banner { --tone: var(--color-accent); flex-direction: column; }
+.proposal-banner .pb-body { cursor: default; }
+.proposal-banner .rb-face svg { width: 24px; height: auto; }
+.pb-actions { display: flex; gap: var(--space-xs); padding: 0 var(--space-md) var(--space-sm) calc(40px + var(--space-sm) + var(--space-md)); }
+.mini-diff { max-height: 50vh; overflow: auto; }
+.mini-file > summary { display: flex; gap: var(--space-sm); align-items: baseline; padding: var(--space-3xs) 0; cursor: pointer; }
+.mini-lines { width: 100%; border-collapse: collapse; font: 12px/1.45 var(--font-outlier); }
+.mini-lines td { padding: 0 var(--space-2xs); white-space: pre-wrap; overflow-wrap: anywhere; vertical-align: top; }
+.mini-sign { width: 1ch; color: var(--color-muted); user-select: none; }
+.mini-lines tr.is-add td { background: var(--color-ok-soft); }
+.mini-lines tr.is-del td { background: var(--color-bad-soft); }
+.mini-lines tr.mini-hunk td { color: var(--color-cool); background: var(--color-paper-2); }

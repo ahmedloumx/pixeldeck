@@ -33,6 +33,7 @@ import actions  # noqa: E402
 import launcher  # noqa: E402
 import terminals  # noqa: E402
 import opener  # noqa: E402
+import proposals  # noqa: E402
 from bitbucket import BitbucketError  # noqa: E402
 from engine import Engine  # noqa: E402
 
@@ -41,6 +42,12 @@ import config  # noqa: E402
 STATIC = HERE / "static"
 WORKSPACE_ROOT = config.workspace_root()
 SECRET = secrets.token_urlsafe(32)
+# A second key, for an agent proposing a pull request from a terminal: it can ask and read the
+# answer, nothing else. Written to the state folder (mode 600) at start; see proposals.py.
+AGENT_KEY = secrets.token_urlsafe(32)
+AGENT_ROUTES = {("POST", "propose"), ("GET", "proposal")}
+PROPOSALS = proposals.Proposals()
+FEATURES = ["merge", "sync", "drop", "proposals"]
 TERMS = terminals.Terminals()
 MAX_BODY = 64 * 1024
 DROP_MAX = 50 * 1024 * 1024
@@ -118,8 +125,10 @@ class Desk(BaseHTTPRequestHandler):
     def _error(self, status, message, **more):
         self._send(status, {"error": message, **more})
 
-    def _authorized(self):
-        return secrets.compare_digest(self.headers.get("X-Desk-Token", ""), SECRET)
+    def _authorized(self, method="", route=""):
+        if secrets.compare_digest(self.headers.get("X-Desk-Token", ""), SECRET):
+            return True
+        return (method, route) in AGENT_ROUTES and secrets.compare_digest(self.headers.get("X-Agent-Key", ""), AGENT_KEY)
 
     def _body(self):
         length = int(self.headers.get("Content-Length") or 0)
@@ -142,7 +151,7 @@ class Desk(BaseHTTPRequestHandler):
         if url.path.startswith("/static/"):
             return self._static(url.path[len("/static/"):])
         if url.path.startswith("/api/"):
-            if not self._authorized():
+            if not self._authorized("GET", url.path[5:]):
                 return self._error(HTTPStatus.UNAUTHORIZED, "stale page token")
             return self._api("GET", url.path[5:], parse_qs(url.query), None)
         self._error(HTTPStatus.NOT_FOUND, "not found")
@@ -153,7 +162,7 @@ class Desk(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         if not url.path.startswith("/api/"):
             return self._error(HTTPStatus.NOT_FOUND, "not found")
-        if not self._authorized():
+        if not self._authorized("POST", url.path[5:]):
             return self._error(HTTPStatus.UNAUTHORIZED, "stale page token")
         if url.path == "/api/term-drop":  # raw file bytes, not JSON: read before _body() would refuse them
             try:
@@ -236,7 +245,21 @@ class Desk(BaseHTTPRequestHandler):
                 branch = (query.get("branch") or [""])[0]
                 return self._send(200, actions.preview(engine, WORKSPACE_ROOT, repo, branch))
             if method == "POST" and route == "pr-create":
-                return self._send(200, actions.create(engine, WORKSPACE_ROOT, body))
+                result = actions.create(engine, WORKSPACE_ROOT, body)
+                PROPOSALS.opened_elsewhere(body.get("repo"), body.get("branch"), result)
+                return self._send(200, result)
+            if method == "POST" and route == "propose":
+                return self._send(200, PROPOSALS.propose(engine, WORKSPACE_ROOT, body))
+            if method == "GET" and route == "proposal":
+                return self._send(200, PROPOSALS.get((query.get("id") or [""])[0]))
+            if method == "GET" and route == "proposals":
+                return self._send(200, {"proposals": PROPOSALS.list()})
+            if method == "POST" and route == "proposal-decide":
+                fields = body.get("fields") if isinstance(body.get("fields"), dict) else {}
+                return self._send(200, PROPOSALS.decide(engine, WORKSPACE_ROOT, str(body.get("id") or ""), body.get("action"), fields))
+            if method == "GET" and route == "branch-diff":
+                q = lambda k: (query.get(k) or [""])[0]  # noqa: E731
+                return self._send(200, actions.branch_diff(WORKSPACE_ROOT, q("repo"), q("branch"), q("dest")))
             if method == "POST" and route == "branch-delete":
                 return self._send(200, actions.delete_branch(engine, WORKSPACE_ROOT, body))
             if method == "POST" and route == "decline":
@@ -306,6 +329,7 @@ class Desk(BaseHTTPRequestHandler):
             "root": str(WORKSPACE_ROOT),
             "platform": sys.platform,
             "terminal": terminals.UNAVAILABLE or "",
+            "features": FEATURES,
             "now": time.time(),
         }
 
@@ -476,6 +500,17 @@ def shell_argv():
     return [os.environ.get("SHELL") or "/bin/sh", "-l"]
 
 
+def write_agent_key(port):
+    """Where pixeldeck.py --propose finds the propose-only key (and the port) of this run."""
+    path = config.folder("state") / "agent.key"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps({"port": port, "key": AGENT_KEY}))
+    if os.name != "nt":
+        os.chmod(path, 0o600)
+
+
 def main():
     parser = argparse.ArgumentParser(description="PixelDeck local server")
     parser.add_argument("--port", type=int, default=config.port())
@@ -484,6 +519,7 @@ def main():
 
     Desk.engine = Engine(WORKSPACE_ROOT)
     Desk.port = args.port
+    write_agent_key(args.port)
     if not args.no_refresh:
         Desk.engine.run_forever()
     httpd = ThreadingHTTPServer(("127.0.0.1", args.port), Desk)
