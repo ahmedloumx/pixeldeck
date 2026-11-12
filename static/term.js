@@ -137,6 +137,7 @@ const Term = (() => {
       paintTabs();
     });
     term.onResize(({ cols, rows }) => {
+      if (cols < 20 || rows < 4) return; // a collapsed panel: leave the program its real size
       const key = `${cols}x${rows}`;
       if (s.alive && key !== s.size) { s.size = key; api("term-resize", { method: "POST", body: { id, cols, rows } }).catch(() => {}); }
     });
@@ -144,6 +145,11 @@ const Term = (() => {
     orderSessions();
     term.open(pane);
     s.renderer = loadRenderer(s);
+    if (typeof SerializeAddon !== "undefined") {
+      try { s.serializer = new SerializeAddon.SerializeAddon(); term.loadAddon(s.serializer); } catch { /* no snapshots then */ }
+    }
+    s.pending = 0;
+    s.parsed = 0;
     if (typeof Unicode11Addon !== "undefined") {
       try { term.loadAddon(new Unicode11Addon.Unicode11Addon()); term.unicode.activeVersion = "11"; } catch { /* xterm's own widths stay */ }
     }
@@ -318,7 +324,8 @@ const Term = (() => {
 
   function fitCurrent() {
     const s = sessions.get(current);
-    if (!s || !s.pane.isConnected || s.pane.hidden || !s.pane.clientWidth) return;
+    // Not while its history is being redrawn: it must land at the size it was written for.
+    if (!s || s.replaying || !s.pane.isConnected || s.pane.hidden || !s.pane.clientWidth) return;
     try { s.fit.fit(); } catch { /* not laid out yet */ }
   }
 
@@ -515,10 +522,28 @@ const Term = (() => {
       if ("exit" in msg && !msg.d) return; // an ended session nobody had open
       s = attach(msg.id, msg.t || "Terminal");
     }
-    if (msg.d) {
-      s.term.write(decode(msg.d));
+    if ("snap" in msg) {
+      // The screen as a page last drew it: start from it at its size, then the output after it.
+      s.replaying = true;
+      s.term.reset();
+      if (msg.cols >= 20 && msg.rows >= 4) s.term.resize(msg.cols, msg.rows);
+      write(s, msg.snap, msg.sp);
+      s.pos = msg.sp; // a reconnect asks for what follows the snapshot, not the whole history
+      return;
+    }
+    if (!s.ready && msg.cols >= 20 && msg.rows >= 4 && !s.replaying) {
+      // No snapshot: replay the history at the size the program has now, not at 80 columns.
+      s.replaying = true;
+      s.term.resize(msg.cols, msg.rows);
+    }
+    if (msg.d || !s.ready) {
+      write(s, msg.d ? decode(msg.d) : "", typeof msg.p === "number" ? msg.p : s.parsed, () => {
+        if (!s.replaying) return;
+        s.replaying = false;
+        if (s.id === current) fitCurrent();
+      });
       // The first chunk after attaching is the replayed scrollback, not new work.
-      if (s.ready && Date.now() - (s.lastKey || 0) > ECHO_MS) setBusy(s, true);
+      if (s.ready && msg.d && Date.now() - (s.lastKey || 0) > ECHO_MS) setBusy(s, true);
       s.ready = true;
     }
     if (typeof msg.p === "number") s.pos = msg.p;
@@ -529,7 +554,40 @@ const Term = (() => {
     }
   }
 
-  return { mount, attach, select, newShell, showBuild, buildWith, fit: fitCurrent, count: () => sessions.size,
+  // Every write remembers the stream offset it ends at, once xterm has drawn it.
+  function write(s, data, upTo, done) {
+    s.pending++;
+    s.term.write(data, () => {
+      s.pending--;
+      if (upTo > s.parsed) s.parsed = upTo;
+      done?.();
+    });
+  }
+
+  /* Snapshots: what each terminal shows now, with the offset it was drawn up to, kept by the
+     server for the next page. Taken only while nothing is half-drawn, so the picture and the
+     offset match exactly; every 15 s, and when the page is hidden or closed. */
+  const SNAPSHOT_KEEP = 2000; // scrollback lines in a snapshot
+  function saveSnapshots(leaving = false) {
+    if (typeof state === "undefined" || !(state.features || []).includes("snapshots")) return;
+    for (const s of sessions.values()) {
+      if (!s.serializer || s.pending || s.replaying || s.parsed === s.savedAt || !s.ready) continue;
+      let text;
+      try { text = s.serializer.serialize({ scrollback: SNAPSHOT_KEEP }); } catch { continue; }
+      if (text.length > 3_500_000) continue;
+      s.savedAt = s.parsed;
+      const q = `id=${encodeURIComponent(s.id)}&pos=${s.parsed}&cols=${s.term.cols}&rows=${s.term.rows}`;
+      fetch(`/api/term-snapshot?${q}`, {
+        method: "POST", body: text, keepalive: leaving && text.length < 60000,
+        headers: { "X-Desk-Token": TOKEN, "Content-Type": "text/plain; charset=utf-8" },
+      }).catch(() => { s.savedAt = -1; });
+    }
+  }
+  setInterval(saveSnapshots, 15000);
+  document.addEventListener("visibilitychange", () => { if (document.hidden) saveSnapshots(); });
+  addEventListener("pagehide", () => saveSnapshots(true));
+
+  return { mount, attach, select, newShell, showBuild, buildWith, fit: fitCurrent, saveSnapshots, count: () => sessions.size,
     renderers: () => [...sessions.values()].map((s) => s.renderer), order: () => [...sessions.keys()],
     // The last lines of the current terminal as text: with WebGL the screen is not in the DOM.
     lines: (n = 5) => {

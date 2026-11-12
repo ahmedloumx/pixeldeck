@@ -59,6 +59,12 @@ class Session:
         self.buf = bytearray()
         self.base = 0  # stream offset of buf[0]
         self.cond = threading.Condition()
+        self.cols, self.rows = cols, rows
+        # The screen as a page last drew it, with the stream offset it had drawn up to. A page
+        # that opens later starts from it and only replays what came after, which was all
+        # written at the same size. Replaying the whole history at one width garbles programs
+        # that redraw in place (Claude Code) whenever the size changed along the way.
+        self.snapshot = None
         self._start(argv, cols, rows)
         threading.Thread(target=self._pump, name=f"term-{self.id}", daemon=True).start()
 
@@ -106,6 +112,17 @@ class Session:
     def resize(self, cols, rows):
         if self.alive:
             self._resize(cols, rows)
+            self.cols, self.rows = cols, rows
+
+    def remember(self, text, pos, cols, rows):
+        """Keep a page's picture of the screen, if its offset still has its tail in the buffer."""
+        with self.cond:
+            if not self.base <= pos <= self.end:
+                return False
+            if self.snapshot and self.snapshot["pos"] > pos:
+                return False  # an older picture never replaces a newer one
+            self.snapshot = {"text": text, "pos": pos, "cols": cols, "rows": rows}
+            return True
 
     def close(self):
         if self.alive:

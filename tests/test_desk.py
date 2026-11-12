@@ -745,11 +745,57 @@ class ProposalRouteTest(unittest.TestCase):
 
     def test_the_command_exits_3_while_waiting_and_2_when_declined(self):
         proc = self.run_cli("feat/slow", "--wait", "1")
-        self.assertEqual(proc.wait(timeout=20), 3)
+        proc.communicate(timeout=20)
+        self.assertEqual(proc.returncode, 3)
         pid = self.wait_pending("feat/slow")
         self.call("POST", "proposal-decide", {"id": pid, "action": "decline"}, page=True)
         again = self.run_cli("feat/slow", "--wait", "1")
-        self.assertEqual(again.wait(timeout=20), 2)
+        again.communicate(timeout=20)
+        self.assertEqual(again.returncode, 2)
+
+
+class SnapshotTest(unittest.TestCase):
+    def session(self):
+        import threading
+        import terminals
+        s = terminals.Session.__new__(terminals.Session)
+        s.buf, s.base, s.cond, s.snapshot, s.exit_code = bytearray(b"0123456789"), 100, threading.Condition(), None, None
+        s.cols, s.rows, s.title = 120, 30, "Shell"
+        return s
+
+    def test_keeps_a_picture_only_while_its_tail_is_in_the_buffer(self):
+        s = self.session()  # offsets 100 to 110 are in the buffer
+        self.assertFalse(s.remember("old", 99, 80, 24), "its tail scrolled out")
+        self.assertFalse(s.remember("future", 111, 80, 24))
+        self.assertTrue(s.remember("screen at 105", 105, 200, 50))
+        self.assertFalse(s.remember("older", 103, 80, 24), "an older picture never replaces a newer one")
+        self.assertEqual(s.snapshot["pos"], 105)
+
+    def test_a_new_page_gets_the_picture_then_only_what_followed(self):
+        import base64
+        import urllib.request
+        import server
+        s = self.session()
+        s.remember("PICTURE", 105, 200, 50)
+        import threading
+        from http.server import ThreadingHTTPServer
+        server.TERMS.sessions["snap1"] = s
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Desk)
+        httpd.daemon_threads = True
+        server.Desk.port = httpd.server_address[1]
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        try:
+            req = urllib.request.Request(f"http://127.0.0.1:{server.Desk.port}/api/term-stream?cursors=", headers={"X-Desk-Token": server.SECRET})
+            with urllib.request.urlopen(req, timeout=10) as res:
+                lines = [json.loads(res.readline()), json.loads(res.readline())]
+        finally:
+            del server.TERMS.sessions["snap1"]
+            httpd.shutdown()
+            httpd.server_close()
+        snap = next(x for x in lines if "snap" in x)
+        data = next(x for x in lines if "d" in x)
+        self.assertEqual((snap["snap"], snap["sp"], snap["cols"], snap["rows"]), ("PICTURE", 105, 200, 50))
+        self.assertEqual(base64.b64decode(data["d"]), b"56789", "only the output after the picture")
 
 
 if __name__ == "__main__":

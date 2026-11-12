@@ -26,7 +26,7 @@ Full documentation, with the architecture, security model and measured performan
 - **Terminal panel.** Real shells in tabs, drawn with WebGL for smooth scrolling. Tabs are named
   after what runs in them, can be renamed and dragged into any order, and show a small loader
   while something is working in them. Drop files on a terminal to paste their paths. The shells
-  stay alive after you close the window.
+  stay alive after you close the window, and reopening it brings their screens back as they were.
 - **Pull requests an agent asks to open.** Instead of opening a pull request itself, an agent
   such as Claude Code runs `pixeldeck.py --propose` and waits. A notification shows the branch,
   its target and its size: **Proceed** opens it as proposed, **Review** opens the popup (target
@@ -166,7 +166,7 @@ on every request, so a reload shows a change. The documentation describes each f
 
 ## Credits
 
-- [xterm.js](https://xtermjs.org/) and its fit, WebGL and Unicode 11 add-ons, MIT license.
+- [xterm.js](https://xtermjs.org/) and its fit, WebGL, Unicode 11 and serialize add-ons, MIT license.
 - Fonts: Press Start 2P, Pixelify Sans and Host Grotesk, SIL Open Font License 1.1.
 
 Their license texts are in [licenses/](licenses/).
