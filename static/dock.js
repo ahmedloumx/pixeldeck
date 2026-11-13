@@ -164,7 +164,8 @@ const Arcade = (() => {
       <button class="btn btn--quiet" type="button" data-bubble-later>Not now</button></div>`;
     const m = mascot.getBoundingClientRect(), b = bar.getBoundingClientRect();
     // The bubble hangs from the bar's right edge; its tail points up at the bot.
-    bubble.style.setProperty("--tail-r", `${Math.max(8, Math.round(b.right - (m.left + m.width / 2) - 8 - 6))}px`);
+    // From the bubble's inner right edge (bar edge, 8px gap, 9px frame) to the tail's tip.
+    bubble.style.setProperty("--tail-r", `${Math.max(0, Math.round(b.right - (m.left + m.width / 2) - 8 - 9 - 4))}px`);
     bar.append(bubble);
     const svgEl = mascot.querySelector(".spr");
     if (svgEl && typeof Sprites !== "undefined") Sprites.flash(svgEl, 4, 700);  // a little wave

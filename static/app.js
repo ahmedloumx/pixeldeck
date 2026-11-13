@@ -2020,6 +2020,24 @@ function setCopyWho(id, who) {
   loadView({ silent: true });
 }
 
+/* A notification opens its pull request here, never in the browser: from what is loaded,
+   else from its owner's list (a teammate not shown yet), else read on its own. */
+async function openFromEvent(ev) {
+  const key = `${ev.repo}#${ev.pr_id}`;
+  let pr = findPr(key);
+  if (!pr && ev.owner && !isMeUuid(ev.owner) && state.people[ev.owner] === undefined) {
+    try { await loadPerson(ev.owner); } catch { /* read it on its own below */ }
+    pr = findPr(key);
+  }
+  if (!pr) {
+    try { pr = (await api(`pr?repo=${encodeURIComponent(ev.repo)}&id=${Number(ev.pr_id)}`)).pr; } catch (err) {
+      toast(`Could not open #${ev.pr_id}.`, err.message, true);
+      return;
+    }
+  }
+  openPr(pr);
+}
+
 async function loadView({ silent = false } = {}) {
   if (!silent) setSyncing(true);
   let changed = !silent;
@@ -2392,11 +2410,7 @@ async function boot() {
     Notify.start({
       api, me: () => state.me, ready: () => !!state.me,
       onSettings: (tab) => Settings.open(tab),
-      onOpen: (ev) => {
-        const pr = findPr(`${ev.repo}#${ev.pr_id}`);
-        if (pr) openPr(pr);
-        else if (ev.url) openExternal(ev.url);
-      },
+      onOpen: openFromEvent,
     });
   }
 }
