@@ -551,7 +551,7 @@ function whoOptions(value, { edit = false } = {}) {
 }
 // A copy picks its own person here; the first panel follows the picker in the top bar.
 const whoPicker = (id, who) => `<label class="field copy-who"><span class="visually-hidden">Whose pull requests this copy shows</span>
-  <select data-copy-who="${esc(id)}">${whoOptions(who)}</select></label>`;
+  <select data-copy-who="${esc(id)}" data-retro>${whoOptions(who)}</select></label>`;
 
 function renderQueue() { for (const id of Layout.instances("queue")) renderQueueIn(id); }
 function renderQueueIn(id) {
@@ -599,7 +599,7 @@ function renderQueueIn(id) {
       <section class="block">${body}</section>
     </div></div>`;
   if (data) state.animate[id] = false;
-  if (copy) { Layout.setLabel(id, `Queue: ${shortWho(view)}`); return; }
+  if (copy) { RetroSelect.enhanceAll(el); Layout.setLabel(id, `Queue: ${shortWho(view)}`); return; }
   Layout.setBadge("queue", data && kind === "me" ? b.needs.length || "" : "");
   const needs = state.me && state.people[state.me.uuid] ? buckets(state.people[state.me.uuid], "me").needs.length : 0;
   document.title = needs ? `(${needs}) PixelDeck` : "PixelDeck";
@@ -647,7 +647,7 @@ function renderInsightsIn(id) {
   el.innerHTML = viewKind(view) === "team" ? insightsTeam(view, id) : insightsPerson(view, id);
   paintCharts();
   if (state.animate[id] !== false && currentData(view)) { countUp(el); state.animate[id] = false; }
-  if (Layout.isCopy(id)) Layout.setLabel(id, `Insights: ${shortWho(view)}`);
+  if (Layout.isCopy(id)) { RetroSelect.enhanceAll(el); Layout.setLabel(id, `Insights: ${shortWho(view)}`); }
 }
 const insightsTools = (view, id) => `<div class="head-tools">${Layout.isCopy(id) ? whoPicker(id, view.who) : ""}${rangeBar(id, view.range)}</div>`;
 
@@ -1773,6 +1773,7 @@ function renderBar() {
   const html = whoOptions("", { edit: true });
   if (sel.dataset.html !== html) { sel.innerHTML = html; sel.dataset.html = html; }
   sel.value = value;
+  RetroSelect.sync(sel);
   const proj = $("#project");
   const key = state.project?.key || "";
   const popts = [`<option value="">Every project</option>`, ...(state.projects || []).map((p) => `<option value="${esc(p.key)}">${esc(p.name)}</option>`)];
@@ -1780,10 +1781,29 @@ function renderBar() {
   const phtml = popts.join("");
   if (proj.dataset.html !== phtml) { proj.innerHTML = phtml; proj.dataset.html = phtml; }
   proj.value = key;
+  RetroSelect.sync(proj);
   const { used, limit } = state.budget;
   StatusBar.paint();
   $("#refresh").title = `Refresh from Bitbucket (r). ${used} of ${limit} API calls used this hour.`;
-  $("#panels-menu-list").innerHTML = Layout.visibility().map((p) => `<label class="check"><input type="checkbox" data-panel-toggle="${p.id}"${p.hidden ? "" : " checked"}> ${esc(p.title)}</label>`).join("");
+  paintLayoutMenu();
+}
+
+// The Layout menu: which panels show, their copies, and the arcade switches.
+function paintLayoutMenu() {
+  const list = Layout.visibility();
+  const rows = list.filter((p) => !p.copy).map((p) => {
+    const copies = list.filter((c) => c.copy && c.base === p.id).map((c) => `<div class="panel-row is-copy"><span class="panel-row-name">${esc(c.title)}</span>
+      <button class="mini-btn" type="button" data-panel-show="${esc(c.id)}">Show</button><button class="mini-btn" type="button" data-panel-remove="${esc(c.id)}" aria-label="Close ${esc(c.title)}">×</button></div>`).join("");
+    return `<div class="panel-row"><label class="switch"><input type="checkbox" data-panel-toggle="${p.id}"${p.hidden ? "" : " checked"}><span class="switch-knob" aria-hidden="true"></span>${esc(p.title)}</label>
+      ${p.copyable ? `<button class="mini-btn" type="button" data-panel-copy="${p.id}" title="A copy keeps its own person, section and range">+ Copy</button>` : ""}</div>${copies}`;
+  }).join("");
+  const box = $("#panels-menu-list");
+  if (box.dataset.html !== rows) { box.innerHTML = rows; box.dataset.html = rows; }
+  const p = Prefs.get();
+  const arcade = `<label class="switch"><input type="checkbox" data-pref-toggle="games"${p.games ? " checked" : ""}><span class="switch-knob" aria-hidden="true"></span>Games beside the terminal</label>
+    <label class="switch"><input type="checkbox" data-pref-toggle="bubbles"${p.bubbles ? " checked" : ""}><span class="switch-knob" aria-hidden="true"></span>The bot suggests a game while you wait</label>`;
+  const a = $("#arcade-menu-list");
+  if (a.dataset.html !== arcade) { a.innerHTML = arcade; a.dataset.html = arcade; }
 }
 
 function renderAll() {
@@ -2189,6 +2209,12 @@ function bind() {
     if (action === "edit-team") return openTeamDialog();
     if (action === "show-all") { state.showAll = true; return renderQueue(); }
     if (action === "reload-pr" && state.pr) return openPr(state.pr.pr, { force: true });
+    const copyPanel = t.closest("[data-panel-copy]");
+    if (copyPanel) { Layout.duplicate(copyPanel.dataset.panelCopy); return; }
+    const removePanel = t.closest("[data-panel-remove]");
+    if (removePanel) { Layout.remove(removePanel.dataset.panelRemove); return; }
+    const showPanel = t.closest("[data-panel-show]");
+    if (showPanel) { Layout.activate(showPanel.dataset.panelShow); return; }
     if (action === "preset-split") { Layout.preset("split"); return; }
     if (action === "preset-compact") { Layout.preset("compact"); return; }
     if (action === "close-help") return $("#help-dialog").close();
@@ -2320,6 +2346,9 @@ async function boot() {
     onRemove: (id) => { delete state.animate[id]; renderBar(); },
   });
   Term.mount(Layout.body("terminal"));
+  Arcade.attach(Layout.body("terminal"));
+  RetroSelect.enhanceAll();
+  Prefs.onChange(() => paintLayoutMenu());
   bind();
   state.route = parseHash();
   renderAll();

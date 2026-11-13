@@ -184,3 +184,71 @@
 .jira-status[data-category="new"] { --tone: var(--color-muted); }
 .jira-status[data-category="done"] { --tone: var(--color-ok); }
 .pr-dialog-body:has(#merge-message) .pr-dialog-foot { position: sticky; bottom: calc(var(--space-lg) * -1); z-index: 1; margin-bottom: calc(var(--space-lg) * -1); padding-bottom: var(--space-lg); background: var(--color-paper); }
+
+/* ---------------------------------------------------------------- retro pickers */
+.rs-native { position: absolute !important; width: 1px !important; height: 1px !important; min-width: 0 !important; padding: 0 !important; border: 0 !important; opacity: 0; pointer-events: none; }
+.field { position: relative; }
+.rs-button { display: inline-flex; align-items: center; gap: var(--space-xs); width: 13rem; min-height: var(--control); padding: 0 var(--space-xs) 0 var(--space-sm);
+  background: var(--color-paper-3); color: var(--color-ink); border: var(--pixel) solid var(--color-rule-2); border-radius: 0;
+  box-shadow: inset 0 0 0 var(--pixel) var(--color-paper), 0 3px 0 var(--color-paper-3); font: inherit; text-align: left; cursor: pointer; }
+.rs-button:hover { border-color: var(--color-muted); }
+.rs-button[aria-expanded="true"] { border-color: var(--color-accent); box-shadow: inset 0 0 0 var(--pixel) var(--color-paper), 0 3px 0 var(--color-accent-deep); }
+.rs-button:focus-visible { outline: var(--pixel) solid var(--color-focus); outline-offset: 2px; }
+.rs-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rs-arrow { flex: none; width: 10px; height: 6px; background: currentColor; clip-path: polygon(0 0, 100% 0, 100% 34%, 80% 34%, 80% 67%, 60% 67%, 60% 100%, 40% 100%, 40% 67%, 20% 67%, 20% 34%, 0 34%); color: var(--color-muted); }
+.rs-button[aria-expanded="true"] .rs-arrow { transform: scaleY(-1); color: var(--color-accent); }
+.copy-who .rs-button { width: auto; min-width: 12rem; max-width: 20rem; min-height: 30px; }
+.rs-pop { position: fixed; z-index: calc(var(--z-tooltip) + 1); overflow: auto; overscroll-behavior: contain; padding: var(--space-2xs); background: var(--color-paper); border: var(--pixel) solid var(--color-rule-2);
+  box-shadow: inset 0 0 0 var(--pixel) var(--color-paper-2), 6px 6px 0 oklch(0% 0 0 / 0.45); outline: none; animation: rs-open 120ms steps(3, end); }
+@keyframes rs-open { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0); } }
+.rs-group { padding: var(--space-xs) var(--space-xs) var(--space-3xs); font: 400 8px var(--font-num); color: var(--color-muted); letter-spacing: 0.06em; text-transform: uppercase; }
+.rs-item { position: relative; padding: 6px var(--space-sm) 6px 22px; color: var(--color-ink-2); white-space: nowrap; cursor: pointer; }
+.rs-item.is-active { background: var(--color-paper-2); color: var(--color-ink); }
+.rs-item.is-active::before { content: ""; position: absolute; left: 7px; top: 50%; width: 6px; height: 8px; margin-top: -4px; background: var(--color-accent); clip-path: polygon(0 0, 50% 0, 50% 25%, 100% 25%, 100% 75%, 50% 75%, 50% 100%, 0 100%); }
+.rs-item.is-selected { color: var(--color-accent); }
+@media (max-width: 1100px) { .bar .rs-button { width: 9rem; } }
+
+/* ---------------------------------------------------------------- the layout menu */
+.layout-pop { width: 20rem; }
+.layout-pop .menu-label { margin: var(--space-2xs) 0 0; font: 400 9px var(--font-num); letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-accent); }
+.preset-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-xs); }
+.preset-card { display: grid; justify-items: center; gap: var(--space-2xs); padding: var(--space-xs); border: var(--pixel) solid var(--color-rule-2); background: var(--color-paper-3); color: var(--color-ink-2); font: 500 var(--text-sm) var(--font-pixel); cursor: pointer; box-shadow: 0 3px 0 var(--color-paper-3); }
+.preset-card:hover { color: var(--color-ink); border-color: var(--color-accent); box-shadow: 0 3px 0 var(--color-accent-deep); }
+.preset-card:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--color-accent-deep); }
+.preset-pic { position: relative; width: 64px; height: 40px; border: var(--pixel) solid var(--color-muted); background: var(--color-paper); }
+.preset-pic i { position: absolute; background: var(--color-cool-soft); border: 1px solid var(--color-cool); }
+.preset-pic.is-split i:nth-child(1) { left: 2px; top: 2px; width: 18px; bottom: 14px; }
+.preset-pic.is-split i:nth-child(2) { left: 23px; top: 2px; right: 2px; bottom: 14px; }
+.preset-pic.is-split i:nth-child(3) { left: 2px; right: 2px; bottom: 2px; height: 9px; background: var(--color-accent-soft); border-color: var(--color-accent); }
+.preset-pic.is-tabs i { inset: 8px 2px 2px; }
+.preset-pic.is-tabs::before { content: ""; position: absolute; left: 2px; top: 2px; width: 18px; height: 5px; background: var(--color-cool); }
+.panel-row { display: flex; align-items: center; gap: var(--space-2xs); min-height: 28px; }
+.panel-row .switch { flex: 1; }
+.panel-row.is-copy { padding-left: 38px; font-size: var(--text-sm); color: var(--color-ink-2); }
+.panel-row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.panel-row-name::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; background: var(--color-cool); }
+.mini-btn { min-height: 22px; padding: 0 6px; border: var(--rule-hair) solid var(--color-rule-2); background: var(--color-paper-2); color: var(--color-ink-2); font: 400 var(--text-xs) var(--font-body); cursor: pointer; }
+.mini-btn:hover { color: var(--color-ink); border-color: var(--color-accent); }
+
+/* ---------------------------------------------------------------- the arcade dock */
+.term-split { display: flex; flex: 1; min-height: 0; }
+.term-split > .term-panes { flex: 1; min-width: 0; }
+.games-dock { position: relative; display: flex; flex-direction: column; flex: none; width: var(--dock-w, 360px); min-height: 0; border-left: var(--pixel) solid var(--color-rule-2); background: var(--color-paper-3); }
+.games-dock[hidden] { display: none; }
+.dock-handle { position: absolute; left: -5px; top: 0; bottom: 0; z-index: 2; width: 8px; cursor: col-resize; }
+.dock-handle:hover { background: color-mix(in oklch, var(--color-accent) 30%, transparent); }
+.dock-head { display: flex; align-items: center; justify-content: space-between; padding: 2px var(--space-xs); font: 400 9px var(--font-num); letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-accent); border-bottom: var(--rule-hair) solid var(--color-rule); }
+.games-slot { flex: 1; min-height: 0; }
+
+/* ---------------------------------------------------------------- the bot's bubble */
+.term-bar { position: relative; }
+.bot-bubble { position: absolute; right: var(--space-xs); top: calc(100% + 10px); z-index: calc(var(--z-dropdown) + 2); width: min(24rem, calc(100% - 16px)); padding: var(--space-sm) var(--space-md);
+  background: var(--sprite-white); color: var(--sprite-dark); border: var(--pixel) solid var(--sprite-dark); box-shadow: 4px 4px 0 oklch(0% 0 0 / 0.45); animation: bubble-in 260ms steps(4, end) both; }
+.bot-bubble::before { content: ""; position: absolute; top: -10px; right: var(--tail-r, 60px); width: 12px; height: 10px; background: var(--sprite-dark); clip-path: polygon(0 100%, 50% 0, 100% 100%); }
+.bot-bubble p { margin: 0 0 var(--space-xs); font-size: var(--text-sm); line-height: 1.45; }
+.bot-bubble-actions { display: flex; gap: var(--space-xs); justify-content: flex-end; }
+.bot-bubble .btn--quiet { color: var(--sprite-dark); }
+.bot-bubble.is-leaving { animation: bubble-out 260ms steps(3, end) forwards; }
+@keyframes bubble-in { from { transform: scale(0.6) translateY(-8px); opacity: 0; } }
+@keyframes bubble-out { to { transform: scale(0.8) translateY(-6px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .bot-bubble, .bot-bubble.is-leaving, .rs-pop { animation: none; } }

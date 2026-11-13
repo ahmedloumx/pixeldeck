@@ -13,6 +13,7 @@
 <link rel="stylesheet" href="/static/app.css">
 <link rel="stylesheet" href="/static/workspace.css">
 <link rel="stylesheet" href="/static/arcade.css">
+<link rel="stylesheet" href="/static/games.css">
 <link rel="stylesheet" href="/static/hub.css">
 <script src="/static/vendor/xterm.js" defer></script>
 <script src="/static/vendor/addon-fit.js" defer></script>
@@ -22,9 +23,12 @@
 <script src="/static/layout.js" defer></script>
 <script src="/static/sprites.js" defer></script>
 <script src="/static/visuals.js" defer></script>
+<script src="/static/games.js" defer></script>
 <script src="/static/term.js" defer></script>
 <script src="/static/notify.js" defer></script>
 <script src="/static/hub.js" defer></script>
+<script src="/static/retro.js" defer></script>
+<script src="/static/dock.js" defer></script>
 <script src="/static/app.js" defer></script>
 </head>
 <body>
@@ -45,21 +49,23 @@
       <img src="/static/app-icon.svg" alt="" width="30" height="30">
       <span>PixelDeck</span>
     </a>
-    <label class="field"><span class="visually-hidden">Project</span><select id="project"></select></label>
-    <label class="field"><span class="visually-hidden">Whose pull requests to show</span><select id="person"></select></label>
+    <label class="field"><span class="visually-hidden">Project</span><select id="project" data-retro></select></label>
+    <label class="field"><span class="visually-hidden">Whose pull requests to show</span><select id="person" data-retro></select></label>
     <label class="field search"><span class="visually-hidden">Filter pull requests</span>
       <input type="search" id="filter" placeholder="Filter: repo, branch, title, ticket" autocomplete="off"></label>
     <details class="menu" id="layout-menu">
       <summary class="btn btn--quiet">Layout</summary>
-      <div class="menu-pop">
+      <div class="menu-pop layout-pop">
         <p class="menu-label">Arrange</p>
-        <div class="menu-row">
-          <button class="btn" type="button" data-action="preset-split">Split</button>
-          <button class="btn" type="button" data-action="preset-compact">Tabs</button>
+        <div class="preset-row">
+          <button class="preset-card" type="button" data-action="preset-split"><span class="preset-pic is-split" aria-hidden="true"><i></i><i></i><i></i></span>Split</button>
+          <button class="preset-card" type="button" data-action="preset-compact"><span class="preset-pic is-tabs" aria-hidden="true"><i></i></span>Tabs</button>
         </div>
         <p class="menu-label">Panels</p>
         <div class="menu-list" id="panels-menu-list"></div>
-        <p class="menu-hint">Drag a panel's tab onto another area to move it. Drag the dividers to resize.</p>
+        <p class="menu-label">Arcade</p>
+        <div class="menu-list" id="arcade-menu-list"></div>
+        <p class="menu-hint">Drag a panel's tab onto another area to move it. Drag the dividers to resize. A copy keeps its own person and range.</p>
       </div>
     </details>
     <div class="sync status" id="status" role="group" aria-label="Status">

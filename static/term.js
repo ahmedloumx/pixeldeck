@@ -78,7 +78,10 @@ const Term = (() => {
     root.innerHTML = `<div class="term-bar"><div class="term-tabs" role="tablist" aria-label="Terminals"></div>
       <span class="term-mascot">${Sprites.svg("bot", { scale: 2, idle: "blink", follow: true })}</span>
       <button class="btn btn--quiet" type="button" data-term-new>New shell</button></div>
-      <div class="term-panes"><div class="empty term-empty">${Sprites.svg("buddy", { scale: 3 })}<p>No terminal yet. The Claude button on a pull request opens one here, or start a shell.</p></div></div>`;
+      <div class="term-split"><div class="term-panes"><div class="empty term-empty">${Sprites.svg("buddy", { scale: 3 })}<p>No terminal yet. The Claude button on a pull request opens one here, or start a shell.</p></div></div>
+      <aside class="games-dock" aria-label="Arcade" hidden><div class="dock-handle" role="separator" aria-orientation="vertical" aria-label="Resize the arcade"></div>
+        <header class="dock-head"><span>Arcade</span><button class="slot-tool" type="button" data-dock-close aria-label="Close the arcade" title="Close the arcade">×</button></header>
+        <div class="games-slot"></div></aside></div>`;
     tabsEl = root.querySelector(".term-tabs");
     panesEl = root.querySelector(".term-panes");
     root.addEventListener("click", (e) => {
