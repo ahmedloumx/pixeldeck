@@ -135,10 +135,10 @@ class ValidationTest(unittest.TestCase):
                 repos.check_hash(bad)
 
     def test_paths_stay_inside_the_repository(self):
-        for good in ("", "a", "src/app.py", "a.b/c", "docs/my file #1.md", "ü/ñ.txt", ".github/workflows"):
+        for good in ("", "a", "src/app.py", "a.b/c", "docs/my file #1.md", "ü/ñ.txt", ".github/workflows", "a..b/c", "a/b..", "v1..v2.txt"):
             with self.subTest(good=good):
                 self.assertEqual(repos.check_path(good), good)
-        for bad in ("/etc/passwd", "..", "a/../b", "a..b/c", "a/b..", "a/./b", "./a", "a//b", "a/", "a\\b", "a\x00b", "a\nb", "a\x7fb",
+        for bad in ("/etc/passwd", "..", "a/../b", "a/..", "../a", "a/./b", "./a", "a//b", "a/", "a\\b", "a\x00b", "a\nb", "a\x7fb",
                     "x" * (repos.PATH_MAX + 1), None, 5):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 repos.check_path(bad)
