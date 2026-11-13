@@ -1,18 +1,22 @@
 "use strict";
 
-/* The Music panel: a pixel boombox for Spotify, and its mini player in the status bar.
-   What Spotify says arrives trimmed by the server (spotify.py) and is only ever written
-   with esc() or textContent. Album art comes through /api/spotify-art, because the page's
-   CSP allows no other host, and is drawn 32 pixels across on a canvas that CSS scales up.
-   A preview plays made-up songs with art drawn in code, so the deck can be seen without
-   an account; it goes through the same render path as the real thing.
-   The deck is built once per view, then patched: a poll never restarts the marquee,
-   moves focus or closes an open device picker. */
+/* The Music panel: a pixel boombox for Spotify, its library, a mini player in the status bar
+   (with a dropdown), and a floating mini player (music-float.js). All of them read one
+   state and one poll loop, kept here. What Spotify says arrives trimmed by the server
+   (spotify.py) and is only ever written with esc() or textContent. Album art comes through
+   /api/spotify-art, because the page's CSP allows no other host, and is drawn in one of
+   three pixel looks (8, 16 or 32-bit) chosen by clicking the art.
+   The preview (music-demo.js) plays made-up songs through the same render path.
+   Views are built once and then patched: a poll never restarts a marquee, moves focus or
+   closes an open picker. */
 
 const Music = (() => {
   const POLL_SHOWN = 4000, POLL_IDLE = 20000, POLL_HIDDEN = 60000;
-  const STATUS_EVERY = 3000, SIGN_IN_WAIT = 180000, HOLD_MS = 1500, LISTS_EVERY = 300000, DEVICES_EVERY = 60000;
-  const ART = 32, MINI_ART = 12, BLOCKS = 32, VOL_BLOCKS = 10, EQ_BARS = 14;
+  const STATUS_EVERY = 3000, SIGN_IN_WAIT = 180000, HOLD_MS = 1500, DEVICES_EVERY = 60000;
+  const VOL_BLOCKS = 10, BLOCKS = 32, EQ_BARS = 14, DECK_ART = 256;
+  const LIBRARY_SCOPES = ["user-library-read", "user-library-modify", "user-read-recently-played"];
+  const LOOKS = { 8: { grid: 32, label: "8-BIT" }, 16: { grid: 64, label: "16-BIT" }, 32: { grid: 128, label: "32-BIT" } };
+  const LOOK_KEY = "prdesk.music.look.v1";
   const reducedQuery = matchMedia("(prefers-reduced-motion: reduce)");
   const still = () => reducedQuery.matches || document.documentElement.dataset.motion === "calm";
 
@@ -21,13 +25,16 @@ const Music = (() => {
   let view = "", mode = "boot";          // mode: boot, setup, live or demo
   let demo = false;
   let player = null, readAt = 0, holdUntil = 0, pollError = "";
-  let devices = [], lists = null, listsAt = 0, devicesAt = 0;
-  let signIn = null;                     // { url, opened, until } while a sign-in is out in the browser
+  let devices = [], devicesAt = 0;
+  let signIn = null;                     // { url, opened, until, scopes } while a sign-in is out in the browser
   let pollTimer = 0, statusTimer = 0, revealTimer = 0, seekTimer = 0, volTimer = 0;
-  let pendingSeek = null, pendingVol = null;  // a key-held seek or volume, sent once the keys rest
-  let artKey = null, artTicket = 0, artFrame = null, lastFilled = -1, paintedItem = null, endAsked = false;
-  const artCache = new Map();
+  let pendingSeek = null, pendingVol = null;
+  let lastFilled = -1, paintedItem = null, endAsked = false, trackSeen = null;
+  const views = new Set();               // other views of the same state: { paint, tick, visible, relook }
+  const trackListeners = new Set();
   const listeners = new Set();
+  const likes = new Map();               // track id -> liked, as far as this page knows
+  let look = (() => { try { return LOOKS[localStorage.getItem(LOOK_KEY)] ? localStorage.getItem(LOOK_KEY) : "16"; } catch { return "16"; } })();
 
   /* ------------------------------------------------------------ pixels */
 
@@ -52,6 +59,14 @@ const Music = (() => {
     play: ["##.......", "####.....", "######...", "########.", "#########", "########.", "######...", "####.....", "##......."],
     pause: Array(9).fill("###...###"),
     next: ["#...#....##", "##..##...##", "###.###..##", "########.##", "###.###..##", "##..##...##", "#...#....##"],
+    heart: [".##...##.", "####.####", "#########", "#########", ".#######.", "..#####..", "...###...", "....#...."],
+    plus: ["...##...", "...##...", "...##...", "########", "########", "...##...", "...##...", "...##..."],
+    list: ["##.######", "##.######", ".........", "##.######", "##.######", ".........", "##.######", "##.######"],
+    pop: ["....#####", ".....####", "....#####", "...###.##", "#.###...#", "#..#.....", "#........", "#........", "######..."],
+    dock: ["#########", "#.......#", "#.......#", "#########", "#########", "#########", "#########"],
+    close: ["##....##", "###..###", ".######.", "..####..", "..####..", ".######.", "###..###", "##....##"],
+    lock: ["..####..", ".##..##.", ".#....#.", ".#....#.", "########", "###..###", "###..###", "########"],
+    back: ["...##", "..##.", ".##..", "##...", ".##..", "..##.", "...##"],
   };
   GLYPH.prev = GLYPH.next.map((r) => [...r].reverse().join(""));
   const glyph = (name, px = 3) => {
@@ -59,7 +74,6 @@ const Music = (() => {
     return pixelSvg(`mu-glyph mu-glyph--${name}`, rows[0].length, rows.length, px, rects(rows, { "#": "mu-ink" }));
   };
 
-  // A loudspeaker drawn as pixel rings; the cone is its own group so it can thump.
   const SPK = { k: "mu-p-k", s: "mu-p-s", r: "mu-p-r", c: "mu-p-c", h: "mu-p-h", w: "mu-p-w" };
   function speaker(n, scale, cls) {
     const c = (n - 1) / 2, R = n / 2, ring = [], cone = [];
@@ -90,249 +104,162 @@ const Music = (() => {
   ];
   const cassette = (scale) => pixelSvg("mu-cassette", 22, 14, scale, rects(CASSETTE, { k: "mu-p-k", S: "mu-p-s", w: "mu-p-w", t: "mu-p-t" }));
 
-  /* ------------------------------------------------------------ art drawn in code */
+  /* ------------------------------------------------------------ the picture: sources, looks, frames */
 
-  function rng(seed) {
-    let a = 0;
-    for (const ch of String(seed)) a = (Math.imul(a ^ ch.charCodeAt(0), 2654435761) >>> 0);
-    return () => {
-      a = (a + 0x6d2b79f5) >>> 0;
-      let t = a;
-      t = Math.imul(t ^ (t >>> 15), t | 1);
-      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-  }
-  function canvas(size = ART) {
+  function canvas(size) {
     const c = document.createElement("canvas");
     c.width = c.height = size;
     return c;
   }
-  const dot = (g, x, y, color, w = 1, h = 1) => { g.fillStyle = color; g.fillRect(x, y, w, h); };
-  function line(g, x0, y0, x1, y1, color) {
-    const dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
-    let err = dx + dy, guard = 0;
-    while (guard++ < 200) {
-      dot(g, x0, y0, color);
-      if (x0 === x1 && y0 === y1) break;
-      const e2 = 2 * err;
-      if (e2 >= dy) { err += dy; x0 += sx; }
-      if (e2 <= dx) { err += dx; y0 += sy; }
-    }
-  }
-  function disc(g, cx, cy, r, color, keep = () => true) {
-    for (let y = Math.floor(cy - r); y <= cy + r; y++) {
-      for (let x = Math.floor(cx - r); x <= cx + r; x++) if (Math.hypot(x - cx, y - cy) <= r && keep(x, y)) dot(g, x, y, color);
-    }
-  }
-  function stars(g, rand, n, maxY, colors = ["#ffffff", "#b9c7ff", "#ffe9a8"]) {
-    for (let i = 0; i < n; i++) dot(g, Math.floor(rand() * ART), Math.floor(rand() * maxY), colors[i % colors.length]);
-  }
-
-  const COVERS = {
-    sunset(g, rand) {
-      const sky = ["#1b1036", "#2a1252", "#43156a", "#6c1c7a", "#9c2a7e", "#d0407c", "#f36a62", "#ffa05a"];
-      for (let y = 0; y < 21; y++) dot(g, 0, y, sky[Math.min(7, Math.floor(y / 2.6))], ART, 1);
-      stars(g, rand, 10, 8);
-      disc(g, 16, 15, 8.4, "#ffd35c", (x, y) => y <= 20 && !(y >= 13 && y % 2 === 0));
-      for (let y = 7; y < 21; y++) for (let x = 7; x < 26; x++) if (Math.hypot(x - 16, y - 15) <= 8.4 && y > 15 && y % 2 && y <= 20) dot(g, x, y, "#ff7a8a");
-      const hills = [20, 19, 18, 18, 17, 17, 18, 19, 20, 20, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 20, 19, 18, 18, 17, 18, 18, 19, 20];
-      hills.forEach((top, x) => { for (let y = top; y < 21; y++) dot(g, x, y, "#1d0d2e"); });
-      dot(g, 0, 21, "#ff4fd8", ART, 1);
-      dot(g, 0, 22, "#120a24", ART, 10);
-      for (const y of [23, 25, 28, 31]) dot(g, 0, y, "#a1309e", ART, 1);
-      // the floor's lines run to a vanishing point at the sun; the canvas edge cuts the outer ones
-      for (let k = -5; k <= 5; k++) line(g, 16 + k * 2, 22, 16 + k * 9, 31, "#c13cbc");
-    },
-    heart(g, rand) {
-      for (let y = 0; y < ART; y += 4) for (let x = 0; x < ART; x += 4) dot(g, x, y, (x + y) % 8 ? "#3b1d5e" : "#4c2577", 4, 4);
-      const H = [".###...###.", "#####.#####", "###########", "###########", "###########", ".#########.", "..#######..", "...#####...", "....###....", ".....#....."];
-      H.forEach((row, y) => [...row].forEach((ch, x) => { if (ch === "#") dot(g, 5 + x * 2, 6 + y * 2, "#ff3d6e", 2, 2); }));
-      for (const [x, y] of [[7, 8], [9, 8], [7, 10], [21, 8]]) dot(g, x, y, "#ffd0dc", 2, 2);
-      for (let i = 0; i < 4; i++) { const x = 2 + Math.floor(rand() * 28), y = 1 + Math.floor(rand() * 4) + (i % 2) * 25; dot(g, x, y, "#fff3a8"); dot(g, x - 1, y, "#ffd35c"); dot(g, x + 1, y, "#ffd35c"); }
-    },
-    slime(g, rand) {
-      for (let y = 0; y < ART; y++) dot(g, 0, y, y < 22 ? (y < 8 ? "#0d2b33" : y < 16 ? "#113a40" : "#164a4b") : (y % 2 ? "#0b2126" : "#0f2b30"), ART, 1);
-      for (let y = 22; y < ART; y += 2) for (let x = (y / 2) % 2 ? 0 : 4; x < ART; x += 8) dot(g, x, y, "#1d5a52", 4, 2);
-      const grid = typeof Sprites !== "undefined" ? Sprites.grid("buddy", 0) : null;
-      if (grid) grid.rows.forEach((row, y) => [...row].forEach((ch, x) => { if (grid.colors[ch]) dot(g, x * 2 - 0, 6 + y * 2, grid.colors[ch], 2, 2); }));
-      for (const [x, y] of [[4, 3], [26, 5], [22, 1]]) { dot(g, x, y, "#ffe66b", 2, 1); dot(g, x + 1, y + 1, "#ffe66b", 1, 3); dot(g, x - 1, y + 3, "#ffe66b", 2, 2); }
-      stars(g, rand, 4, 6, ["#7cf2c8"]);
-    },
-    space(g, rand) {
-      dot(g, 0, 0, "#0a0f2e", ART, ART);
-      stars(g, rand, 26, ART);
-      disc(g, 16, 16, 8, "#e88a3a");
-      for (let y = 8; y <= 24; y++) for (let x = 8; x <= 24; x++) if (Math.hypot(x - 16, y - 16) <= 8 && (y === 13 || y === 18 || y === 19)) dot(g, x, y, "#c0602b");
-      for (let y = 8; y <= 24; y++) for (let x = 8; x <= 24; x++) if (Math.hypot(x - 14, y - 13) <= 3 && Math.hypot(x - 16, y - 16) <= 8) dot(g, x, y, "#f6b56a");
-      for (let x = 2; x < 30; x++) { const y = Math.round(16 + (x - 16) * 0.32); if (Math.abs(x - 16) > 6 || y > 17) dot(g, x, y, "#ffd98a"); if (Math.abs(x - 16) > 7) dot(g, x, y + 1, "#b98a4a"); }
-      const duck = ["..yy.", ".yyky", "yyyyo", ".yyy."];
-      duck.forEach((row, y) => [...row].forEach((ch, x) => { const c = { y: "#ffd84a", k: "#111", o: "#ff8a2a" }[ch]; if (c) dot(g, 24 + x, 4 + y, c); }));
-    },
-    floppy(g, rand) {
-      for (let y = 0; y < ART; y++) for (let x = 0; x < ART; x++) dot(g, x, y, (x + y) % 6 < 3 ? "#167c7c" : "#1a8f8c");
-      dot(g, 6, 5, "#0e1430", 21, 23); dot(g, 5, 6, "#0e1430", 23, 21);
-      dot(g, 7, 6, "#232c5e", 19, 21);
-      dot(g, 11, 6, "#aab3c2", 11, 8); dot(g, 18, 7, "#232c5e", 2, 6);
-      dot(g, 9, 17, "#f4f1e6", 15, 9);
-      for (const y of [19, 21, 23]) dot(g, 11, y, "#9aa6c9", 11, 1);
-      for (const [x, y] of [[19, 18], [21, 18], [18, 19], [19, 19], [20, 19], [21, 19], [22, 19], [19, 20], [20, 20], [21, 20], [20, 21]]) dot(g, x, y, "#ff4f73");
-      stars(g, rand, 5, ART, ["#7ff0e0"]);
-    },
-    lighthouse(g, rand) {
-      for (let y = 0; y < 22; y++) dot(g, 0, y, ["#0b1233", "#101a45", "#16235a", "#1e2f6e"][Math.min(3, Math.floor(y / 6))], ART, 1);
-      stars(g, rand, 12, 14);
-      disc(g, 6, 6, 3, "#f3efd0"); disc(g, 7, 5, 2.2, "#0b1233", (x, y) => Math.hypot(x - 6, y - 6) <= 3);
-      for (let x = 1; x < 22; x++) { const spread = Math.round((22 - x) * 0.32); for (let y = 9 - spread; y <= 9 + spread; y++) if ((x + y) % 2 === 0) dot(g, x, y, "#fff2a6"); }
-      for (let y = 10; y < 26; y++) dot(g, 21, y, Math.floor((y - 10) / 3) % 2 ? "#f4f1e6" : "#e0453a", 5, 1);
-      dot(g, 20, 6, "#2a2a3a", 7, 1); dot(g, 21, 7, "#ffe66b", 5, 3); dot(g, 20, 10, "#2a2a3a", 7, 1); dot(g, 22, 4, "#2a2a3a", 3, 2);
-      for (let y = 22; y < ART; y++) dot(g, 0, y, y % 2 ? "#0d2c55" : "#123a6b", ART, 1);
-      for (let i = 0; i < 14; i++) dot(g, Math.floor(rand() * 30), 23 + Math.floor(rand() * 9), "#5f8fd0", 2, 1);
-      dot(g, 18, 26, "#3a3a4a", 11, 2);
-    },
-    city(g, rand) {
-      for (let y = 0; y < ART; y++) dot(g, 0, y, ["#2a1145", "#3a1652", "#4d1b5c", "#6a2160", "#8a2a5e"][Math.min(4, Math.floor(y / 6))], ART, 1);
-      stars(g, rand, 8, 9);
-      dot(g, 5, 3, "#0a1a12", 22, 9); dot(g, 6, 4, "#0f2a1c", 20, 7);
-      const check = [[9, 8], [10, 9], [11, 10], [12, 9], [13, 8], [14, 7], [15, 6], [16, 5]];
-      for (const [x, y] of check) { dot(g, x + 3, y - 1, "#3dff8a", 2, 1); dot(g, x + 3, y, "#2ad46f", 2, 1); }
-      dot(g, 10, 12, "#555", 1, 4); dot(g, 21, 12, "#555", 1, 4);
-      let x = 0;
-      while (x < ART) {
-        const w = 3 + Math.floor(rand() * 4), h = 8 + Math.floor(rand() * 12);
-        dot(g, x, ART - h, "#120a1e", w, h);
-        for (let wy = ART - h + 2; wy < ART - 1; wy += 2) for (let wx = x + 1; wx < x + w - 1; wx += 2) if (rand() > 0.45) dot(g, wx, wy, rand() > 0.3 ? "#ffd86b" : "#7cffb0");
-        x += w + (rand() > 0.6 ? 1 : 0);
-      }
-    },
-  };
-  function painted(name) {
-    const c = canvas();
-    const g = c.getContext("2d");
-    (COVERS[name] || COVERS.space)(g, rng(name));
-    return c;
-  }
-  // A song without a picture gets a tape label in stripes from its own name.
+  // A song without a picture gets a striped tape label made from its own name.
   function plainCover(seed) {
-    const c = canvas(), g = c.getContext("2d"), rand = rng(seed), hue = Math.floor(rand() * 360);
-    dot(g, 0, 0, `hsl(${hue} 30% 16%)`, ART, ART);
-    for (let y = 6; y < 26; y += 4) dot(g, 0, y, `hsl(${(hue + y * 9) % 360} 70% ${48 + (y % 8)}%)`, ART, 2);
-    dot(g, 4, 12, "#f4f1e6", 24, 8);
-    for (let i = 0; i < 5; i++) dot(g, 6 + i * 4, 15, "#2a2a3a", 2, 2);
+    const c = canvas(64), g = c.getContext("2d"), rand = MusicDemo.rng(seed), hue = Math.floor(rand() * 360);
+    g.fillStyle = `hsl(${hue} 30% 16%)`; g.fillRect(0, 0, 64, 64);
+    for (let y = 12; y < 52; y += 8) { g.fillStyle = `hsl(${(hue + y * 5) % 360} 70% ${48 + (y % 16)}%)`; g.fillRect(0, y, 64, 4); }
+    g.fillStyle = "#f4f1e6"; g.fillRect(8, 24, 48, 16);
+    g.fillStyle = "#2a2a3a";
+    for (let i = 0; i < 5; i++) g.fillRect(12 + i * 8, 30, 4, 4);
     return c;
   }
-  // What a set shows with no signal: colour bars and a strip of noise.
-  function noSignal() {
-    const c = canvas(), g = c.getContext("2d"), rand = rng("no signal");
-    const bars = ["#c8c8c8", "#c8c800", "#00c8c8", "#00c800", "#c800c8", "#c80000", "#0000c8"], widths = [5, 5, 4, 5, 4, 5, 4];
-    let x = 0;
-    bars.forEach((color, i) => { dot(g, x, 0, color, widths[i], 21); dot(g, x, 21, bars[6 - i], widths[i], 3); x += widths[i]; });
-    for (let y = 24; y < ART; y++) for (let nx = 0; nx < ART; nx++) { const v = Math.floor(rand() * 200) + 20; dot(g, nx, y, `rgb(${v},${v},${v})`); }
-    return c;
-  }
-
-  // Real album art, shrunk to 32 pixels: an ordered dither and 8 levels a channel make it read as pixel art.
-  const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
-  function pixelate(image) {
-    const c = canvas(), g = c.getContext("2d", { willReadFrequently: true });
-    g.imageSmoothingEnabled = true;
-    g.imageSmoothingQuality = "high";
-    g.drawImage(image, 0, 0, ART, ART);
-    const img = g.getImageData(0, 0, ART, ART), d = img.data;
-    for (let i = 0; i < d.length; i += 4) {
-      const p = i >> 2, t = (BAYER[((p >> 5) & 3) * 4 + (p & 3)] / 16 - 0.5) * 30;
-      for (let k = 0; k < 3; k++) d[i + k] = Math.max(0, Math.min(255, Math.round((d[i + k] + t) / 36) * 36));
-      d[i + 3] = 255;
-    }
-    g.putImageData(img, 0, 0);
+  // No signal: colour bars over a strip of noise, drawn at the size asked for.
+  function noSignal(size) {
+    const c = canvas(size), g = c.getContext("2d"), rand = MusicDemo.rng("no signal");
+    const bars = ["#c8c8c8", "#c8c800", "#00c8c8", "#00c800", "#c800c8", "#c80000", "#0000c8"];
+    const top = Math.round(size * 0.66), mid = Math.round(size * 0.75), u = size / 7;
+    bars.forEach((color, i) => {
+      g.fillStyle = color; g.fillRect(Math.round(i * u), 0, Math.ceil(u), top);
+      g.fillStyle = bars[6 - i]; g.fillRect(Math.round(i * u), top, Math.ceil(u), mid - top);
+    });
+    for (let y = mid; y < size; y++) for (let x = 0; x < size; x++) { const v = 20 + Math.floor(rand() * 200); g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(x, y, 1, 1); }
     return c;
   }
   async function fetchArt(url) {
     const res = await fetch(`/api/spotify-art?url=${encodeURIComponent(url)}`, { headers: { "X-Desk-Token": TOKEN } });
     if (!res.ok) throw new Error(`art ${res.status}`);
-    const bitmap = await createImageBitmap(await res.blob());
-    try { return pixelate(bitmap); } finally { bitmap.close?.(); }
+    return createImageBitmap(await res.blob());
   }
+
+  const sources = new Map(), frames = new Map();
+  let inflight = 0;
+  const waiting = [];
+  // Real pictures come four at a time, so a long list never floods the server.
+  function queued(task) {
+    return new Promise((resolve, reject) => {
+      const run = () => { inflight++; task().then(resolve, reject).finally(() => { inflight--; waiting.shift()?.(); }); };
+      if (inflight < 4) run(); else waiting.push(run);
+    });
+  }
+  function sourceOf(key) {
+    if (sources.has(key)) return sources.get(key);
+    const job = key.startsWith("demo:") ? Promise.resolve(MusicDemo.cover(key.slice(5)))
+      : key.startsWith("plain:") ? Promise.resolve(plainCover(key))
+        : queued(() => (mode === "demo" ? Promise.reject(new Error("no art in the preview")) : fetchArt(key)));
+    sources.set(key, job);
+    job.catch(() => sources.delete(key));
+    while (sources.size > 300) sources.delete(sources.keys().next().value);
+    return job;
+  }
+  // Smaller in halves first: one big step down drops detail unevenly in some browsers.
+  function shrink(src, size) {
+    let cur = src, w = src.width;
+    while (w / 2 >= size * 1.5) {
+      const half = canvas(Math.round(w / 2));
+      const g = half.getContext("2d");
+      g.imageSmoothingQuality = "high";
+      g.drawImage(cur, 0, 0, half.width, half.height);
+      cur = half; w = half.width;
+    }
+    const out = canvas(size), g = out.getContext("2d", { willReadFrequently: true });
+    g.imageSmoothingEnabled = true;
+    g.imageSmoothingQuality = "high";
+    g.drawImage(cur, 0, 0, size, size);
+    return out;
+  }
+  // 8-bit: 8 levels a channel and a strong ordered dither. 16-bit: RGB565 (32, 64 and 32
+  // levels) and a light one. 32-bit: the colours as they are.
+  const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+  function quantize(c, lk) {
+    if (lk === "32") return c;
+    const g = c.getContext("2d", { willReadFrequently: true }), img = g.getImageData(0, 0, c.width, c.height), d = img.data, w = c.width;
+    const levels = lk === "8" ? [7, 7, 7] : [31, 63, 31], spread = lk === "8" ? 30 : 0.5;
+    for (let i = 0; i < d.length; i += 4) {
+      const p = i >> 2, x = p % w, y = (p / w) | 0, t = BAYER[(y & 3) * 4 + (x & 3)] / 16 - 0.5;
+      for (let k = 0; k < 3; k++) {
+        const n = levels[k], step = 255 / n, v = d[i + k] + t * (lk === "8" ? spread : step * spread);
+        d[i + k] = Math.max(0, Math.min(255, Math.round(Math.round(v / step) * step)));
+      }
+      d[i + 3] = 255;
+    }
+    g.putImageData(img, 0, 0);
+    return c;
+  }
+  // The grid a view draws: the look's own size, never more than twice the space it has.
+  const gridFor = (css, lk = look) => Math.max(8, Math.min(LOOKS[lk].grid, Math.round(css * 2)));
+  async function frame(key, css, lk = look) {
+    const size = gridFor(css, lk), id = `${key}|${lk}|${size}`;
+    if (frames.has(id)) return frames.get(id);
+    const out = key === "none" ? noSignal(size) : quantize(shrink(await sourceOf(key), size), lk);
+    frames.set(id, out);
+    while (frames.size > 500) frames.delete(frames.keys().next().value);
+    return out;
+  }
+  /** Draw a picture into a canvas the view owns; css is its size on screen. */
+  async function drawArt(c, key, css, { reveal = false } = {}) {
+    if (!c) return;
+    c.dataset.art = key || "";
+    let out;
+    try { out = await frame(key || "none", css); } catch { out = await frame(`plain:${key}`, css); }
+    if (c.dataset.art !== (key || "")) return;  // a newer picture was asked for meanwhile
+    if (c.width !== out.width) { c.width = c.height = out.width; }
+    c.style.imageRendering = out.width > css ? "auto" : "pixelated";
+    const g = c.getContext("2d");
+    if (!reveal || still() || !c.isConnected || !c.getClientRects().length) { clearInterval(c._reveal); g.drawImage(out, 0, 0); return; }
+    // the new picture rolls in from the top, an eighth at a time, like a set changing channel
+    clearInterval(c._reveal);
+    let row = 0;
+    const step = Math.max(1, out.width / 8);
+    c._reveal = setInterval(() => {
+      row = Math.min(out.width, row + step);
+      g.drawImage(out, 0, 0, out.width, row, 0, 0, out.width, row);
+      if (row < out.width) { g.fillStyle = "rgba(210, 255, 220, 0.7)"; g.fillRect(0, row, out.width, Math.max(1, step / 4)); } else clearInterval(c._reveal);
+    }, 34);
+  }
+  const artKey = (item) => (item ? item.art || `plain:${item.id || item.name}` : "none");
+  function setLook(next) {
+    if (!LOOKS[next] || next === look) return;
+    look = next;
+    try { localStorage.setItem(LOOK_KEY, next); } catch { /* storage blocked: the look lasts this visit */ }
+    if (els.look) els.look.textContent = LOOKS[look].label;
+    if (els.art) { els.art.dataset.art = ""; drawArt(els.art, artKey(player?.item), artCss()); }
+    if (miniEls.art) drawArt(miniEls.art, artKey(player?.item), 18);
+    for (const v of views) v.relook?.();
+  }
+  const cycleLook = () => setLook({ 8: "16", 16: "32", 32: "8" }[look]);
+  const artCss = () => (els.art?.clientWidth || DECK_ART);
 
   /* ------------------------------------------------------------ sources */
 
-  // The preview: made-up songs and artists, a local clock, controls that work on this page only.
-  const Demo = (() => {
-    const TRACKS = [
-      { id: "demo-1", name: "Neon Harbor", artists: ["The Pixel Tides"], album: "Night Drive EP", duration_ms: 222000, art: "demo:sunset" },
-      { id: "demo-2", name: "Cartridge Hearts", artists: ["Bit Lagoon"], album: "Save Slot One", duration_ms: 185000, art: "demo:heart" },
-      { id: "demo-3", name: "Slime Time Boogie", artists: ["Gelatin Groove", "Sir Wobbleton 3000"], album: "Bouncy Castle", duration_ms: 168000, art: "demo:slime" },
-      { id: "demo-4", name: "Orbit of the Rubber Duck", artists: ["Captain Lint"], album: "Debug Odyssey", duration_ms: 256000, art: "demo:space" },
-      { id: "demo-5", name: "Floppy Disk Romance", artists: ["Magnetic Avenue"], album: "1.44 MB of Love", duration_ms: 207000, art: "demo:floppy" },
-      { id: "demo-6", name: "Lighthouse Lo-Fi", artists: ["Harbor Static"], album: "Foghorn Tapes", duration_ms: 179000, art: "demo:lighthouse" },
-      { id: "demo-7", name: "Green Build Groove", artists: ["Squash and the Rebasers"], album: "All Checks Passed", duration_ms: 213000, art: "demo:city" },
-    ];
-    const LISTS = [
-      { id: "demoFocus", name: "Focus Mode: Pixels", owner: "You", tracks: 24 },
-      { id: "demoMerge", name: "Merge Day Anthems", owner: "You", tracks: 18 },
-      { id: "demoDuck", name: "Rubber Duck Radio", owner: "Pixel Pat", tracks: 31 },
-      { id: "demoRebase", name: "Late Night Rebase", owner: "You", tracks: 12 },
-      { id: "demoGreen", name: "Green Build Grooves", owner: "Robo Rita", tracks: 27 },
-      { id: "demoStandup", name: "Standup Shuffle", owner: "You", tracks: 9 },
-    ];
-    const DEVICES = [
-      { id: "demoDesk", name: "Desk Speakers", type: "Computer", volume: 70, supports_volume: true },
-      { id: "demoPhone", name: "Pocket Phone", type: "Smartphone", volume: 40, supports_volume: true },
-      { id: "demoKitchen", name: "Kitchen Radio", type: "Speaker", volume: 55, supports_volume: true },
-    ];
-    let s = null;
-    function reset() { s = { i: 0, playing: true, pos: 71000, at: performance.now(), shuffle: false, repeat: "context", volume: 70, device: "demoDesk", list: "demoFocus" }; }
-    const step = (dir) => (s.shuffle && dir > 0 ? (s.i + 3) % TRACKS.length : (s.i + dir + TRACKS.length) % TRACKS.length);
-    function clock() {
-      const t = performance.now();
-      if (s.playing) s.pos += t - s.at;
-      s.at = t;
-      for (let guard = 0; s.pos >= TRACKS[s.i].duration_ms && guard < 50; guard++) {
-        s.pos -= TRACKS[s.i].duration_ms;
-        if (s.repeat !== "track") s.i = step(1);
-      }
-    }
-    function now() {
-      if (!s) reset();
-      clock();
-      const dev = DEVICES.find((d) => d.id === s.device);
-      return {
-        connected: true, active: true, is_playing: s.playing, progress_ms: Math.floor(s.pos), shuffle: s.shuffle, repeat: s.repeat,
-        device: { ...dev, active: true, restricted: false, volume: s.volume }, item: { ...TRACKS[s.i], kind: "track" }, playlist: s.list, disallows: [],
-      };
-    }
-    async function control(action, value) {
-      clock();
-      if (action === "play") s.playing = true;
-      else if (action === "pause") s.playing = false;
-      else if (action === "next") { s.i = step(1); s.pos = 0; }
-      else if (action === "previous") { if (s.pos > 3000) s.pos = 0; else { s.i = step(-1); s.pos = 0; } }
-      else if (action === "seek") s.pos = value;
-      else if (action === "volume") s.volume = value;
-      else if (action === "shuffle") s.shuffle = value;
-      else if (action === "repeat") s.repeat = value;
-      return { ok: true };
-    }
-    return {
-      now: async () => now(), control, reset,
-      devices: async () => { if (!s) reset(); return DEVICES.map((d) => ({ ...d, active: d.id === s.device, volume: d.id === s.device ? s.volume : d.volume })); },
-      transfer: async (id) => { const d = DEVICES.find((x) => x.id === id); if (d) { s.device = id; s.volume = d.volume; } return { ok: true }; },
-      playlists: async () => LISTS,
-      playPlaylist: async (id) => { clock(); s.list = id; s.i = [...id].reduce((a, ch) => a + ch.charCodeAt(0), 0) % TRACKS.length; s.pos = 0; s.playing = true; return { ok: true }; },
-      art: async (item) => painted(String(item.art).slice(5)),
-    };
-  })();
-
+  const q = (params) => Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== "").map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&");
   const Live = {
     now: () => api("spotify-now"),
     control: (action, value, device) => api("spotify-control", { method: "POST", body: { action, value, ...(device ? { device_id: device } : {}) } }),
     devices: async () => (await api("spotify-devices")).devices || [],
     transfer: (id, play) => api("spotify-transfer", { method: "POST", body: { device_id: id, play } }),
-    playlists: async () => (await api("spotify-playlists")).playlists || [],
-    playPlaylist: (id, device) => api("spotify-playlist-play", { method: "POST", body: { id, ...(device ? { device_id: device } : {}) } }),
-    art: (item) => fetchArt(item.art),
+    playlists: (offset = 0) => api(`spotify-playlists?${q({ offset })}`),
+    playlist: (id, offset = 0) => api(`spotify-playlist?${q({ id, offset })}`),
+    liked: (offset = 0) => api(`spotify-liked?${q({ offset })}`),
+    albums: (offset = 0) => api(`spotify-albums?${q({ offset })}`),
+    album: (id, offset = 0) => api(`spotify-album?${q({ id, offset })}`),
+    recent: (before) => api(`spotify-recent?${q({ before })}`),
+    search: (text, type = "all", offset = 0) => api(`spotify-search?${q({ q: text, type, offset })}`),
+    artist: (id, offset = 0) => api(`spotify-artist?${q({ id, offset })}`),
+    queue: () => api("spotify-queue"),
+    queueAdd: (uri) => api("spotify-queue-add", { method: "POST", body: { uri } }),
+    likedCheck: (ids) => api(`spotify-liked-check?${q({ ids: ids.join(",") })}`),
+    like: (ids, on) => api("spotify-like", { method: "POST", body: { ids, liked: on } }),
+    play: (opts) => api("spotify-play", { method: "POST", body: opts }),
   };
-  const source = () => (mode === "demo" ? Demo : Live);
+  const source = () => (mode === "demo" ? MusicDemo.source : Live);
 
   /* ------------------------------------------------------------ helpers */
 
@@ -342,15 +269,17 @@ const Music = (() => {
   }
   const shown = () => !!root && root.isConnected && root.getClientRects().length > 0;
   const miniShown = () => !!mini && !mini.hidden && mini.getClientRects().length > 0;
+  const anyShown = () => shown() || miniShown() || [...views].some((v) => v.visible?.());
   const playing = () => !!player?.is_playing && !!player?.item;
   const can = (what) => !(player?.disallows || []).includes(what);
+  const itemKey = () => player?.item?.id ?? player?.item?.name ?? null;
   function position() {
     if (!player?.item) return 0;
     const run = player.is_playing ? performance.now() - readAt : 0;
     return Math.min(player.item.duration_ms, player.progress_ms + run);
   }
-  function hash(text) { let h = 0; for (const ch of String(text)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h; }
-  const TAPE_TONES = ["--sprite-orange", "--sprite-blue", "--sprite-yellow", "--sprite-red", "--sprite-grass", "--color-cool"];
+  const missing = (scope) => mode === "live" && (status?.scopes_missing || []).includes(scope);
+  const libraryLocked = () => mode === "live" && LIBRARY_SCOPES.some((s) => (status?.scopes_missing || []).includes(s));
 
   /* ------------------------------------------------------------ views */
 
@@ -365,9 +294,6 @@ const Music = (() => {
     const step = (n, done, title, body) => `<li class="mu-step${done ? " is-done" : ""}"><span class="mu-step-n num8" aria-hidden="true">${done ? "OK" : n}</span>
       <div class="mu-step-body"><h4>${title}${done ? '<span class="visually-hidden"> (done)</span>' : ""}</h4>${body}</div></li>`;
     const copy = (value, label = "Copy") => `<button class="btn btn--quiet mu-copy-btn" type="button" data-music="copy" data-copy="${esc(value)}">${label}</button>`;
-    const waiting = signIn ? `<div class="mu-wait" role="status"><span class="mu-wait-led" aria-hidden="true"></span>
-        <span>${signIn.opened ? "Spotify's sign-in page is open in your browser. Sign in there; this page notices by itself." : "PixelDeck could not open a browser here. Copy the sign-in link into one:"}</span>
-        ${copy(signIn.url, "Copy the sign-in link")}</div>` : "";
     return `<div class="mu" data-view="setup"><section class="mu-setup" aria-labelledby="mu-setup-title">
       <header class="mu-setup-head"><span class="mu-setup-art">${cassette(5)}</span>
         <div><p class="mu-kicker num8">MUSIC</p><h2 id="mu-setup-title">Put your Spotify on the deck</h2>
@@ -384,12 +310,18 @@ const Music = (() => {
           ${s.configured && !s.client_id_ok ? '<p class="mu-warn">That Client ID does not look right: it is the letters and digits on the app\'s page.</p>' : ""}`)}
         ${step(4, false, "Connect", `<p>Sign in with Spotify in your browser and allow PixelDeck.</p>
           <p class="mu-actions"><button class="btn btn--primary" type="button" data-music="connect"${s.configured && s.client_id_ok ? "" : " disabled"}>Connect Spotify</button>
-          <button class="btn btn--quiet" type="button" data-music="retry">Check again</button></p>${waiting}`)}
+          <button class="btn btn--quiet" type="button" data-music="retry">Check again</button></p>${waitingHtml()}`)}
       </ol>
       <p class="mu-premium"><span class="mu-premium-tag num8">PREMIUM</span><span>Spotify Premium is needed for the app's owner, and for play, pause, skip, seek and volume.
         While the app is in development mode it works for its owner and up to 5 people added under User Management.</span></p>
       <footer class="mu-setup-foot"><span>Just looking?</span><button class="btn" type="button" data-music="preview">Preview with made-up music</button></footer>
     </section></div>`;
+  }
+  function waitingHtml() {
+    if (!signIn) return "";
+    return `<div class="mu-wait" role="status"><span class="mu-wait-led" aria-hidden="true"></span>
+      <span>${signIn.opened ? "Spotify's sign-in page is open in your browser. Sign in there; this page notices by itself." : "PixelDeck could not open a browser here. Copy the sign-in link into one:"}</span>
+      <button class="btn btn--quiet mu-copy-btn" type="button" data-music="copy" data-copy="${esc(signIn.url)}">Copy the sign-in link</button></div>`;
   }
 
   function deckHtml() {
@@ -399,7 +331,10 @@ const Music = (() => {
     const blocks = "<i></i>".repeat(BLOCKS);
     const vol = Array.from({ length: VOL_BLOCKS }, (_, i) => `<i style="--h:${28 + i * 8}%"></i>`).join("");
     const woofer = speaker(26, 4, "mu-woofer"), tweeter = speaker(10, 4, "mu-tweeter");
+    const mq = (ref, cls) => `<div class="mu-mq ${cls}" data-ref="${ref}"><span class="mu-mq-track"><span class="mu-mq-text"></span><span class="mu-mq-text" aria-hidden="true"></span></span></div>`;
     return `<div class="mu" data-view="deck">
+      <div class="mu-top"><span class="mu-kicker num8">MUSIC</span><span class="mu-from" data-ref="from"></span>
+        <span class="mu-top-tools"><button class="btn btn--quiet mu-tool" type="button" data-music="popout" data-tip="Float a mini player over the layout">${glyph("pop", 2)}<span>Pop out</span></button></span></div>
       <div class="mu-ribbon" data-ref="ribbon" hidden></div>
       <div class="mu-stage">
         <div class="mu-crew" aria-hidden="true"><span class="mu-slime">${Sprites.svg("buddy", { scale: 4 })}</span><span class="mu-bot">${Sprites.svg("bot", { scale: 4 })}</span></div>
@@ -408,12 +343,12 @@ const Music = (() => {
           <div class="mu-brand" aria-hidden="true"><span class="mu-power" data-ref="power"></span><b>PIXELDECK</b><small>PD-808 STEREO CASSETTE</small></div>
           <div class="mu-face">
             <div class="mu-spk" aria-hidden="true">${tweeter}${woofer}</div>
-            <div class="mu-crt"><canvas class="mu-art" data-ref="art" width="${ART}" height="${ART}" role="img" aria-label="Album art"></canvas><span class="mu-crt-knobs" aria-hidden="true"><i></i><i></i></span></div>
+            <div class="mu-crt"><button class="mu-screen" type="button" data-music="look" data-ref="screen" aria-label="Album art. Click to change the pixel look">
+                <canvas class="mu-art" data-ref="art" width="64" height="64"></canvas></button>
+              <span class="mu-look num8" data-ref="look" aria-hidden="true">${LOOKS[look].label}</span><span class="mu-crt-knobs" aria-hidden="true"><i></i><i></i></span></div>
             <div class="mu-lcd" data-ref="lcd">
               <div class="mu-lcd-row"><span class="mu-mode" data-ref="mode">STOP</span><span class="mu-dev" data-ref="dev"></span></div>
-              <div class="mu-mq mu-mq--title" data-ref="title"><span class="mu-mq-track"><span class="mu-mq-text"></span><span class="mu-mq-text" aria-hidden="true"></span></span></div>
-              <div class="mu-mq mu-mq--sub" data-ref="sub"><span class="mu-mq-track"><span class="mu-mq-text"></span><span class="mu-mq-text" aria-hidden="true"></span></span></div>
-              <div class="mu-mq mu-mq--album" data-ref="album"><span class="mu-mq-track"><span class="mu-mq-text"></span><span class="mu-mq-text" aria-hidden="true"></span></span></div>
+              ${mq("title", "mu-mq--title")}${mq("sub", "mu-mq--sub")}${mq("album", "mu-mq--album")}
               <div class="mu-lcd-row mu-times"><span class="num8 mu-pos" data-ref="pos">0:00</span><span class="num8 mu-dur" data-ref="dur">0:00</span></div>
               <div class="mu-seek" data-ref="seek" data-music="seek" role="slider" tabindex="0" aria-label="Position in the song" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">${blocks}</div>
               <div class="mu-eq" data-ref="eq" aria-hidden="true">${eq}</div>
@@ -427,6 +362,7 @@ const Music = (() => {
               <button class="mu-key" type="button" data-music="next" data-ref="next" aria-label="Next">${glyph("next")}<span>NEXT</span></button>
             </div>
             <div class="mu-toggles" role="group" aria-label="Order">
+              <button class="mu-key mu-key--toggle mu-key--like" type="button" data-music="like" data-ref="like" aria-pressed="false" aria-label="Like this song">${glyph("heart", 2)}<span>LIKE</span></button>
               <button class="mu-key mu-key--toggle" type="button" data-music="shuffle" data-ref="shuffle" aria-pressed="false"><i class="mu-led" aria-hidden="true"></i><span>SHUF</span></button>
               <button class="mu-key mu-key--toggle" type="button" data-music="repeat" data-ref="repeat" aria-pressed="false"><i class="mu-led" aria-hidden="true"></i><span data-ref="repeatLabel">RPT</span></button>
             </div>
@@ -438,25 +374,23 @@ const Music = (() => {
         </div>
       </div>
       <p class="mu-note" data-ref="note" role="status" hidden></p>
-      <section class="mu-tapes" aria-labelledby="mu-tapes-title"><header class="mu-tapes-head"><h3 id="mu-tapes-title">Tapes</h3><span class="mu-hint">Your playlists. Pick one to play it.</span></header>
-        <div class="mu-tape-list" data-ref="tapes"></div></section>
+      <div class="mu-lib" data-ref="lib"></div>
     </div>`;
   }
 
   function build() {
     const next = mode === "boot" ? "boot" : mode === "setup" ? "setup" : "deck";
     if (!root) return;
-    clearInterval(revealTimer);
     if (next === "deck" && view === "deck") { paintAll(); return; }
     view = next;
     root.innerHTML = next === "boot" ? bootHtml() : next === "setup" ? setupHtml() : deckHtml();
     els = {};
     for (const el of root.querySelectorAll("[data-ref]")) els[el.dataset.ref] = el;
     if (next === "deck") {
-      artKey = null;
       lastFilled = -1;
-      if (artFrame) els.art.getContext("2d").drawImage(artFrame, 0, 0);
+      paintedItem = undefined;
       RetroSelect.enhanceAll(root);
+      if (typeof MusicLibrary !== "undefined") MusicLibrary.mount(els.lib, core);
       paintAll();
     }
   }
@@ -488,6 +422,7 @@ const Music = (() => {
   }
   function refit() {
     for (const el of [els.title, els.sub, els.album, miniEls.mq]) fit(el);
+    for (const v of views) v.refit?.();
   }
 
   function ribbon() {
@@ -497,6 +432,9 @@ const Music = (() => {
       html = `<span class="mu-ribbon-tag num8">PREVIEW</span><span>Made-up songs and artists, drawn here. Nothing plays and nothing reaches Spotify.</span>
         <span class="mu-ribbon-tools">${status?.connected ? "" : status?.configured && status?.client_id_ok ? '<button class="btn btn--primary" type="button" data-music="connect">Connect Spotify</button>' : '<button class="btn" type="button" data-music="leave">Set up Spotify</button>'}
         <button class="btn btn--quiet" type="button" data-music="leave">${status?.connected ? "Back to my Spotify" : "Leave the preview"}</button></span>`;
+    } else if (libraryLocked()) {
+      html = `<span class="mu-ribbon-tag num8">LIBRARY</span><span>Reconnect Spotify to unlock Liked Songs, saved albums and Recently played: they need permissions PixelDeck did not ask for when you first connected.</span>
+        <span class="mu-ribbon-tools"><button class="btn btn--primary" type="button" data-music="connect">Reconnect Spotify</button></span>`;
     } else if (status?.user && !status.user.premium) {
       html = `<span class="mu-ribbon-tag num8">FREE</span><span>Spotify Free: the deck shows what plays. Play, pause, skip, seek and volume need Premium.</span>`;
     }
@@ -508,28 +446,43 @@ const Music = (() => {
     ribbon();
     paint();
     paintDevices();
-    paintTapes();
+    for (const v of views) v.paintAll?.();
+  }
+
+  function fromText(p) {
+    const ctx = p?.context;
+    if (!ctx) return "";
+    return { playlist: "FROM A PLAYLIST", album: "FROM AN ALBUM", artist: "FROM AN ARTIST" }[ctx.type] || "";
   }
 
   function paint() {
     paintMini();
+    const item = player?.item;
+    const key = item?.id ?? item?.name ?? null;
+    if (key !== trackSeen) { trackSeen = key; for (const fn of trackListeners) fn(item); if (item?.id) checkLikes([item.id]); }
+    for (const v of views) v.paint?.();
     if (view !== "deck" || !els.lcd) return;
-    const p = player, item = p?.item, on = playing();
-    paintedItem = item?.id ?? item?.name ?? null;
+    const p = player, on = playing();
+    paintedItem = key;
     root.firstElementChild.classList.toggle("is-playing", on);
     root.firstElementChild.classList.toggle("is-idle", !item);
     els.mode.textContent = !p ? "TUNING" : !item ? "NO TAPE" : on ? "PLAY" : "PAUSE";
     els.mode.dataset.state = !item ? "stop" : on ? "play" : "pause";
     els.dev.textContent = p?.device?.name ? p.device.name.toUpperCase() : "";
+    els.from.textContent = fromText(p);
     marquee(els.title, item ? item.name : p ? "Nothing is playing" : "Tuning in");
     marquee(els.sub, item ? item.artists.join(", ") : p ? "Start Spotify on a phone or computer," : "");
-    marquee(els.album, item ? (item.album ? `${item.kind === "episode" ? "SHOW" : "FROM"} ${item.album}` : "") : p ? "or pick a tape below." : "");
+    marquee(els.album, item ? (item.album ? `${item.kind === "episode" ? "SHOW" : "FROM"} ${item.album}` : "") : p ? "or pick something in the library below." : "");
     els.play.classList.toggle("is-playing", on);
     els.play.setAttribute("aria-label", on ? "Pause" : "Play");
     els.playLabel.textContent = on ? "PAUSE" : "PLAY";
     els.play.disabled = !p || (on ? !can("pausing") : (!item && !els.device?.value) || !can("resuming"));
     els.prev.disabled = !item || !can("skipping_prev");
     els.next.disabled = !item || !can("skipping_next");
+    const liked = item?.id ? likes.get(item.id) : undefined;
+    els.like.setAttribute("aria-pressed", String(liked === true));
+    els.like.disabled = !item?.id || item.kind === "episode";
+    els.like.setAttribute("aria-label", liked ? "Liked: click to remove from Liked Songs" : "Like this song");
     els.shuffle.setAttribute("aria-pressed", String(!!p?.shuffle));
     els.shuffle.disabled = !item || !can("toggling_shuffle");
     const rep = p?.repeat || "off";
@@ -547,8 +500,10 @@ const Music = (() => {
     els.power.classList.toggle("is-on", on);
     els.note.textContent = pollError;
     els.note.hidden = !pollError;
-    markTape();
-    wantArt(item, !!p);
+    els.look.textContent = LOOKS[look].label;
+    els.screen.setAttribute("aria-label", `Album art, ${LOOKS[look].label.toLowerCase()} look. Click to change the pixel look`);
+    const want = artKey(p ? item : null);
+    if (els.art.dataset.art !== want) drawArt(els.art, want, artCss(), { reveal: true });
     tick();
   }
 
@@ -567,6 +522,7 @@ const Music = (() => {
       els.seek.setAttribute("aria-valuetext", `${fmt(pos)} of ${fmt(dur)}`);
       els.seek.setAttribute("aria-disabled", String(!dur || !can("seeking")));
     }
+    for (const v of views) v.tick?.();
     if (mode === "live" && playing() && position() >= player.item.duration_ms && !endAsked) {
       endAsked = true;  // the song is over here: ask what plays next a moment after Spotify moved on
       schedule(800);
@@ -580,20 +536,20 @@ const Music = (() => {
     if (!on) return;
     if (!miniEls.play) {
       mini.innerHTML = `<button class="mm-play" type="button" data-music="toggle" aria-label="Play">${glyph("play", 2)}${glyph("pause", 2)}</button>
-        <button class="mm-title" type="button" data-music="open" data-tip="Open the music player"><canvas class="mm-art" width="${MINI_ART}" height="${MINI_ART}" aria-hidden="true"></canvas>
+        <button class="mm-title" type="button" data-music="drop" aria-haspopup="dialog" aria-expanded="false"><canvas class="mm-art" width="18" height="18" aria-hidden="true"></canvas>
         <span class="mu-mq mm-mq"><span class="mu-mq-track"><span class="mu-mq-text"></span><span class="mu-mq-text" aria-hidden="true"></span></span></span>
         <span class="mm-eq" aria-hidden="true"><i></i><i></i><i></i></span></button>`;
       miniEls = { play: mini.querySelector(".mm-play"), title: mini.querySelector(".mm-title"), art: mini.querySelector(".mm-art"), mq: mini.querySelector(".mm-mq") };
-      if (artFrame) drawMiniArt(artFrame);
     }
     const item = player?.item, isOn = playing();
     mini.classList.toggle("is-playing", isOn);
     miniEls.play.classList.toggle("is-playing", isOn);
     miniEls.play.setAttribute("aria-label", isOn ? "Pause" : "Play");
     miniEls.play.disabled = !item;
-    const text = item ? `${item.name} · ${item.artists.join(", ")}` : player ? "Nothing playing" : "Music";
-    marquee(miniEls.mq, text);
-    miniEls.title.setAttribute("aria-label", item ? `Now playing: ${item.name} by ${item.artists.join(", ")}. Open the music player.` : "Open the music player");
+    marquee(miniEls.mq, item ? `${item.name} · ${item.artists.join(", ")}` : player ? "Nothing playing" : "Music");
+    miniEls.title.setAttribute("aria-label", item ? `Now playing: ${item.name} by ${item.artists.join(", ")}. Open the music dropdown.` : "Open the music dropdown");
+    const want = artKey(player ? item : null);
+    if (miniEls.art.dataset.art !== want) drawArt(miniEls.art, want, 18);
   }
 
   function paintDevices() {
@@ -610,74 +566,6 @@ const Music = (() => {
     RetroSelect.sync(sel);
   }
 
-  function paintTapes() {
-    const box = els.tapes;
-    if (!box) return;
-    let html;
-    if (lists === null) html = '<p class="mu-tapes-empty">Reading your playlists</p>';
-    else if (!lists.length) html = '<p class="mu-tapes-empty">No playlists yet. The ones you make or follow in Spotify show up here.</p>';
-    else {
-      html = lists.map((p) => {
-        const meta = [p.tracks != null ? `${p.tracks} ${p.tracks === 1 ? "song" : "songs"}` : "", p.owner || ""].filter(Boolean).join("  ");
-        return `<button class="mu-tape" type="button" data-music="playlist" data-id="${esc(p.id)}" style="--tape:var(${TAPE_TONES[hash(p.id) % TAPE_TONES.length]})" aria-label="Play the playlist ${esc(p.name)}">
-          <span class="mu-tape-label"><span class="mu-tape-top"><span class="mu-tape-side num8" aria-hidden="true">A</span><b>${esc(p.name)}</b></span>
-            <small>${esc(meta)}</small>
-            <span class="mu-tape-window" aria-hidden="true"><i class="mu-reel"></i><span class="mu-tape-run"></span><i class="mu-reel"></i></span></span>
-          <span class="mu-tape-foot" aria-hidden="true"><i></i><i></i><i></i></span><span class="mu-tape-sticker num8" aria-hidden="true">ON AIR</span></button>`;
-      }).join("");
-    }
-    if (box._html !== html) { box.innerHTML = html; box._html = html; }
-    markTape();
-  }
-  function markTape() {
-    if (!els.tapes) return;
-    for (const t of els.tapes.querySelectorAll(".mu-tape")) {
-      const on = !!player?.playlist && t.dataset.id === player.playlist;
-      t.classList.toggle("is-on", on);
-      t.setAttribute("aria-current", on ? "true" : "false");
-    }
-  }
-
-  /* ------------------------------------------------------------ the picture */
-
-  function wantArt(item, known) {
-    const key = item ? item.art || `plain:${item.id || item.name}` : known ? "none" : "boot";
-    if (key === artKey) return;
-    artKey = key;
-    const ticket = ++artTicket;
-    if (!item) { show(noSignal()); return; }
-    if (artCache.has(key)) { show(artCache.get(key)); return; }
-    const done = (frame) => {
-      artCache.set(key, frame);
-      while (artCache.size > 24) artCache.delete(artCache.keys().next().value);
-      if (ticket === artTicket) show(frame);
-    };
-    if (!item.art) { done(plainCover(key)); return; }
-    source().art(item).then(done, () => { if (ticket === artTicket) show(plainCover(key)); });
-  }
-  function drawMiniArt(frame) {
-    const g = miniEls.art?.getContext("2d");
-    if (!g) return;
-    g.imageSmoothingEnabled = true;
-    g.clearRect(0, 0, MINI_ART, MINI_ART);
-    g.drawImage(frame, 0, 0, MINI_ART, MINI_ART);
-  }
-  // A new picture rolls in from the top, four rows a frame, like a set changing channel.
-  function show(frame) {
-    artFrame = frame;
-    drawMiniArt(frame);
-    const g = els.art?.getContext("2d");
-    if (!g) return;
-    clearInterval(revealTimer);
-    if (still() || !shown()) { g.drawImage(frame, 0, 0); return; }
-    let row = 0;
-    revealTimer = setInterval(() => {
-      row = Math.min(ART, row + 4);
-      g.drawImage(frame, 0, 0, ART, row, 0, 0, ART, row);
-      if (row < ART) { g.fillStyle = "rgba(210, 255, 220, 0.7)"; g.fillRect(0, row, ART, 1); } else clearInterval(revealTimer);
-    }, 34);
-  }
-
   /* ------------------------------------------------------------ status and polling */
 
   function notify() { for (const fn of listeners) { try { fn(status); } catch { /* a listener's own trouble */ } } }
@@ -687,13 +575,14 @@ const Music = (() => {
     mode = demo ? "demo" : status?.connected ? "live" : status ? "setup" : "boot";
     const deck = mode === "live" || mode === "demo";
     if (mode !== was && deck) {
-      player = null; lists = null; devices = []; listsAt = devicesAt = 0; pollError = "";
-      if (mode === "demo") Demo.reset();
+      player = null; devices = []; devicesAt = 0; pollError = ""; likes.clear(); trackSeen = undefined;
+      if (mode === "demo") MusicDemo.source.reset();
     }
     if (!deck) { clearTimeout(pollTimer); player = null; }
     if (mode !== was || !deck) build(); else paintAll();
     paintMini();
-    if (mode !== was && deck) { poll(); loadSide(true); }
+    for (const v of views) v.mode?.(mode, was);
+    if (mode !== was && deck) { poll(); loadDevices(true); }
   }
 
   async function refreshStatus() {
@@ -710,6 +599,10 @@ const Music = (() => {
       signIn = null;
       clearTimeout(statusTimer);
       toast("Spotify connected.", status.user ? `Signed in as ${status.user.name}.` : "");
+    } else if (status?.connected && before?.connected && (before.scopes_missing || []).length && !(status.scopes_missing || []).length) {
+      signIn = null;
+      clearTimeout(statusTimer);
+      toast("Library unlocked.", "Liked Songs, saved albums and Recently played are in the Music panel now.");
     }
     // Nothing new: leave the page alone, or the setup card and the Settings dialog would be
     // rebuilt (and scrolled back up) every few seconds while a sign-in is out in the browser.
@@ -725,7 +618,8 @@ const Music = (() => {
     clearTimeout(statusTimer);
     statusTimer = setTimeout(async function again() {
       await refreshStatus();
-      if (status?.connected || !signIn) return;
+      const done = status?.connected && !(signIn?.scopes && (status.scopes_missing || []).length);
+      if (done || !signIn) { signIn = null; return; }
       if (Date.now() < signIn.until) statusTimer = setTimeout(again, STATUS_EVERY);
       else { signIn = null; if (mode === "setup") build(); }
     }, STATUS_EVERY);
@@ -733,7 +627,7 @@ const Music = (() => {
 
   function cadence() {
     if (document.hidden) return POLL_HIDDEN;
-    return shown() || miniShown() ? POLL_SHOWN : POLL_IDLE;
+    return anyShown() ? POLL_SHOWN : POLL_IDLE;
   }
   function schedule(ms) {
     clearTimeout(pollTimer);
@@ -763,17 +657,53 @@ const Music = (() => {
     endAsked = false;
   }
 
-  async function loadSide(force = false) {
+  function loadDevices(force = false) {
     if (mode !== "live" && mode !== "demo") return;
     const asked = mode, now = Date.now();
-    if (force || now - devicesAt > DEVICES_EVERY) {
-      devicesAt = now;
-      source().devices().then((d) => { if (mode === asked) { devices = d; paintDevices(); paint(); } }).catch(() => {});
-    }
-    if (force || now - listsAt > LISTS_EVERY) {
-      listsAt = now;
-      source().playlists().then((l) => { if (mode === asked) { lists = l; paintTapes(); } })
-        .catch((err) => { if (mode === asked) { lists = lists || []; paintTapes(); pollError = pollError || err.message; paint(); } });
+    if (!force && now - devicesAt < DEVICES_EVERY) return;
+    devicesAt = now;
+    source().devices().then((d) => { if (mode === asked) { devices = d; paintDevices(); paint(); } }).catch(() => {});
+  }
+
+  /* ------------------------------------------------------------ likes */
+
+  let likeBatch = new Set(), likeTimer = 0;
+  // Ask which songs are liked, at most 50 at a time, a moment after the lists stop asking.
+  function checkLikes(ids) {
+    if ((mode !== "live" && mode !== "demo") || missing("user-library-read")) return;
+    for (const id of ids) if (id && !likes.has(id)) likeBatch.add(id);
+    if (!likeBatch.size) return;
+    clearTimeout(likeTimer);
+    likeTimer = setTimeout(async () => {
+      const batch = [...likeBatch].slice(0, 50);
+      batch.forEach((id) => likeBatch.delete(id));
+      try {
+        const out = await source().likedCheck(batch);
+        if (out.locked) return;
+        for (const [id, on] of Object.entries(out.liked || {})) likes.set(id, on);
+        paint();
+        for (const v of views) v.likes?.();
+      } catch { /* the hearts stay hollow */ }
+      if (likeBatch.size) checkLikes([]);
+    }, 120);
+  }
+  async function like(ids, on) {
+    const before = ids.map((id) => [id, likes.get(id)]);
+    ids.forEach((id) => likes.set(id, on));
+    paint();
+    for (const v of views) v.likes?.();
+    try {
+      const out = await source().like(ids, on);
+      if (out.locked) throw Object.assign(new Error(out.message), { locked: true });
+      return true;
+    } catch (err) {
+      before.forEach(([id, was]) => (was === undefined ? likes.delete(id) : likes.set(id, was)));
+      paint();
+      for (const v of views) v.likes?.();
+      if (err.message === "reloading") return false;
+      if (err.locked) toast("Reconnect Spotify to like songs.", err.message, true);
+      else toast("Spotify did not change Liked Songs.", err.message, true);
+      return false;
     }
   }
 
@@ -781,7 +711,6 @@ const Music = (() => {
 
   const deviceChoice = () => (player?.active ? undefined : els.device?.value || undefined);
 
-  const itemKey = () => player?.item?.id ?? player?.item?.name ?? null;
   // Another key goes after a seek or volume still waiting to be sent, so that one goes first.
   // A skip drops a waiting seek: it was meant for the song being left.
   async function flushPending(action) {
@@ -831,19 +760,28 @@ const Music = (() => {
     }
   }
 
-  async function playList(id) {
-    const tape = els.tapes?.querySelector(`.mu-tape[data-id="${CSS.escape(id)}"]`);
-    tape?.classList.add("is-loading");
+  /** Play a playlist, album or artist, or a list of songs, from one song in it. */
+  async function playFrom(opts) {
     try {
-      await source().playPlaylist(id, deviceChoice());
-      if (player) player.playlist = id;
-      markTape();
+      const device = deviceChoice();
+      await source().play({ ...opts, ...(device ? { device_id: device } : {}) });
       holdUntil = 0;
       setTimeout(poll, mode === "demo" ? 0 : 700);
+      return true;
     } catch (err) {
-      if (err.message !== "reloading") toast("Spotify did not play that tape.", err.message, true);
-    } finally {
-      tape?.classList.remove("is-loading");
+      if (err.message !== "reloading") toast("Spotify did not play that.", err.message, true);
+      return false;
+    }
+  }
+  async function queueAdd(uri, name) {
+    try {
+      await source().queueAdd(uri);
+      toast("Added to the queue.", name || "");
+      for (const v of views) v.queued?.();
+      return true;
+    } catch (err) {
+      if (err.message !== "reloading") toast("Spotify did not queue that.", err.message, true);
+      return false;
     }
   }
 
@@ -852,7 +790,7 @@ const Music = (() => {
     try {
       await source().transfer(id, playing());
       devicesAt = 0;
-      setTimeout(() => { poll(); loadSide(); }, mode === "demo" ? 0 : 900);
+      setTimeout(() => { poll(); loadDevices(); }, mode === "demo" ? 0 : 900);
     } catch (err) {
       if (err.message !== "reloading") toast("Spotify did not move the music.", err.message, true);
       paintDevices();
@@ -861,9 +799,10 @@ const Music = (() => {
 
   async function connect(button) {
     if (button) button.disabled = true;
+    const reconnect = !!status?.connected;
     try {
       const out = await api("spotify-login", { method: "POST", body: {} });
-      signIn = { url: out.url, opened: !!out.opened, until: Date.now() + SIGN_IN_WAIT };
+      signIn = { url: out.url, opened: !!out.opened, until: Date.now() + SIGN_IN_WAIT, scopes: reconnect };
       toast(out.opened ? "Spotify's sign-in page is open in your browser." : "Open Spotify's sign-in page.",
         out.opened ? "Sign in there and come back: PixelDeck notices by itself." : "PixelDeck could not open a browser. Copy the link from the Music panel.");
       demo = false;
@@ -894,11 +833,15 @@ const Music = (() => {
   function startDemo() {
     demo = true;
     decide();
-    if (!Layout.isShown("music")) Layout.activate("music");
+    if (!Layout.isShown("music") && !(typeof MusicFloat !== "undefined" && MusicFloat.isOpen())) Layout.activate("music");
   }
   function stopDemo() {
     demo = false;
     decide();
+  }
+  function openPanel() {
+    Layout.activate("music");
+    root?.querySelector(".mu")?.scrollIntoView?.({ block: "start" });
   }
 
   function seekAt(el, clientX) {
@@ -958,14 +901,21 @@ const Music = (() => {
     if (what === "toggle" || what === "next" || what === "previous") return act(what);
     if (what === "shuffle") return act("shuffle", !player?.shuffle);
     if (what === "repeat") return act("repeat", { off: "context", context: "track", track: "off" }[player?.repeat || "off"]);
+    if (what === "like") { const id = player?.item?.id; return id && like([id], likes.get(id) !== true); }
     if (what === "seek") return seekAt(t, e.clientX);
     if (what === "volume") return volumeAt(t, e.clientX);
-    if (what === "playlist") return playList(t.dataset.id);
+    if (what === "look") return cycleLook();
     if (what === "open") {
       const dialog = t.closest("dialog");
       if (dialog?.open) dialog.close();
-      return Layout.activate("music");
+      if (typeof MusicFloat !== "undefined") MusicFloat.closeDropdown();
+      return openPanel();
     }
+    if (what === "drop") {
+      if (typeof MusicFloat !== "undefined") return MusicFloat.toggleDropdown(mini);
+      return openPanel();
+    }
+    if (what === "popout") { if (typeof MusicFloat !== "undefined") MusicFloat.popOut(); return; }
     if (what === "connect") return connect(t);
     if (what === "disconnect") return disconnect(t);
     if (what === "preview") return startDemo();
@@ -977,6 +927,17 @@ const Music = (() => {
     }
   }
 
+  /* ------------------------------------------------------------ what the other views use */
+
+  const core = {
+    get player() { return player; }, get status() { return status; }, get mode() { return mode; }, get look() { return look; },
+    source, position, playing, fmt, glyph, cassette, marquee, fit, still, can,
+    act, playFrom, queueAdd, like, checkLikes, liked: (id) => likes.get(id), missing, libraryLocked,
+    drawArt, artKey, cycleLook, lookLabel: () => LOOKS[look].label,
+    addView: (v) => { views.add(v); return v; }, onTrack: (fn) => trackListeners.add(fn),
+    openPanel, shown, connect,
+  };
+
   /* ------------------------------------------------------------ mount */
 
   function mount(el) {
@@ -984,36 +945,38 @@ const Music = (() => {
     root.classList.add("mu-panel");
     mini = document.getElementById("music-mini");
     document.addEventListener("click", (e) => { onClick(e); });
-    root.addEventListener("keydown", (e) => {
+    document.addEventListener("keydown", (e) => {
       const slider = e.target.closest?.("[data-music='seek'], [data-music='volume']");
       if (slider && nudge(slider.dataset.music, e.key)) e.preventDefault();
     });
     root.addEventListener("change", (e) => { if (e.target === els.device) transfer(e.target.value); });
-    // Showing the panel again wakes it: measure the marquee, ask what plays if that is stale.
+    // Showing the panel again wakes it: measure the marquees, ask what plays if that is stale.
     let wasShown = false;
     new ResizeObserver(() => {
       const now = shown();
       refit();
-      if (now && !wasShown && (mode === "live" || mode === "demo")) { poll(); loadSide(); }
+      if (now && !wasShown && (mode === "live" || mode === "demo")) { poll(); loadDevices(); }
+      if (now && !wasShown && els.art && player) { els.art.dataset.art = ""; drawArt(els.art, artKey(player.item), artCss()); }
       wasShown = now;
     }).observe(root);
     document.addEventListener("visibilitychange", () => { if (!document.hidden && (mode === "live" || mode === "demo")) poll(); });
     addEventListener("focus", () => { if (signIn || mode === "setup") refreshStatus(); });
     // The local clock: time, blocks and the end of a song, four times a second while it plays.
     setInterval(async () => {
-      if (document.hidden || !playing() || !(shown() || miniShown())) return;
-      if (mode === "demo" && performance.now() >= holdUntil) accept(await Demo.now());
+      if (document.hidden || !playing() || !anyShown()) return;
+      if (mode === "demo" && performance.now() >= holdUntil) accept(await MusicDemo.source.now());
       const item = player?.item;
-      if ((item?.id ?? item?.name ?? null) !== paintedItem) paint(); else tick();
+      if ((item?.id ?? item?.name ?? null) !== paintedItem || trackSeen !== (item?.id ?? item?.name ?? null)) paint(); else tick();
     }, 250);
     const calm = () => { refit(); if (view === "deck") paint(); };
     reducedQuery.addEventListener?.("change", calm);
     if (typeof Prefs !== "undefined") Prefs.onChange(calm);
+    if (typeof MusicFloat !== "undefined") MusicFloat.mount(core);
     demo = new URLSearchParams(location.search).has("musicdemo");
     build();
     if (demo) {
       decide();
-      setTimeout(() => { if (!Layout.isShown("music")) Layout.activate("music"); }, 0);
+      setTimeout(() => { if (!Layout.isShown("music") && !(typeof MusicFloat !== "undefined" && MusicFloat.isOpen())) Layout.activate("music"); }, 0);
     }
     refreshStatus();
   }
@@ -1025,5 +988,6 @@ const Music = (() => {
     onStatus: (fn) => listeners.add(fn),
     connect, disconnect,
     preview: startDemo,
+    core,
   };
 })();
