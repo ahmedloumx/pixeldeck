@@ -1,8 +1,8 @@
 """Jira, for one job: the ticket of a pull request you merge, its status, and moving it on.
 
 The site comes from JIRA_SITE only, never from the page. The token is JIRA_TOKEN, with
-JIRA_EMAIL (or BITBUCKET_EMAIL); without one the Bitbucket token is tried, which works
-only when it also carries Jira scopes. A classic API token talks to the site itself; a
+JIRA_EMAIL (or BITBUCKET_EMAIL); the Bitbucket token is never sent here, so it still goes
+to api.bitbucket.org only. A classic API token talks to the site itself; a
 token with scopes must go through Atlassian's gateway (api.atlassian.com/ex/jira/<cloud
 id>), so when the site refuses, the gateway is tried and whichever answers is kept.
 """
@@ -40,15 +40,11 @@ class Jira:
 
     @staticmethod
     def settings():
-        token, source = config.get("JIRA_TOKEN"), "JIRA_TOKEN"
-        if not token:
-            token, source = config.get("BITBUCKET_TOKEN"), "BITBUCKET_TOKEN"
-        return config.jira_site(), config.get("JIRA_EMAIL") or config.get("BITBUCKET_EMAIL"), token, source
+        return config.jira_site(), config.get("JIRA_EMAIL") or config.get("BITBUCKET_EMAIL"), config.get("JIRA_TOKEN"), "JIRA_TOKEN"
 
     def status(self):
-        site, email, token, source = self.settings()
-        return {"site": site or None, "token_set": bool(token), "token_from": source if token else None,
-                "email": email or None, **self.state}
+        site, email, token, _ = self.settings()
+        return {"site": site or None, "token_set": bool(token), "email": email or None, **self.state}
 
     # ---- transport ---------------------------------------------------------
 

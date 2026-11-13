@@ -545,6 +545,16 @@ class JiraTest(unittest.TestCase):
         self.assertEqual(json.loads(posts[0][2]), {"transition": {"id": "31"}})
         self.assertNotIn("scoped-token", json.dumps(j.status()), "the status never carries the token")
 
+    def test_the_bitbucket_token_is_never_sent_to_jira(self):
+        os.environ.pop("JIRA_TOKEN")
+        os.environ["BITBUCKET_TOKEN"] = "bitbucket-secret"
+        self.addCleanup(lambda: os.environ.pop("BITBUCKET_TOKEN", None))
+        j = self.jira_mod.Jira(opener=self._open)
+        with self.assertRaises(self.jira_mod.JiraError):
+            j.ticket("ABC-9001")
+        self.assertEqual(self.requests, [], "no Jira token: nothing is sent at all")
+        self.assertFalse(j.status()["token_set"])
+
     def test_refuses_bad_keys_and_steps_jira_does_not_offer(self):
         j = self.jira_mod.Jira(opener=self._open)
         for bad in ("abc-1", "ABC-0", "ABC-1/../../x", "", None):

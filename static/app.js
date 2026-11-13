@@ -948,7 +948,7 @@ function prTools(pr) {
       + `<span class="tool-sep" aria-hidden="true"></span>`
       + tool(`tool--merge${signals(pr).approved ? " is-ready" : ""}`, "data-merge", Sprites.svg("merge", { scale: 2 }), "Merge",
         signals(pr).approved
-          ? `Merge into ${pr.dest} with the branch's default strategy. Asks you to confirm.`
+          ? `Merge into ${pr.dest}: pick the strategy, the message and the ticket's next status first.`
           : `Not approved yet. Bitbucket's merge checks decide whether it can merge into ${pr.dest}. Asks you to confirm.`)
       + tool("tool--danger", "data-decline", Sprites.svg("decline", { scale: 2 }), "Decline", "Decline this pull request. Asks you to confirm.")
     : tool("tool--agent", 'data-launch="review"', buddy, "Review with the rubric", `Review with the rubric: Claude reviews it in the Terminal panel. ${shift}`)

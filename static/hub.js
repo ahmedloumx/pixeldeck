@@ -156,8 +156,8 @@ const Settings = (() => {
         <p><button class="btn" type="button" data-settings-test>Test the connection</button></p></section>
       ${jira ? `<section class="set-card"><header><h3>Jira</h3>${pill(jira.ok, jira.me ? `Connected as ${jira.me}` : "Connected", jira.site ? (jira.token_set ? "Token refused" : "No Jira token") : "Not set up")}</header>
         ${jira.error ? `<p class="set-error">${esc(jira.error)}</p>` : ""}
-        <dl class="set-rows">${row("Site", jira.site)}${row("Token", jira.token_set ? `set (${jira.token_from})` : "missing")}</dl>
-        <p class="set-hint">Used to show and change a ticket's status when you merge. Set <code>JIRA_SITE</code>, and <code>JIRA_TOKEN</code> when your Bitbucket token cannot read Jira.</p></section>` : ""}
+        <dl class="set-rows">${row("Site", jira.site)}${row("Token", jira.token_set ? "set (never shown)" : "missing")}</dl>
+        <p class="set-hint">Used to show and move a ticket's status when you merge. Set <code>JIRA_SITE</code> and <code>JIRA_TOKEN</code>, an API token with Jira access; the Bitbucket token is never sent to Jira.</p></section>` : ""}
       <section class="set-card"><header><h3>Claude Code</h3>${pill(cl.ok, "Ready", cl.path ? "Not answering" : "Not found")}</header>
         ${cl.error ? `<p class="set-error">${esc(cl.error)}</p>` : ""}
         <dl class="set-rows">${row("Program", cl.path, { code: true })}${row("Version", cl.version)}</dl>
