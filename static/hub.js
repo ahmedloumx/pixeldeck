@@ -35,6 +35,7 @@ const PixelIcon = (() => {
     gear: ["....###....", ".##.###.##.", ".#########.", "..##...##..", "###.....###", "###.....###", "###.....###", "..##...##..", ".#########.", ".##.###.##.", "....###...."],
     help: ["..#####..", ".##...##.", ".##...##.", ".....##..", "....##...", "...##....", "...##....", ".........", "...##....", "...##....", "........."],
     plug: ["..#...#..", "..#...#..", "#########", "#########", ".#######.", ".#######.", "..#####..", "....#....", "....#....", "....#...."],
+    layout: ["###########", "#...#.....#", "#...#.....#", "#...#.....#", "#...#.....#", "#...#######", "#...#.....#", "#...#.....#", "#...#.....#", "#...#.....#", "###########"],
   };
   function svg(name, px = 2) {
     const rows = ROWS[name];
@@ -123,9 +124,17 @@ const StatusBar = (() => {
     $id("bell").innerHTML = `${PixelIcon.svg("bell")}<span class="st-badge" id="bell-badge" hidden></span>`;
     $id("settings-btn").innerHTML = PixelIcon.svg("gear");
     $id("guide-btn").innerHTML = PixelIcon.svg("help");
+    if ($id("layout-btn")) $id("layout-btn").innerHTML = PixelIcon.svg("layout");
     $id("bell").hidden = !has("events");
     $id("settings-btn").addEventListener("click", () => Settings.open());
     $id("guide-btn").addEventListener("click", () => { if (typeof Guide !== "undefined") Guide.start(); });
+    // The layout menu is a <details>: like the bell, a press outside it or Escape closes it.
+    // Capture, so a panel that stops the event (the terminal) still closes it.
+    const menu = $id("layout-menu");
+    document.addEventListener("pointerdown", (e) => { if (menu?.open && !menu.contains(e.target)) menu.open = false; }, true);
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && menu?.open) { menu.open = false; menu.querySelector("summary")?.focus(); }
+    });
     if (typeof Notify !== "undefined") Notify.onChange(paintBell);
     clearInterval(tick);
     tick = setInterval(paintSync, 1000);
