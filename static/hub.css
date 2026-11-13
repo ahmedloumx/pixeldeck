@@ -8,3 +8,4 @@
 .head-tools .range-bar { margin: 0; }
 .panel-head-row .copy-who { margin: 0; }
 .copy-who select { min-height: 30px; }
+.copy-link.is-copied { color: var(--color-ok); text-decoration-color: var(--color-ok); }

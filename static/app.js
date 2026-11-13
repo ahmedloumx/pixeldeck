@@ -1173,6 +1173,14 @@ async function copyText(text) {
   area.remove();
   return ok;
 }
+async function copyLink(btn) {
+  const ok = await copyText(btn.dataset.copyLink);
+  if (!ok) return toast("Could not copy the link.", btn.dataset.copyLink, true);
+  clearTimeout(btn._reset);
+  btn.textContent = "Copied!";
+  btn.classList.add("is-copied");
+  btn._reset = setTimeout(() => { btn.textContent = "Copy link"; btn.classList.remove("is-copied"); }, 1400);
+}
 async function copyThreads(btn) {
   const { pr, detail } = state.pr || {};
   if (!detail?.threads) return;
@@ -1229,7 +1237,7 @@ function renderPr() {
     <div class="pr-view${state.prFolded ? " is-folded" : ""}">
       <header class="pr-head"${state.prFolded ? " inert" : ""}>
         <div class="pr-top"><span class="id">${esc(full.repo)} #${full.id}</span>${stateChip(full)}<span>${esc(full.author.name)}</span><time class="when">${esc(ago(full.updated_on))}</time>
-          <span class="spacer"></span><button class="link" type="button" data-external="${esc(full.url)}">Bitbucket</button>${ticket}
+          <span class="spacer"></span><button class="link" type="button" data-external="${esc(full.url)}">Bitbucket</button><button class="link copy-link" type="button" data-copy-link="${esc(full.url)}" title="Copy the link to this pull request">Copy link</button>${ticket}
           <button class="link" type="button" data-action="reload-pr">Reload</button><button class="btn btn--quiet" type="button" data-action="close-pr">Close</button></div>
         <h2>${esc(full.title)}</h2>
         <div class="branch">${esc(full.source)} into ${esc(full.dest)}</div>
@@ -2037,6 +2045,8 @@ function bind() {
     if (refuse) return decideProposal(refuse, refuse.dataset.proposalDecline, "decline", !!refuse.closest("#pr-dialog"));
     const review = t.closest("[data-proposal-review]");
     if (review) { const p = review.closest(".proposal-banner")?._proposal; if (p) openPreview(p.repo, p.branch, p); return; }
+    const linkBtn = t.closest("[data-copy-link]");
+    if (linkBtn) return copyLink(linkBtn);
     const copyBtn = t.closest("[data-copy-threads]");
     if (copyBtn) return copyThreads(copyBtn);
     const launchBtn = t.closest("[data-launch]");
