@@ -161,13 +161,13 @@ footer { margin-top: 72px; padding-top: 18px; border-top: 3px dashed var(--rule-
 <div class="grid cols-4">
   <div class="score"><b>0</b><span>third-party packages for the server: the Python standard library only (Windows adds pywinpty for the terminal)</span></div>
   <div class="score"><b class="cool">0</b><span>build steps: no bundler, no framework, no npm install</span></div>
-  <div class="score"><b class="amber">~11,500</b><span>lines: 4,000 Python, 5,900 JavaScript, 1,600 CSS</span></div>
-  <div class="score"><b>61</b><span>unit tests, run on Python 3.12 and 3.14, plus a WebKit self-test and browser scripts</span></div>
+  <div class="score"><b class="amber">~14,700</b><span>lines: 5,100 Python, 7,600 JavaScript, 2,100 CSS</span></div>
+  <div class="score"><b>114</b><span>unit tests, run on Python 3.12 and 3.14, plus a WebKit self-test and browser scripts</span></div>
 </div>
 <div class="grid cols-4" style="margin-top:18px">
   <div class="score"><b class="cool">95 MB</b><span>server memory, 0% CPU when idle (measured on Linux)</span></div>
   <div class="score"><b class="cool">336 MB</b><span>Linux app window memory, for its 3 processes</span></div>
-  <div class="score"><b class="amber">925 KB</b><span>everything the page loads, fonts, terminal and games included</span></div>
+  <div class="score"><b class="amber">1062 KB</b><span>everything the page loads, fonts, terminal, games and player included</span></div>
   <div class="score"><b>1000/h</b><span>Bitbucket call limit it stays under; background work stops at 80%</span></div>
 </div>
 
@@ -183,6 +183,7 @@ footer { margin-top: 72px; padding-top: 18px; border-top: 3px dashed var(--rule-
       <li><strong>Pull request view</strong>: overview with the description rendered from Markdown, diff with per-file viewed marks, threads, commits, tasks. The header folds under the tab row (<code>f</code>) so the diff gets the room. <strong>Copy link</strong> copies its address in one click.</li>
       <li><strong>Copy review comments</strong>: every thread, the open ones, or one thread, copied as plain Markdown for a Claude prompt, with file, line and status.</li>
       <li><strong>Team and insights</strong>: teammates' queues, review load, merge history. Insights take a range (7 days, 30 days, 12 weeks, 120 days, the merged window); a month or less is charted per day. A panel that cannot see that far says so.</li>
+      <li><strong>Repos</strong>: a tab beside the queue with the project's repositories and a search; for each one, its code at any branch (folders, files with line numbers, the README as text), its branches (searchable, newest first), its recent commits and its open pull requests, which open in PixelDeck. Read only; a branch resolves to a commit and the code is read by commit, so what was read once is kept. Files over 512 KB are cut; binary, LFS and submodule files link to Bitbucket.</li>
       <li><strong>Panel copies</strong>: copy the Queue or Insights panel from its tab tools or the Layout menu. A copy keeps its own person, section and range, is saved with the layout, and opens in its own window too.</li>
       <li><strong>Actions</strong>: open a pull request from a pushed branch; sync, merge or decline your own; delete a pushed branch. Each asks for a second click in place.</li>
       <li><strong>Merge popup</strong>, like Bitbucket's: the strategies the target branch allows (read with the pull request, no extra call), its default picked, the commit message Bitbucket would write, closing the branch, and the ticket from Jira with its status. Choose the status to move it to and PixelDeck moves it once the merge is through. Without <code>JIRA_TOKEN</code> the popup says how to set it up and the merge still works.</li>
@@ -206,6 +207,7 @@ footer { margin-top: 72px; padding-top: 18px; border-top: 3px dashed var(--rule-
       <li>A <strong>title screen</strong> while the first data loads: the icon drops in, the name waves, and the slime and the bot race along a bar that fills with the real load steps. The lead changes at each step; one wins, the other says GG. Any key skips it.</li>
       <li><strong>The arcade dock</strong>: Tetris, Snake and Flappy beside the terminal, switched on in the Layout menu. The bot and the slime play in all three. Game keys stay in the game while it has focus.</li>
       <li><strong>Bot ideas</strong>: while one of your pull requests waits on reviewers or on its merge, the bot on the terminal bar now and then suggests a round, built from parts so the same line does not come back soon. At most every 10 minutes, never while you type, never taking focus.</li>
+      <li><strong>Music</strong>: a retro boombox for Spotify (pixelated album art, a green LCD, a block progress bar to seek, transport keys, volume blocks, an equalizer, devices, playlists as cassettes) and a mini player in the status bar. It drives your own Spotify app through the Web API with your own Spotify app's Client ID (<code>SPOTIFY_CLIENT_ID</code>); Premium is needed for the owner and for control. <strong>Preview</strong> shows it with made-up music.</li>
       <li><strong>The guide</strong>: a tour on the first start, a spotlight on each part with a mascot telling it; the <strong>?</strong> in the status bar brings it back.</li>
       <li><strong>Retro pickers</strong>: the project and person pickers are pixel dropdowns with full keyboard use, over the real selects. Numbers use ArcadeClassic when it is installed on your computer (personal use license, so it is not shipped), else Press Start 2P.</li>
       <li><strong>Game moments</strong>: a merge sets off fireworks (merged from PixelDeck, the pull request moves to Merged at once; merged elsewhere, it plays when a refresh sees it); a deleted branch's critter is knocked out; for a new shell the bot beams to the new tab, hammers it together and beams home. <code>?</code> replays them.</li>
@@ -245,6 +247,7 @@ cp .env.example .env        # Windows: copy .env.example .env</code></pre>
       <tr><td><code>BITBUCKET_WORKSPACE</code></td><td>The workspace slug, as in <code>bitbucket.org/&lt;workspace&gt;/&lt;repo&gt;</code>. Required.</td></tr>
       <tr><td><code>BITBUCKET_PROJECT</code></td><td>Start scoped to one project key. Empty: every project. You can switch in the app.</td></tr>
       <tr><td><code>JIRA_SITE</code>, <code>TICKET_PREFIXES</code></td><td>Turn ticket keys such as <code>ABC-123</code> in branches and titles into Jira links. With no prefixes, any key that looks like one counts, so set them when you can.</td></tr>
+      <tr><td><code>SPOTIFY_CLIENT_ID</code></td><td>Your own Spotify app's Client ID, for the music player. Register <code>http://127.0.0.1:8642/spotify/callback</code> (your port) as its redirect URI; Spotify allows plain http only for 127.0.0.1. No client secret: sign-in uses PKCE.</td></tr>
       <tr><td><code>JIRA_TOKEN</code>, <code>JIRA_EMAIL</code></td><td>An Atlassian API token with Jira access, for the ticket status in the merge popup. A classic token talks to the site; a token with scopes goes through Atlassian's gateway, found on its own. The Bitbucket token is never sent to Jira. <code>JIRA_EMAIL</code> defaults to <code>BITBUCKET_EMAIL</code>.</td></tr>
       <tr><td><code>PIXELDECK_WORKSPACE_ROOT</code></td><td>The folder with your local clones: for pushed branches, worktrees and the terminal's start folder. Default: the folder PixelDeck sits in.</td></tr>
       <tr><td><code>PIXELDECK_RELEASE_REPOS</code></td><td>Glob patterns of repos whose pull requests target master or main before develop.</td></tr>
@@ -446,6 +449,8 @@ cp .env.example .env        # Windows: copy .env.example .env</code></pre>
       <tr><td><code>engine.py</code></td><td class="n">563</td><td>Cache, refresh loop, merged and declined windows, project scope, the sync schedule.</td></tr>
       <tr><td><code>events.py</code></td><td class="n">119</td><td>What moved between two reads, and the event log the notifications poll.</td></tr>
       <tr><td><code>jira.py</code></td><td class="n">159</td><td>A ticket's status and moving it on, for the merge popup; site or gateway.</td></tr>
+      <tr><td><code>repos.py</code></td><td class="n">356</td><td>The Repos panel's routes: repositories, branches, commits, folders and files, GET only, checked inputs, kept by commit.</td></tr>
+      <tr><td><code>spotify.py</code></td><td class="n">658</td><td>Spotify sign-in (PKCE), tokens kept on the server, playback routes, album art from Spotify's image host.</td></tr>
       <tr><td><code>connections.py</code></td><td class="n">79</td><td>The settings report: Bitbucket, the Claude Code CLI, git, never a token.</td></tr>
       <tr><td><code>model.py</code></td><td class="n">298</td><td>Pull requests, reviews, threads, timelines, parsed diffs, ticket keys.</td></tr>
       <tr><td><code>app_window.py</code></td><td class="n">292</td><td>The Linux window: WebKit view, pop-outs, links to the browser, file drops, self-test.</td></tr>
@@ -455,10 +460,10 @@ cp .env.example .env        # Windows: copy .env.example .env</code></pre>
       <tr><td><code>actions.py</code></td><td class="n">414</td><td>Open, sync, merge (with the popup's options) and decline a pull request; review; delete a pushed branch.</td></tr>
       <tr><td><code>gitscan.py</code>, <code>opener.py</code>, <code>check_api.py</code></td><td class="n">261</td><td>Branches pushed without a pull request; opening links; an API shape check.</td></tr>
       <tr><td><code>briefs/</code></td><td class="n">62</td><td>The default Claude brief templates.</td></tr>
-      <tr><td><code>static/</code> scripts</td><td class="n">5,885</td><td><code>app.js</code> (queue, pull request view, Markdown, copy, merge popup, title screen), <code>layout.js</code> (panels and their copies), <code>sprites.js</code> (pixel characters), <code>term.js</code> (terminal tabs), <code>visuals.js</code> (merge tree, age bars), <code>notify.js</code> (slot banners, the bell), <code>hub.js</code> (status bar, settings, preferences), <code>retro.js</code> (pixel pickers), <code>dock.js</code> (the arcade dock, bot ideas), <code>games.js</code> (Tetris, Snake, Flappy), <code>guide.js</code> (the tour).</td></tr>
-      <tr><td><code>static/</code> styles</td><td class="n">1,631</td><td>Tokens, base, app, workspace, arcade, games, hub.</td></tr>
+      <tr><td><code>static/</code> scripts</td><td class="n">7,558</td><td><code>app.js</code> (queue, pull request view, Markdown, copy, merge popup, title screen), <code>layout.js</code> (panels and their copies), <code>sprites.js</code> (pixel characters), <code>term.js</code> (terminal tabs), <code>visuals.js</code> (merge tree, age bars), <code>notify.js</code> (slot banners, the bell), <code>hub.js</code> (status bar, settings, preferences), <code>retro.js</code> (pixel pickers), <code>dock.js</code> (the arcade dock, bot ideas), <code>games.js</code> (Tetris, Snake, Flappy), <code>guide.js</code> (the tour), <code>repos.js</code> (the Repos panel), <code>music.js</code> (the music player).</td></tr>
+      <tr><td><code>static/</code> styles</td><td class="n">2,067</td><td>Tokens, base, app, workspace, arcade, games, hub, repos, music.</td></tr>
       <tr><td><code>run.sh</code>, <code>install-desktop.sh</code>, <code>PixelDeck.command</code>, <code>PixelDeck.cmd</code></td><td class="n">65</td><td>Launchers for each system; the Linux app grid and dock entry.</td></tr>
-      <tr><td><code>tests/test_desk.py</code></td><td class="n">1,062</td><td>61 tests.</td></tr>
+      <tr><td><code>tests/</code></td><td class="n">2,013</td><td>114 tests: the desk, the Repos routes, the Spotify client.</td></tr>
     </tbody>
   </table>
 </div>

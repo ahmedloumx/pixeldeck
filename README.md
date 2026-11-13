@@ -44,6 +44,10 @@ Full documentation, with the architecture, security model and measured performan
   terminals), what notifies you, and your look: accent colour, number font, motion, mascots.
 - **Team and insights.** Your teammates' queues, review load and merge history. Insights pick a
   range, from 7 days to 120; a month or less is charted per day.
+- **Repos.** A tab beside the queue: the project's repositories with a search, and for each one
+  its code at any branch (folders, files with line numbers, the README), its branches, its recent
+  commits and its open pull requests. Read only; code and commits are kept once read, so going
+  back costs no API calls.
 - **Panel copies.** Copy the Queue or Insights panel: each copy keeps its own person, section
   and range, so two people or two ranges sit side by side. Copies are saved with the layout and
   open in their own window too.
@@ -66,6 +70,11 @@ Full documentation, with the architecture, security model and measured performan
   terminal from the Layout menu. While one of your pull requests waits on reviewers or on its
   merge, the bot on the terminal bar now and then suggests a round, with a line it has not said
   lately. It never takes focus from a terminal; switch it off in the Layout menu.
+- **Music.** A retro boombox for Spotify: pixelated album art, a green LCD with the title
+  scrolling, a block progress bar to seek, chunky transport keys, volume blocks, an equalizer,
+  your devices and your playlists as cassettes; a mini player sits in the status bar. It drives
+  your own Spotify app (desktop or phone) through Spotify's Web API. Each person uses their own
+  Spotify app, see below. **Preview** in the player shows it with made-up music.
 - **Guide.** A short tour on the first start, a spotlight on each part with a mascot telling it.
   The **?** in the status bar brings it back.
 
@@ -132,6 +141,7 @@ in the real environment wins over the file, and the file is re-read when it chan
 | `BITBUCKET_WORKSPACE` | The workspace slug, as in `bitbucket.org/<workspace>/<repo>`. Required. |
 | `BITBUCKET_PROJECT` | Start scoped to one project key. Empty: every project. |
 | `JIRA_SITE`, `TICKET_PREFIXES` | Turn ticket keys such as `ABC-123` in branches and titles into Jira links. |
+| `SPOTIFY_CLIENT_ID` | The Client ID of your own Spotify app, for the music player (see below). |
 | `JIRA_TOKEN`, `JIRA_EMAIL` | An Atlassian API token with Jira access, to show and move a ticket's status in the merge popup. Classic and scoped tokens both work; the Bitbucket token is never sent to Jira. `JIRA_EMAIL` defaults to `BITBUCKET_EMAIL`. |
 | `PIXELDECK_WORKSPACE_ROOT` | The folder with your local clones. Default: the folder PixelDeck sits in. |
 | `PIXELDECK_RELEASE_REPOS` | Glob patterns of repos whose pull requests target master or main before develop. |
@@ -155,6 +165,22 @@ running. `--dest` picks another target branch and `--keep-branch` keeps the bran
 merge. Approval is refused if the branch moved since it was proposed, so what opens is what you
 saw. Put a line in your agent's instructions (for Claude Code, its `CLAUDE.md`) telling it to
 open pull requests this way.
+
+### The music player and your Spotify app
+
+Spotify gives each app its own Client ID, so everyone who runs PixelDeck uses an app of their own:
+
+1. At [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard), create an app
+   (any name) and tick **Web API**.
+2. Add the redirect URI `http://127.0.0.1:8642/spotify/callback` (your port, if you changed
+   `PIXELDECK_PORT`). Spotify allows plain http only for `127.0.0.1`, never `localhost`.
+3. Put the app's Client ID in `.env` as `SPOTIFY_CLIENT_ID=`. No client secret: PixelDeck signs in
+   with PKCE, the flow made for apps that cannot keep one.
+4. Press **Connect** in the Music panel and sign in to Spotify in your browser.
+
+Spotify Premium is needed for the app's owner (in development mode) and for play, pause, skip,
+seek and volume. In development mode an app works for its owner and up to 5 people added under
+User Management. The player shows the exact redirect URI to register, with a copy button.
 
 ### Claude brief templates
 
@@ -185,6 +211,11 @@ folder. Files you leave out come from `briefs/`. Placeholders such as `{source}`
   token. The Jira site comes from `.env` only, never from the page, and a ticket key must look
   like one before it reaches a URL.
 - The routes the page polls (events, status) answer from memory and never call Bitbucket.
+- The Repos panel only reads (GET) and checks every repository, commit and path before it
+  reaches a URL; file contents are shown as text, never as markup.
+- Spotify tokens stay on the server, in the state folder with mode 600, and never reach the page
+  or a log. The sign-in comes back to `/spotify/callback` with a single-use state that expires in
+  10 minutes; album art is fetched by the server from Spotify's image host only.
 
 ## Development
 
