@@ -26,7 +26,7 @@ const Repos = (() => {
   const st = {
     list: null, listError: "", listFor: null, loading: false, restored: false, filter: "",
     repo: null, tab: "code", branches: null, branchesError: "", branchFilter: "", branchHits: null,
-    branch: "", hash: "", path: "", file: "", codeKey: "",
+    branch: "", hash: "", path: "", file: "", codeKey: "", branchesAt: 0, refreshing: false, prSig: "",
     tree: null, treeError: "", fileData: null, fileError: "", readme: null, commits: null,
   };
   const mem = (() => {
@@ -153,6 +153,7 @@ const Repos = (() => {
       const b = await api(`repo-branches?${query({ repo: slug })}`);
       if (st.repo?.slug !== slug) return;
       st.branches = b;
+      st.branchesAt = Date.now();
     } catch (err) {
       if (st.repo?.slug !== slug) return;
       st.branchesError = err.message;
@@ -193,6 +194,28 @@ const Repos = (() => {
     remember();
     paintTabs();
     paintPane();
+    refreshBranches();
+  }
+  // Branch tips move with every push: past a minute, read them again, and follow the current
+  // branch if its tip moved. The server keeps the list a minute too, so this is one call at most.
+  async function refreshBranches() {
+    if (!st.repo || !st.branches || st.refreshing || Date.now() - st.branchesAt < 60000) return;
+    const slug = st.repo.slug;
+    st.refreshing = true;
+    let fresh;
+    try { fresh = await api(`repo-branches?${query({ repo: slug })}`); } catch { return; } finally { st.refreshing = false; }
+    if (st.repo?.slug !== slug) return;
+    st.branches = fresh;
+    st.branchesAt = Date.now();
+    paintTabs();
+    const tip = fresh.branches.find((b) => b.name === st.branch);
+    if (tip && st.hash && tip.hash !== st.hash) {
+      st.hash = tip.hash;
+      if (st.tab === "code") { paintPicker(); loadCode(); }
+      else if (st.tab === "commits") { paintCommits(); loadCommits(); }
+      else if (st.tab === "branches") paintBranchList();
+    } else if (st.tab === "code") paintPicker();
+    else if (st.tab === "branches") paintBranchList();
   }
   function paintPane() {
     const pane = root.querySelector(".rp-pane");
@@ -444,10 +467,22 @@ const Repos = (() => {
     for (const pool of pools) for (const pr of pool || []) if (pr.repo === slug && pr.state === "OPEN") found.set(prKey(pr), pr);
     return [...found.values()].sort((a, b) => (b.updated_on || "").localeCompare(a.updated_on || ""));
   }
+  const prSig = (prs) => prs.map((pr) => `${prKey(pr)}@${pr.updated_on}`).join(",");
+  // The app reads pull requests on its own clock: when what it holds for this repository
+  // changes (the first load after a reload, a new pull request), the count and the tab catch up.
+  function watchPrs() {
+    if (!st.repo || !root.isConnected || document.hidden) return;
+    const sig = prSig(openPrs(st.repo.slug));
+    if (sig === st.prSig) return;
+    st.prSig = sig;
+    paintTabs();
+    if (st.tab === "prs") paintPrs();
+  }
   function paintPrs() {
     const pane = root.querySelector(".rp-pane");
     if (!pane) return;
     const prs = openPrs(st.repo.slug);
+    st.prSig = prSig(prs);
     const web = `${st.repo.url}/pull-requests/`;
     const table = prs.length
       ? `<table class="queue rp-prs"><thead><tr><th class="col-state">State</th><th>Pull request</th><th class="col-who">Reviewers</th><th class="num">Threads</th><th class="num">Updated</th></tr></thead>
@@ -510,8 +545,9 @@ const Repos = (() => {
     new IntersectionObserver((entries) => {
       if (!entries.some((x) => x.isIntersecting)) return;
       if (!st.list && !st.loading) load();
-      else if (st.repo) paintTabs();
+      else if (st.repo) { paintTabs(); refreshBranches(); }
     }).observe(root);
+    setInterval(watchPrs, 3000);
   }
   return { mount };
 })();

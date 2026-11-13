@@ -109,15 +109,16 @@ def check_hash(value):
 
 
 def check_path(value):
-    """A path inside the repository: relative, no empty, '.' or '..' segment, no control
-    characters or backslashes. '' is the root."""
+    """A path inside the repository: relative, no empty or '.' segment, no '..' anywhere (a name
+    holding two dots cannot be opened here, which is rare and safe), no control characters or
+    backslashes. '' is the root."""
     if not isinstance(value, str) or len(value) > PATH_MAX:
         raise ValueError("bad path")
     if not value:
         return ""
-    if value.startswith("/") or "\\" in value or _CONTROL.search(value):
+    if value.startswith("/") or "\\" in value or ".." in value or _CONTROL.search(value):
         raise ValueError("bad path")
-    if any(part in ("", ".", "..") for part in value.split("/")):
+    if any(part in ("", ".") for part in value.split("/")):
         raise ValueError("bad path")
     return value
 
