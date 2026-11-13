@@ -15,7 +15,7 @@ const state = {
   people: {}, teamData: null, loadedAt: {},
   pr: null,          // { pr, detail, extra, diff, tab }
   filter: "", launches: [], busy: false,
-  animate: { queue: true, insights: true },
+  animate: {},      // panel id -> false once its first paint has animated
   showAll: false, cursor: -1,
   prFolded: false,
 };
@@ -129,12 +129,21 @@ function weeks(n = 12) {
   const now = mondayOf(new Date());
   return Array.from({ length: n }, (_, i) => { const s = new Date(now); s.setDate(s.getDate() - 7 * (n - 1 - i)); return s; });
 }
-function perWeek(items, field, starts) {
+function dayOf(value) {
+  const d = new Date(value);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+function lastDays(n) {
+  const today = dayOf(new Date());
+  return Array.from({ length: n }, (_, i) => { const s = new Date(today); s.setDate(s.getDate() - (n - 1 - i)); return s; });
+}
+function perWeek(items, field, starts, bucketOf = mondayOf) {
   const index = new Map(starts.map((s, i) => [s.getTime(), i]));
   const counts = starts.map(() => 0);
   for (const it of items) {
     if (!it[field]) continue;
-    const i = index.get(mondayOf(it[field]).getTime());
+    const i = index.get(bucketOf(it[field]).getTime());
     if (i !== undefined) counts[i]++;
   }
   return counts;
@@ -208,7 +217,24 @@ function matches(pr) {
 }
 
 const isMeUuid = (uuid) => state.me && uuid === state.me.uuid;
-const whoUuid = () => (state.route.who === "me" ? state.me?.uuid : state.route.who);
+const whoUuid = (view = state.route) => (view.who === "me" ? state.me?.uuid : view.who);
+
+/* A view is what one Queue or Insights panel shows: whose pull requests, which section and
+   which time range. The first panel of each follows the address bar; a copy keeps its own
+   view in the saved layout, so two people or two ranges can sit side by side. */
+const RANGE_KEY = "prdesk.insights.range.v1";
+// Merged pull requests are kept for 120 days, so no range reaches further back.
+const RANGES = [["7", "7 days", "the last 7 days"], ["30", "30 days", "the last 30 days"], ["84", "12 weeks", "the last 12 weeks"], ["120", "120 days", "the last 120 days"]];
+let insightsRange = (() => { try { const r = localStorage.getItem(RANGE_KEY); return RANGES.some(([id]) => id === r) ? r : "84"; } catch { return "84"; } })();
+const rangeLabel = (r) => (RANGES.find(([id]) => id === r) || RANGES[2])[1];
+const rangeNote = (r) => (RANGES.find(([id]) => id === r) || RANGES[2])[2];
+function viewOf(id) {
+  const p = Layout.params(id);
+  if (!p) return { ...state.route, range: insightsRange };
+  const range = RANGES.some(([r]) => r === p.range) ? p.range : insightsRange;
+  return { who: p.who || "me", section: p.section || "", pr: null, range };
+}
+const panelOf = (el) => el?.closest?.("[data-panel]")?.dataset.panel || null;
 const youReview = (pr) => (pr.reviews || []).some((r) => isMeUuid(r.uuid) && r.reviewer && (r.state === "pending" || r.state === "commented"));
 
 let teamAgg = { src: null, data: null };
@@ -225,9 +251,9 @@ function teamAggregate() {
   teamAgg = { src: state.teamData, data };
   return data;
 }
-function currentData() {
-  if (state.route.who === "team") return teamAggregate();
-  return state.people[whoUuid()] || null;
+function currentData(view = state.route) {
+  if (view.who === "team") return teamAggregate();
+  return state.people[whoUuid(view)] || null;
 }
 
 function buckets(data, kind) {
@@ -250,26 +276,28 @@ function buckets(data, kind) {
   };
 }
 
-function overviewStats(data) {
-  const now = Date.now();
-  const starts = weeks(12);
-  const since12 = starts[0].getTime();
+// Every figure covers the same range: a month or less is drawn per day, longer per week.
+function overviewStats(data, range = "84") {
+  const days = Number(range) || 84;
+  const daily = days <= 31;
+  const starts = daily ? lastDays(days) : weeks(Math.ceil(days / 7));
+  const since = daily ? starts[0].getTime() : Math.min(starts[0].getTime(), Date.now() - days * DAY);
   const merged = data.merged || [];
   const created = [...(data.open || []), ...merged, ...(data.declined || [])];
-  const merged12 = merged.filter((p) => new Date(p.updated_on).getTime() >= since12);
-  const merged30 = merged.filter((p) => now - new Date(p.updated_on).getTime() <= 30 * DAY);
-  const took30 = merged30.map(tookMs).filter((v) => v >= 0);
-  const known = merged30.filter((p) => Array.isArray(p.changes_requested_by));
+  const mergedIn = merged.filter((p) => new Date(p.updated_on).getTime() >= since);
+  const took = mergedIn.map(tookMs).filter((v) => v >= 0);
+  const known = mergedIn.filter((p) => Array.isArray(p.changes_requested_by));
   const fixed = known.filter((p) => p.changes_requested_by.length);
+  const bucketOf = daily ? dayOf : mondayOf;
   return {
-    starts,
-    opened: perWeek(created, "created_on", starts),
-    merged: perWeek(merged, "updated_on", starts),
-    opened12: created.filter((p) => new Date(p.created_on).getTime() >= since12).length,
-    merged12: merged12.length, merged30,
-    median30: median(took30), mean30: mean(took30), took30, known, fixed,
-    byRepo: tally(merged12.map((p) => p.repo)),
-    approvers: tally(merged12.flatMap((p) => (p.reviews || []).filter((r) => r.state === "approved").map((r) => r.name))),
+    range, days, unit: daily ? "day" : "week", starts,
+    opened: perWeek(created, "created_on", starts, bucketOf),
+    merged: perWeek(merged, "updated_on", starts, bucketOf),
+    openedN: created.filter((p) => new Date(p.created_on).getTime() >= since).length,
+    mergedN: mergedIn.length, mergedIn,
+    median: median(took), mean: mean(took), took, known, fixed,
+    byRepo: tally(mergedIn.map((p) => p.repo)),
+    approvers: tally(mergedIn.flatMap((p) => (p.reviews || []).filter((r) => r.state === "approved").map((r) => r.name))),
     askers: tally(fixed.flatMap((p) => p.changes_requested_by)),
   };
 }
@@ -383,14 +411,15 @@ function weeklyChart(st, width) {
   st.starts.forEach((start, i) => {
     const cx = Math.round(i * slot + slot / 2);
     const o = st.opened[i], m = st.merged[i];
-    out += `<g data-tip="${esc(`${i === n - 1 ? "This week" : `Week of ${shortDate(start)}`}: ${o} opened, ${m} merged`)}">`;
+    const when = st.unit === "day" ? (i === n - 1 ? "Today" : start.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })) : i === n - 1 ? "This week" : `Week of ${shortDate(start)}`;
+    out += `<g data-tip="${esc(`${when}: ${o} opened, ${m} merged`)}">`;
     out += stack(cx - bw - 1, blocksFor(o), "px-opened", i) + stack(cx + 1, blocksFor(m), "px-merged", i);
     out += `<rect class="hit" x="${i * slot}" y="0" width="${slot}" height="${base}"/></g>`;
     if (i === 0 || i === n - 1 || i === Math.floor(n / 2)) {
-      out += `<text class="tick" x="${cx}" y="${height - 5}" text-anchor="middle">${i === n - 1 ? "this week" : esc(shortDate(start))}</text>`;
+      out += `<text class="tick" x="${cx}" y="${height - 5}" text-anchor="middle">${i === n - 1 ? (st.unit === "day" ? "today" : "this week") : esc(shortDate(start))}</text>`;
     }
   });
-  return `<svg class="chart" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img" aria-label="Pull requests opened and merged per week, last 12 weeks">${out}</svg>`;
+  return `<svg class="chart" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img" aria-label="Pull requests opened and merged per ${st.unit}, ${esc(rangeNote(st.range))}">${out}</svg>`;
 }
 
 const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -431,9 +460,9 @@ function heatmapHtml(h) {
     <div class="heat" role="img" aria-label="Merged pull requests per day, last ${h.weeksBack} weeks">${cells}</div></div>`;
 }
 const heatLegend = () => `<span class="heat-legend" aria-hidden="true">less ${[0, 1, 2, 3, 4].map((l) => `<span class="heat-cell" data-l="${l}"></span>`).join("")} more</span>`;
-function punchcard(data) {
+function punchcard(merged) {
   const grid = Array.from({ length: 7 }, () => Array(24).fill(0));
-  for (const pr of data.merged || []) { const d = new Date(pr.updated_on); grid[(d.getDay() + 6) % 7][d.getHours()]++; }
+  for (const pr of merged || []) { const d = new Date(pr.updated_on); grid[(d.getDay() + 6) % 7][d.getHours()]++; }
   const max = Math.max(0, ...grid.flat());
   let peak = null;
   grid.forEach((row, r) => row.forEach((v, h) => { if (v && (!peak || v > peak.v)) peak = { v, r, h }; }));
@@ -453,11 +482,12 @@ function hbars(rows, opts = {}) {
       <span class="hbar-value">${value}</span></li>`).join("")}</ol>`;
 }
 function paintCharts() {
-  const data = currentData();
   for (const box of $$(".chart-box")) {
+    const view = viewOf(panelOf(box) || "insights");
+    const data = currentData(view);
     const width = Math.floor(box.clientWidth);
     if (!width || !data || Number(box.dataset.drawn) === width) continue;
-    box.innerHTML = weeklyChart(overviewStats(data), width);
+    box.innerHTML = weeklyChart(overviewStats(data, view.range), width);
     box.dataset.drawn = String(width);
   }
 }
@@ -491,7 +521,7 @@ const SECTIONS = [
   { id: "merged", label: "Merged", kinds: ["me", "mate", "team"], empty: "No merges in the last 120 days." },
   { id: "declined", label: "Declined", kinds: ["me", "mate", "team"], empty: "Nothing declined in the last 90 days." },
 ];
-const viewKind = () => (state.route.who === "team" ? "team" : state.route.who === "me" ? "me" : "mate");
+const viewKind = (view = state.route) => (view.who === "team" ? "team" : view.who === "me" ? "me" : "mate");
 const sectionsFor = (kind) => SECTIONS.filter((s) => s.kinds.includes(kind));
 const VISUAL_TITLE = {
   needs: "How long each has waited", changes: "How long each has waited", open: "How long each has waited",
@@ -506,19 +536,40 @@ function personName(uuid) {
   return state.team.find((m) => m.uuid === uuid)?.name || "Teammate";
 }
 
-function renderQueue() {
-  const el = Layout.body("queue");
+function shortWho(view) {
+  const kind = viewKind(view);
+  return kind === "team" ? "Team" : kind === "me" ? "You" : firstName(personName(whoUuid(view)));
+}
+function whoOptions(value, { edit = false } = {}) {
+  const opt = (v, label) => `<option value="${esc(v)}"${v === value ? " selected" : ""}>${esc(label)}</option>`;
+  const out = [];
+  if (state.me) out.push(opt("me", `${state.me.name} (you)`));
+  if (state.team.length) out.push(`<optgroup label="Team">${state.team.map((m) => opt(m.uuid, m.name)).join("")}</optgroup>`);
+  out.push(opt("team", "Whole team"));
+  if (edit) out.push(opt("edit-team", "Edit team…"));
+  return out.join("");
+}
+// A copy picks its own person here; the first panel follows the picker in the top bar.
+const whoPicker = (id, who) => `<label class="field copy-who"><span class="visually-hidden">Whose pull requests this copy shows</span>
+  <select data-copy-who="${esc(id)}">${whoOptions(who)}</select></label>`;
+
+function renderQueue() { for (const id of Layout.instances("queue")) renderQueueIn(id); }
+function renderQueueIn(id) {
+  const el = Layout.body(id);
   if (!el) return;
-  const kind = viewKind();
-  const data = currentData();
+  const copy = Layout.isCopy(id);
+  const view = viewOf(id);
+  const kind = viewKind(view);
+  const data = currentData(view);
   const list = sectionsFor(kind);
-  const sec = list.find((s) => s.id === state.route.section) || list[0];
+  const sec = list.find((s) => s.id === view.section) || list[0];
   const b = buckets(data, kind);
-  const who = kind === "team" ? "Your team" : kind === "me" ? "Your pull requests" : `${personName(whoUuid())}`;
+  const who = kind === "team" ? "Your team" : kind === "me" ? "Your pull requests" : `${personName(whoUuid(view))}`;
   const chips = list.map((s) => {
     const n = data ? b[s.id].length : "";
     const tone = n && s.id === "needs" ? " is-due" : n && s.id === "changes" ? " is-bad" : "";
-    return `<a class="sec-chip${s.id === sec.id ? " is-current" : ""}" role="tab" aria-selected="${s.id === sec.id}" href="${hashFor({ ...state.route, section: s.id, pr: null })}">
+    const link = copy ? `href="#" data-copy-section="${s.id}"` : `href="${hashFor({ ...state.route, section: s.id, pr: null })}"`;
+    return `<a class="sec-chip${s.id === sec.id ? " is-current" : ""}" role="tab" aria-selected="${s.id === sec.id}" ${link}>
       <span class="sec-label"><span class="sec-long">${esc(s.label)}</span><span class="sec-short">${esc(s.short || s.label)}</span></span><span class="sec-n${tone}">${n}</span></a>`;
   }).join("");
   let visual = "", body;
@@ -536,17 +587,19 @@ function renderQueue() {
     visual = ageChart(b[sec.id].filter(matches), { showAuthor: kind !== "me" || sec.id === "requests" });
     body = queueTable(b[sec.id], { empty: sec.empty, showAuthor: kind !== "me" || sec.id === "requests" });
   }
-  el.classList.toggle("calm", !state.animate.queue);
+  el.classList.toggle("calm", state.animate[id] === false);
+  const title = copy ? `${whoPicker(id, view.who)}` : `<h2 class="panel-title">${esc(who)}</h2>`;
   // The sections sit in a rail beside the list; a narrow panel wraps them above it instead.
   el.innerHTML = `<div class="queue-split">
     <nav class="sec-chips" role="tablist" aria-label="Sections" aria-orientation="vertical">${chips}</nav>
     <div class="queue-main">${authNotice()}
-      <header class="panel-head-row"><h2 class="panel-title">${esc(who)}</h2><span class="note">${esc(projectNote())}</span></header>
+      <header class="panel-head-row">${title}<span class="note">${esc(projectNote())}</span></header>
       ${data ? dateBar(sec.id, sec.id === "pushed" ? b.pushed.filter((x) => matches({ repo: x.repo, title: x.subject, source: x.branch, dest: x.dest, pushed_at: x.pushed_at })).length : b[sec.id].filter(matches).length, b[sec.id].length) : ""}
       ${visual ? `<figure class="section-visual"><figcaption>${esc(VISUAL_TITLE[sec.id] || "")}</figcaption>${visual}</figure>` : ""}
       <section class="block">${body}</section>
     </div></div>`;
-  if (data) state.animate.queue = false;
+  if (data) state.animate[id] = false;
+  if (copy) { Layout.setLabel(id, `Queue: ${shortWho(view)}`); return; }
   Layout.setBadge("queue", data && kind === "me" ? b.needs.length || "" : "");
   const needs = state.me && state.people[state.me.uuid] ? buckets(state.people[state.me.uuid], "me").needs.length : 0;
   document.title = needs ? `(${needs}) PixelDeck` : "PixelDeck";
@@ -573,24 +626,41 @@ function authNotice() {
     <p><button class="btn" type="button" data-action="retry">Try again now</button></p></section>`;
 }
 
-function renderInsights() {
-  const el = Layout.body("insights");
-  if (!el) return;
-  el.classList.toggle("calm", !state.animate.insights);
-  el.innerHTML = viewKind() === "team" ? insightsTeam() : insightsPerson();
-  paintCharts();
-  if (state.animate.insights && currentData()) { countUp(el); state.animate.insights = false; }
+function rangeBar(id, range) {
+  const chips = RANGES.map(([r, label]) => `<button class="date-chip" type="button" data-range="${r}" data-range-panel="${esc(id)}" aria-pressed="${r === range}">${label}</button>`).join("");
+  return `<div class="date-bar range-bar" role="group" aria-label="Time range of these numbers" data-tip="Merged pull requests go back 120 days, declined ones 90."><span class="date-basis">Range</span>${chips}</div>`;
+}
+function setRange(id, range) {
+  if (!RANGES.some(([r]) => r === range)) return;
+  if (Layout.isCopy(id)) Layout.setParams(id, { range });
+  else { insightsRange = range; try { localStorage.setItem(RANGE_KEY, range); } catch { /* storage blocked */ } }
+  state.animate[id] = true;
+  renderInsightsIn(id);
 }
 
-function insightsPerson() {
-  const data = currentData();
-  const kind = viewKind();
-  const name = kind === "me" ? "Your numbers" : personName(whoUuid());
-  if (!data) return `<header class="head"><h1>${esc(name)}</h1></header>${skeleton()}`;
+function renderInsights() { for (const id of Layout.instances("insights")) renderInsightsIn(id); }
+function renderInsightsIn(id) {
+  const el = Layout.body(id);
+  if (!el) return;
+  const view = viewOf(id);
+  el.classList.toggle("calm", state.animate[id] === false);
+  el.innerHTML = viewKind(view) === "team" ? insightsTeam(view, id) : insightsPerson(view, id);
+  paintCharts();
+  if (state.animate[id] !== false && currentData(view)) { countUp(el); state.animate[id] = false; }
+  if (Layout.isCopy(id)) Layout.setLabel(id, `Insights: ${shortWho(view)}`);
+}
+const insightsTools = (view, id) => `<div class="head-tools">${Layout.isCopy(id) ? whoPicker(id, view.who) : ""}${rangeBar(id, view.range)}</div>`;
+
+function insightsPerson(view, id) {
+  const data = currentData(view);
+  const kind = viewKind(view);
+  const name = kind === "me" ? "Your numbers" : personName(whoUuid(view));
+  if (!data) return `<header class="head"><h1>${esc(name)}</h1>${insightsTools(view, id)}</header>${skeleton()}`;
   const b = buckets(data, kind);
-  const st = overviewStats(data);
+  const st = overviewStats(data, view.range);
+  const span = rangeLabel(view.range), note = rangeNote(view.range);
   const awaiting = (data.open || []).map(signals).reduce((n, s) => n + s.awaiting, 0);
-  const med = duration(st.median30), avg = duration(st.mean30);
+  const med = duration(st.median), avg = duration(st.mean);
   const asked = listNames(b.changes.flatMap((pr) => pr.reviews.filter((r) => r.state === "changes_requested").map((r) => r.name)));
   const line = [
     kind === "me" ? (b.needs.length ? `${plural(b.needs.length, "pull request")} ${b.needs.length === 1 ? "needs" : "need"} you.` : "Nothing needs you right now.") : `${plural((data.open || []).length, "open pull request")}.`,
@@ -601,24 +671,26 @@ function insightsPerson() {
     kind === "me" ? stat("Needs you", b.needs.length, { reading: true, due: b.needs.length > 0, i: 0 }) : stat("Open", (data.open || []).length, { reading: true, i: 0 }),
     stat("Changes requested", b.changes.length, { i: 1 }),
     kind === "me" ? stat("Threads to answer", awaiting, { i: 2 }) : stat("Your review", b.requests.length, { i: 2 }),
-    stat("Opened", st.opened12, { unit: "12 weeks", i: 3 }),
-    stat("Merged", st.merged12, { unit: data.merged_total ? `12 weeks, ${data.merged_total} all time` : "12 weeks", i: 4 }),
+    stat("Opened", st.openedN, { unit: span, i: 3 }),
+    stat("Merged", st.mergedN, { unit: data.merged_total ? `${span}, ${data.merged_total} all time` : span, i: 4 }),
     stat("Median to merge", med ? med.n : null, { unit: med ? med.unit : "", i: 5 }),
     stat("Average to merge", avg ? avg.n : null, { unit: avg ? avg.unit : "", i: 6 }),
   ].join("");
   const bucket = [["under 4 hours", 0, 4 * HOUR], ["4 to 24 hours", 4 * HOUR, DAY], ["1 to 3 days", DAY, 3 * DAY], ["3 to 7 days", 3 * DAY, 7 * DAY], ["over a week", 7 * DAY, Infinity]]
-    .map(([label, lo, hi]) => [label, st.took30.filter((v) => v >= lo && v < hi).length]);
+    .map(([label, lo, hi]) => [label, st.took.filter((v) => v >= lo && v < hi).length]);
   const topRepos = st.byRepo.slice(0, 6);
   const other = st.byRepo.slice(6).reduce((n, r) => n + r[1], 0);
   if (other) topRepos.push([`${st.byRepo.length - 6} other repos`, other]);
-  const heat = dailyHeat(data);
-  const punch = punchcard(data);
+  const heat = dailyHeat(data, Math.min(18, Math.max(5, Math.ceil(st.days / 7) + 1)));
+  const punch = punchcard(st.mergedIn);
   const busy = heat.busiest ? `on ${heat.busiest.date.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })}` : "";
+  // Review history is read for the last 30 days of merges only, so a longer range says so.
+  const history = st.mergedN ? `history read for ${st.known.length} of ${st.mergedN}${st.days > 30 ? ", kept for 30 days" : ""}` : note;
   return `${authNotice()}
-    <header class="head reveal" style="--i:0"><h1>${esc(name)}</h1><p class="status">${esc(line)}</p></header>
+    <header class="head reveal" style="--i:0"><h1>${esc(name)}</h1><p class="status">${esc(line)}</p>${insightsTools(view, id)}</header>
     <dl class="stats reveal" style="--i:1">${figures}</dl>
     <div class="panels reveal" style="--i:2">
-      <figure class="panel panel--lead"><div class="panel-head"><h2>Opened and merged, per week</h2>
+      <figure class="panel panel--lead"><div class="panel-head"><h2>Opened and merged, per ${st.unit}</h2>
         <span class="legend"><span><span class="swatch swatch--opened"></span>Opened</span><span><span class="swatch swatch--merged"></span>Merged</span></span></div>
         <div class="chart-box"></div></figure>
       <figure class="panel panel--lead"><div class="panel-head"><h2>Merge tree, by ticket</h2><span class="panel-note">the last 14 merges and what is still open</span></div>
@@ -630,43 +702,45 @@ function insightsPerson() {
             <div><dt>Longest run</dt><dd><span class="num8" data-count="${heat.longest}">${heat.longest}</span><small>${heat.longest === 1 ? "day" : "days"} in a row</small></dd></div>
             <div><dt>Busiest day</dt><dd><span class="num8">${heat.busiest ? heat.busiest.merged : 0}</span><small>${esc(busy)}</small></dd></div>
           </dl></div></figure>
-      <figure class="panel panel--lead"><div class="panel-head"><h2>When the merges land</h2><span class="panel-note">${esc(punch.peak ? `most often ${DAY_NAMES[punch.peak.r]} around ${String(punch.peak.h).padStart(2, "0")}:00` : "last 120 days")}</span></div>${punch.html}</figure>
-      <figure class="panel"><div class="panel-head"><h2>Time to merge</h2><span class="panel-note">last 30 days</span></div>${hbars(st.took30.length ? bucket : [], { empty: "No merges in the last 30 days." })}</figure>
-      <figure class="panel"><div class="panel-head"><h2>Merged by repository</h2><span class="panel-note">12 weeks</span></div>${hbars(topRepos, { empty: "No merges in 12 weeks." })}</figure>
-      <figure class="panel"><div class="panel-head"><h2>Who approved the merges</h2><span class="panel-note">12 weeks</span></div>${hbars(st.approvers.slice(0, 7), { empty: "No approvals recorded." })}</figure>
-      <figure class="panel"><div class="panel-head"><h2>Changes requested, then merged</h2><span class="panel-note">${esc(st.merged30.length ? `history read for ${st.known.length} of ${st.merged30.length}` : "last 30 days")}</span></div>
+      <figure class="panel panel--lead"><div class="panel-head"><h2>When the merges land</h2><span class="panel-note">${esc(punch.peak ? `most often ${DAY_NAMES[punch.peak.r]} around ${String(punch.peak.h).padStart(2, "0")}:00` : note)}</span></div>${punch.html}</figure>
+      <figure class="panel"><div class="panel-head"><h2>Time to merge</h2><span class="panel-note">${esc(note)}</span></div>${hbars(st.took.length ? bucket : [], { empty: `No merges in ${note}.` })}</figure>
+      <figure class="panel"><div class="panel-head"><h2>Merged by repository</h2><span class="panel-note">${esc(span)}</span></div>${hbars(topRepos, { empty: `No merges in ${note}.` })}</figure>
+      <figure class="panel"><div class="panel-head"><h2>Who approved the merges</h2><span class="panel-note">${esc(span)}</span></div>${hbars(st.approvers.slice(0, 7), { empty: "No approvals recorded." })}</figure>
+      <figure class="panel"><div class="panel-head"><h2>Changes requested, then merged</h2><span class="panel-note">${esc(history)}</span></div>
         <p class="panel-figure"><span class="reading-s num8" data-count="${st.fixed.length}">${st.fixed.length}</span><span>of ${st.known.length} merges went through a round of requested changes</span></p>
         ${hbars(st.askers.slice(0, 5), { tone: "bad", empty: st.known.length ? "Nobody asked for changes on these merges." : "History is still loading." })}</figure>
     </div>`;
 }
 
-function insightsTeam() {
+function insightsTeam(view, id) {
   const td = state.teamData;
-  if (!td) return `<header class="head"><h1>Your team</h1></header>${skeleton(6)}`;
-  const stripMax = Math.max(1, ...td.members.flatMap((m) => overviewStats(m).merged));
+  if (!td) return `<header class="head"><h1>Your team</h1>${insightsTools(view, id)}</header>${skeleton(6)}`;
+  const stats = new Map(td.members.map((m) => [m, overviewStats(m, view.range)]));
+  const stripMax = Math.max(1, ...td.members.flatMap((m) => stats.get(m).merged));
+  const unit = stats.size ? [...stats.values()][0].unit : "week";
   const rows = td.members.map((m, i) => {
     const synced = !!m.synced_at;
-    const st = overviewStats(m);
+    const st = stats.get(m);
     const open = (m.open || []).length;
     const changes = (m.open || []).filter((pr) => signals(pr).changes.length).length;
     const asks = m.user.is_me ? 0 : (m.open || []).filter(youReview).length;
-    const med = duration(st.median30);
+    const med = duration(st.median);
     const cell = (v, cls = "") => synced ? `<span class="reading num8${cls}">${v}</span>` : `<span class="reading is-zero">…</span>`;
     return `<tr class="row" data-person="${esc(m.user.is_me ? "me" : m.user.uuid)}" style="--i:${Math.min(i, 14)}">
       <td><span class="who">${face(m.user)}<span>${esc(m.user.name)}${m.user.is_me ? ' <span class="you-tag">you</span>' : ""}</span></span></td>
       <td class="num">${cell(open, open ? "" : " is-zero")}</td>
       <td class="num">${cell(changes, changes ? " is-bad" : " is-zero")}</td>
       <td class="num">${cell(asks, asks ? " is-you" : " is-zero")}</td>
-      <td class="num">${cell(st.merged12, st.merged12 ? "" : " is-zero")}</td>
+      <td class="num">${cell(st.mergedN, st.mergedN ? "" : " is-zero")}</td>
       <td class="num"><span class="figure-cell">${synced && med ? `${med.n} ${med.unit}` : "none"}</span></td>
       <td>${synced ? heatStrip(st.merged, stripMax) : ""}</td></tr>`;
   }).join("");
   const total = td.members.reduce((t, m) => t + (m.open || []).length, 0);
   return `${authNotice()}
     <header class="head reveal" style="--i:0"><h1>Your team</h1>
-      <p class="status">${esc(`${plural(total, "open pull request")} across ${plural(td.members.length, "person", "people")}. Pick a name to see their pull requests.`)}</p></header>
+      <p class="status">${esc(`${plural(total, "open pull request")} across ${plural(td.members.length, "person", "people")}. Pick a name to see their pull requests.`)}</p>${insightsTools(view, id)}</header>
     <section class="block reveal" style="--i:1"><table class="queue team">
-      <thead><tr><th>Person</th><th class="num">Open</th><th class="num">Changes requested</th><th class="num">Your review</th><th class="num">Merged, 12 weeks</th><th class="num">Median to merge</th><th>Merged per week</th></tr></thead>
+      <thead><tr><th>Person</th><th class="num">Open</th><th class="num">Changes requested</th><th class="num">Your review</th><th class="num">Merged, ${esc(rangeLabel(view.range))}</th><th class="num">Median to merge</th><th>Merged per ${unit}</th></tr></thead>
       <tbody>${rows}</tbody></table>
       <p><button class="btn btn--quiet" type="button" data-action="edit-team">Choose who is on the team</button></p></section>`;
 }
@@ -1584,11 +1658,7 @@ async function saveTeam() {
 function renderBar() {
   const sel = $("#person");
   const value = state.route.who;
-  const opts = [];
-  if (state.me) opts.push(`<option value="me">${esc(state.me.name)} (you)</option>`);
-  if (state.team.length) opts.push(`<optgroup label="Team">${state.team.map((m) => `<option value="${esc(m.uuid)}">${esc(m.name)}</option>`).join("")}</optgroup>`);
-  opts.push(`<option value="team">Whole team</option>`, `<option value="edit-team">Edit team…</option>`);
-  const html = opts.join("");
+  const html = whoOptions("", { edit: true });
   if (sel.dataset.html !== html) { sel.innerHTML = html; sel.dataset.html = html; }
   sel.value = value;
   const proj = $("#project");
@@ -1790,6 +1860,35 @@ async function loadTeam() {
   state.loadedAt.team = Date.now();
   return changed;
 }
+// A copy may show someone the address bar does not: their data loads alongside.
+async function loadCopies() {
+  let changed = false;
+  const whos = new Set();
+  for (const base of ["queue", "insights"]) for (const id of Layout.instances(base)) if (Layout.isCopy(id)) whos.add(viewOf(id).who);
+  whos.delete(state.route.who);
+  for (const who of whos) {
+    const key = who === "team" ? "team" : whoUuid({ who });
+    if (!key || Date.now() - (state.loadedAt[key] || 0) < 25000) continue;
+    try { changed = (who === "team" ? await loadTeam() : await loadPerson(key)) || changed; } catch { /* the next poll tries again */ }
+  }
+  return changed;
+}
+function renderPanel(id) {
+  const base = Layout.baseOf(id);
+  if (base === "queue") renderQueueIn(id);
+  else if (base === "insights") renderInsightsIn(id);
+}
+function setCopyWho(id, who) {
+  if (who === "edit-team") return openTeamDialog();
+  if (who !== "me" && who !== "team" && isMeUuid(who)) who = "me";
+  const ids = sectionsFor(viewKind({ who })).map((x) => x.id);
+  const section = ids.includes(viewOf(id).section) ? viewOf(id).section : ids[0];
+  Layout.setParams(id, { who, section });
+  state.animate[id] = true;
+  renderPanel(id);
+  loadView({ silent: true });
+}
+
 async function loadView({ silent = false } = {}) {
   if (!silent) setSyncing(true);
   let changed = !silent;
@@ -1798,6 +1897,7 @@ async function loadView({ silent = false } = {}) {
     if (state.route.who === "team") changed = (await loadTeam()) || changed;
     else if (whoUuid()) changed = (await loadPerson(whoUuid())) || changed;
     if (state.me && !state.people[state.me.uuid]) changed = (await loadPerson(state.me.uuid)) || changed;
+    changed = (await loadCopies()) || changed;
   } catch (err) {
     if (err.message !== "reloading") toast("Could not load.", err.message, true);
   } finally {
@@ -1945,8 +2045,23 @@ function bind() {
     if (opener && !t.closest("tr[data-pr]")) { e.preventDefault(); const pr = findPr(opener.dataset.open); if (pr) openPr(pr); return; }
     const row = t.closest("tr[data-pr]");
     if (row) { e.preventDefault(); const pr = findPr(row.dataset.pr); if (pr) openPr(pr); return; }
+    const rangeBtn = t.closest("[data-range]");
+    if (rangeBtn) return setRange(rangeBtn.dataset.rangePanel, rangeBtn.dataset.range);
     const person = t.closest("tr[data-person]");
-    if (person) return go({ who: person.dataset.person, section: person.dataset.person === "me" ? "needs" : "open" });
+    if (person) {
+      const id = panelOf(person);
+      if (id && Layout.isCopy(id)) return setCopyWho(id, person.dataset.person);
+      return go({ who: person.dataset.person, section: person.dataset.person === "me" ? "needs" : "open" });
+    }
+    const copySec = t.closest("[data-copy-section]");
+    if (copySec) {
+      e.preventDefault();
+      const id = panelOf(copySec);
+      Layout.setParams(id, { section: copySec.dataset.copySection });
+      state.animate[id] = true;
+      renderQueueIn(id);
+      return;
+    }
     const chip = t.closest(".sec-chip");
     if (chip) { e.preventDefault(); const r = parseHashFrom(chip.getAttribute("href")); go({ ...state.route, section: r.section }); return; }
     const tab = t.closest(".pr-view [data-tab]");
@@ -1975,6 +2090,7 @@ function bind() {
     if (t.matches("[data-viewed]")) return markViewed(Number(t.dataset.viewed), t.checked);
     if (t.matches("[data-date-from]")) return setDates({ from: t.value });
     if (t.matches("[data-date-to]")) return setDates({ to: t.value });
+    if (t.matches("[data-copy-who]")) return setCopyWho(t.dataset.copyWho, t.value);
     if (t.matches("[data-panel-toggle]")) { if (t.checked) Layout.show(t.dataset.panelToggle); else Layout.hide(t.dataset.panelToggle); renderBar(); return; }
     if (t.id === "person") {
       const v = t.value;
@@ -1985,7 +2101,7 @@ function bind() {
       try {
         const res = await api("project", { method: "POST", body: { key: t.value } });
         state.project = res.project; state.people = {}; state.teamData = null; state.loadedAt = {};
-        state.animate = { queue: true, insights: true };
+        state.animate = {};
         renderAll();
         await loadView();
         toast(res.project ? `Showing ${res.project.name} only.` : "Showing every project.");
@@ -2082,10 +2198,13 @@ const BootScreen = (() => {
 async function boot() {
   Layout.init({
     panels: [
-      { id: "queue", title: "Queue" }, { id: "pr", title: "Pull request" },
-      { id: "insights", title: "Insights" }, { id: "terminal", title: "Terminal" },
+      { id: "queue", title: "Queue", copyable: true }, { id: "pr", title: "Pull request" },
+      { id: "insights", title: "Insights", copyable: true }, { id: "terminal", title: "Terminal" },
     ],
     onChange: () => { for (const b of $$(".chart-box")) b.dataset.drawn = ""; paintCharts(); Term.fit(); },
+    paramsFor: (id) => { const v = viewOf(id); return { who: v.who, section: v.section, range: v.range }; },
+    onCreate: (id) => { state.animate[id] = true; renderPanel(id); renderBar(); loadView({ silent: true }); },
+    onRemove: (id) => { delete state.animate[id]; renderBar(); },
   });
   Term.mount(Layout.body("terminal"));
   bind();

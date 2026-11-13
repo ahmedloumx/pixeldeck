@@ -1,0 +1,10 @@
+/* The hub layer: panel copies, insight ranges, the status bar, notifications, settings,
+   the guide, retro pickers and the layout menu. Same tokens as the rest; motion is
+   stepped so it reads as 8-bit, and switched off under reduced motion. */
+
+/* ------------------------------------------------------------ panel copies */
+.slot-tab.is-copy .slot-tab-title::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; vertical-align: 2px; background: var(--color-cool); box-shadow: 2px 2px 0 var(--color-cool-deep); }
+.head-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2xs) var(--space-sm); margin-top: var(--space-sm); }
+.head-tools .range-bar { margin: 0; }
+.panel-head-row .copy-who { margin: 0; }
+.copy-who select { min-height: 30px; }
