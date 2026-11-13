@@ -1590,11 +1590,111 @@ async function deleteBranch(button, repo, branch, sha) {
     await reloadMine();
   } catch (err) { toast("Could not delete the branch.", err.message, true); }
 }
+/* Merging opens a popup like Bitbucket's: the strategies the target branch allows (its
+   default picked), the commit message Bitbucket would write, closing the branch, and the
+   Jira ticket with its status, which can move on once the merge is through. */
+const STRATEGY = {
+  merge_commit: ["Merge commit", "Keeps every commit and adds a merge commit."],
+  squash: ["Squash", "One commit with all the changes, on top of the target."],
+  fast_forward: ["Fast forward", "Moves the target to the branch tip. Refused when the target moved on."],
+  squash_fast_forward: ["Squash, fast forward only", "One commit, only while the branch is up to date."],
+  rebase_fast_forward: ["Rebase, fast forward", "Replays the commits on the target, no merge commit."],
+  rebase_merge: ["Rebase, merge", "Replays the commits, then adds a merge commit."],
+};
+const TRANSITION_KEY = "prdesk.merge.transition.v1";
+let mergeBox = null;
+function mergeTicketHtml() {
+  const m = mergeBox;
+  const key = m.opts?.ticket?.key || m.pr.ticket?.key;
+  if (!key || !(state.features || []).includes("jira")) return "";
+  const url = m.opts?.ticket?.url || m.pr.ticket?.url;
+  const link = url ? `<button class="link" type="button" data-external="${esc(url)}">${esc(key)}</button>` : esc(key);
+  if (m.ticketState === "loading") return `<section class="merge-ticket"><h3>Ticket</h3><p class="set-hint">Reading ${esc(key)} from Jira…</p></section>`;
+  if (m.ticketState === "error") {
+    return `<section class="merge-ticket"><h3>Ticket ${link}</h3><p class="set-hint">Could not read it from Jira: ${esc(m.ticketError)}</p>
+      <p class="set-hint">Set <code>JIRA_TOKEN</code> in the settings file to see and move its status here. <button class="link" type="button" data-merge-settings>Connections</button></p></section>`;
+  }
+  const t = m.ticket;
+  let remembered = "";
+  try { remembered = localStorage.getItem(TRANSITION_KEY) || ""; } catch { /* storage blocked */ }
+  const options = [`<option value="">Leave it in ${esc(t.status.name)}</option>`, ...t.transitions.map((x) =>
+    `<option value="${esc(x.id)}"${x.name === remembered || x.to === remembered ? " selected" : ""}>${esc(x.name === x.to ? x.to : `${x.name}: ${x.to}`)}</option>`)].join("");
+  return `<section class="merge-ticket"><h3>Ticket ${link}</h3>
+    <p class="merge-ticket-line"><span class="jira-status" data-category="${esc(t.status.category || "")}">${esc(t.status.name)}</span><span>${esc(t.summary)}</span></p>
+    <label class="field-block"><span>After the merge, move it to</span><select id="merge-transition">${options}</select></label></section>`;
+}
+function paintMerge() {
+  const m = mergeBox;
+  if (!m) return;
+  const body = $("#pr-dialog-body");
+  if (!m.opts) {
+    body.innerHTML = `<header class="pr-dialog-head"><h2 id="pr-dialog-title">Merge #${esc(m.pr.id)}</h2></header>
+      ${m.error ? `<p class="set-error">${esc(m.error)}</p>` : `<p class="set-hint">Reading the pull request from Bitbucket…</p>`}
+      <footer class="pr-dialog-foot"><span class="spacer"></span><button class="btn btn--quiet" type="button" data-action="close-preview">Close</button></footer>`;
+    return;
+  }
+  if (body.querySelector("#merge-message")) { const box = body.querySelector("#merge-ticket-slot"); if (box) box.innerHTML = mergeTicketHtml(); return; }
+  const o = m.opts;
+  const cards = o.strategies.map((s) => {
+    const [label, hint] = STRATEGY[s] || [s.replace(/_/g, " "), ""];
+    return `<label class="strategy-card"><input type="radio" name="merge-strategy" value="${esc(s)}"${s === o.default ? " checked" : ""}>
+      <span class="strategy-name">${esc(label)}${s === o.default ? ' <small>default</small>' : ""}</span><span class="strategy-hint">${esc(hint)}</span></label>`;
+  }).join("");
+  body.innerHTML = `<header class="pr-dialog-head"><h2 id="pr-dialog-title">Merge pull request #${esc(o.id)}</h2>
+      <p><span class="id">${esc(o.repo)}</span> <span class="branch">${esc(o.source)}</span> into <b>${esc(o.dest)}</b></p><p>${esc(o.title || "")}</p></header>
+    <fieldset class="strategies"><legend>Merge strategy</legend>${cards}</fieldset>
+    <div class="pr-fields">
+      <label class="field-block field-wide"><span>Commit message</span><textarea id="merge-message" rows="5">${esc(o.message)}</textarea></label>
+      <label class="check"><input id="merge-close" type="checkbox"${o.close_source_branch ? " checked" : ""}> Close ${esc(o.source)} after the merge</label></div>
+    <div id="merge-ticket-slot">${mergeTicketHtml()}</div>
+    <p class="set-error" id="merge-error" hidden></p>
+    <footer class="pr-dialog-foot"><span class="spacer"></span>
+      <button class="btn btn--quiet" type="button" data-action="close-preview">Cancel</button>
+      <button class="btn btn--primary" type="button" data-merge-go>${svg("merge")} Merge</button></footer>`;
+}
+async function openMerge(pr) {
+  mergeBox = { pr, opts: null, ticket: null, ticketState: "loading" };
+  paintMerge();
+  if (!$("#pr-dialog").open) $("#pr-dialog").showModal();
+  try { mergeBox.opts = await api(`merge-options?repo=${encodeURIComponent(pr.repo)}&id=${pr.id}`); } catch (err) { mergeBox.error = err.message; }
+  const box = mergeBox;
+  paintMerge();
+  const key = box.opts?.ticket?.key;
+  if (!key || !(state.features || []).includes("jira")) return;
+  try { box.ticket = await api(`ticket?key=${encodeURIComponent(key)}`); box.ticketState = "ok"; } catch (err) { box.ticketState = "error"; box.ticketError = err.message; }
+  if (mergeBox === box) paintMerge();
+}
+async function mergeGo(button) {
+  const m = mergeBox;
+  if (!m?.opts) return;
+  const strategy = $('input[name="merge-strategy"]:checked')?.value;
+  const transition = $("#merge-transition")?.value || "";
+  const body = { repo: m.pr.repo, id: m.pr.id, strategy, message: $("#merge-message").value, close_source_branch: $("#merge-close").checked };
+  const err = $("#merge-error");
+  err.hidden = true;
+  const ok = await doMerge(m.pr, body, button, (message) => { err.textContent = message; err.hidden = false; });
+  if (!ok) return;
+  $("#pr-dialog").close();
+  mergeBox = null;
+  if (!transition || !m.ticket) return;
+  const step = m.ticket.transitions.find((x) => x.id === transition);
+  try { localStorage.setItem(TRANSITION_KEY, step?.to || ""); } catch { /* storage blocked */ }
+  try {
+    const moved = await api("ticket-move", { method: "POST", body: { key: m.ticket.key, transition } });
+    toast(`${moved.key} is ${moved.status.name} now.`, moved.summary);
+  } catch (e) { toast(`Merged, but ${m.ticket.key} did not move.`, e.message, true); }
+}
+
 async function mergePr(button) {
   const pr = state.pr?.detail?.pr || state.pr?.pr;
-  if (!pr || !armed(button, `Confirm: merge #${pr.id} into ${pr.dest}`)) return;
+  if (!pr) return;
+  if ((state.features || []).includes("merge-options")) return openMerge(pr);
+  if (!armed(button, `Confirm: merge #${pr.id} into ${pr.dest}`)) return;
+  await doMerge(pr, { repo: pr.repo, id: pr.id }, button);
+}
+async function doMerge(pr, body, button, inline = null) {
   try {
-    const res = await busy(button, () => api("merge", { method: "POST", body: { repo: pr.repo, id: pr.id } }));
+    const res = await busy(button, () => api("merge", { method: "POST", body }));
     const how = res.strategy ? `Strategy: ${res.strategy.replace(/_/g, " ")}.` : "";
     if (res.state === "MERGED") {
       forgetOpen(pr); // the merge moment plays now, not a second time on the next refresh
@@ -1606,14 +1706,18 @@ async function mergePr(button) {
     }
     await reloadMine();
     if (state.pr && prKey(state.pr.pr) === prKey(pr)) openPr(findPr(prKey(pr)) || state.pr.pr, { force: true });
+    return true;
   } catch (err) {
     const behind = state.pr?.sync?.behind;
-    if (/no route/.test(err.message)) toast("Merge needs the newer PixelDeck server.", NEEDS_RESTART, true);
+    let message = `Could not merge: ${err.message}`;
+    if (/no route/.test(err.message)) message = "Merge needs the newer PixelDeck server.";
     else if (behind) {
-      toast(`Could not merge: the branch is ${behind} ${behind === 1 ? "commit" : "commits"} behind ${state.pr.sync.dest}.`, `${err.message} Sync it first with the bar above.`, true);
+      message = `Could not merge: the branch is ${behind} ${behind === 1 ? "commit" : "commits"} behind ${state.pr.sync.dest}. ${err.message} Sync it first with the bar above.`;
       const bar = $(".sync-bar");
       if (bar) { bar.classList.remove("is-nudge"); void bar.offsetWidth; bar.classList.add("is-nudge"); }
-    } else toast("Could not merge the pull request.", err.message, true);
+    }
+    if (inline) inline(message); else toast(message, /no route/.test(err.message) ? NEEDS_RESTART : "", true);
+    return false;
   }
 }
 
@@ -2028,6 +2132,8 @@ function bind() {
     if (t.closest("[data-create-pr]")) return createPr(t.closest("[data-create-pr]"));
     if (t.closest("[data-decline]")) return declinePr(t.closest("[data-decline]"));
     if (t.closest("[data-merge]")) return mergePr(t.closest("[data-merge]"));
+    if (t.closest("[data-merge-go]")) return mergeGo(t.closest("[data-merge-go]"));
+    if (t.closest("[data-merge-settings]")) { $("#pr-dialog").close(); return Settings.open("connections"); }
     if (t.closest("[data-sync]")) return syncPr(t.closest("[data-sync]"));
     const preset = t.closest("[data-date-preset]");
     if (preset) return setDates({ preset: preset.dataset.datePreset });
@@ -2114,6 +2220,8 @@ function bind() {
     }
   });
   $("#refresh").addEventListener("click", refreshNow);
+  // A late answer from Jira must never paint over another popup opened since.
+  $("#pr-dialog").addEventListener("close", () => { mergeBox = null; });
   $("#team-search").addEventListener("input", paintCandidates);
   $("#team-list").addEventListener("change", (e) => {
     const box = e.target.closest("input[data-uuid]");

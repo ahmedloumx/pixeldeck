@@ -11,7 +11,9 @@
 .copy-link.is-copied { color: var(--color-ok); text-decoration-color: var(--color-ok); }
 
 /* ---------------------------------------------------------------- personal look */
-@font-face { font-family: "Arcade Local"; src: local("ArcadeClassic"), local("ARCADECLASSIC"); size-adjust: 150%; }
+/* ArcadeClassic is personal use only, so it is never shipped: it is used when installed.
+   Its space is zero wide, so spaces come from the next font in the stack. */
+@font-face { font-family: "Arcade Local"; src: local("ArcadeClassic"), local("ARCADECLASSIC"); size-adjust: 150%; unicode-range: U+0021-007E; }
 :root[data-numbers="arcade"] { --font-num: "Arcade Local", "Press Start 2P", var(--font-pixel); }
 :root[data-numbers="plain"] { --font-num: var(--font-outlier); }
 :root[data-accent="cool"] { --color-accent: oklch(78% 0.13 245); --color-accent-ink: oklch(18% 0.05 250); --color-accent-soft: oklch(29% 0.06 250); --color-focus: oklch(78% 0.13 245); --color-accent-deep: oklch(52% 0.13 255); }
@@ -164,3 +166,21 @@
 .set-about { display: grid; justify-items: start; gap: var(--space-xs); }
 .set-mascots { display: flex; gap: var(--space-md); align-items: end; }
 @media (max-width: 760px) { .set-shell { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); } .set-tabs { display: flex; overflow-x: auto; padding: var(--space-xs); border-right: 0; border-bottom: var(--rule-hair) solid var(--color-rule); } .set-row { grid-template-columns: 1fr; } }
+
+/* ---------------------------------------------------------------- the merge popup */
+.strategies { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: var(--space-xs); margin: 0 0 var(--space-md); padding: 0; border: 0; }
+.strategies legend { margin-bottom: var(--space-xs); padding: 0; font-size: var(--text-sm); color: var(--color-muted); }
+.strategy-card { position: relative; display: grid; gap: 2px; padding: var(--space-sm) var(--space-sm) var(--space-sm) calc(var(--space-sm) + 22px); border: var(--rule-hair) solid var(--color-rule); background: var(--color-paper-3); cursor: pointer; }
+.strategy-card:hover { border-color: var(--color-rule-2); }
+.strategy-card input { position: absolute; top: calc(var(--space-sm) + 3px); left: var(--space-sm); width: 14px; height: 14px; margin: 0; accent-color: var(--color-accent); }
+.strategy-card:has(input:checked) { border-color: var(--color-accent); box-shadow: 0 3px 0 var(--color-accent-deep); background: var(--color-paper-2); }
+.strategy-name { font-weight: 500; color: var(--color-ink); }
+.strategy-name small { margin-left: var(--space-2xs); font: 400 8px var(--font-num); color: var(--color-accent); vertical-align: 2px; }
+.strategy-hint { font-size: var(--text-sm); color: var(--color-muted); }
+.merge-ticket { margin: var(--space-md) 0; padding: var(--space-sm) var(--space-md); border: var(--rule-hair) solid var(--color-rule); background: var(--color-paper-3); }
+.merge-ticket h3 { margin: 0 0 var(--space-xs); font: 500 var(--text-md) var(--font-pixel); letter-spacing: 0; }
+.merge-ticket-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-xs); margin: 0 0 var(--space-sm); font-size: var(--text-sm); }
+.jira-status { --tone: var(--color-cool); padding: 2px var(--space-xs); border: var(--rule-hair) solid var(--tone); color: var(--tone); font: 400 9px/1.8 var(--font-num); text-transform: uppercase; }
+.jira-status[data-category="new"] { --tone: var(--color-muted); }
+.jira-status[data-category="done"] { --tone: var(--color-ok); }
+.pr-dialog-body:has(#merge-message) .pr-dialog-foot { position: sticky; bottom: calc(var(--space-lg) * -1); z-index: 1; margin-bottom: calc(var(--space-lg) * -1); padding-bottom: var(--space-lg); background: var(--color-paper); }

@@ -439,6 +439,122 @@ class MergeTest(unittest.TestCase):
         self.assertNotIn("POST", [c[0] for c in engine.client.calls])
 
 
+class MergeOptionsTest(unittest.TestCase):
+    """The merge popup: strategies the branch allows, a message like Bitbucket's, the ticket."""
+
+    def _engine(self):
+        import actions
+        pr = model.slim_pr(raw_pr(author={"uuid": "{me}", "display_name": "Me"}))
+
+        class Client(_FakeClient):
+            def get(self, path, params=None):
+                self.calls.append(("GET", path, None))
+                return {"state": "OPEN", "title": pr["title"], "close_source_branch": True,
+                        "source": {"branch": {"name": pr["source"]}},
+                        "participants": [{"user": ALICE, "approved": True}, {"user": BOB, "approved": False}],
+                        "destination": {"branch": {"name": "develop", "default_merge_strategy": "merge_commit",
+                                                   "merge_strategies": ["merge_commit", "squash", "fast_forward"]}}}
+        engine = type("E", (), {})()
+        engine.client = Client()
+        engine.find_pr = lambda repo, pr_id: pr
+        engine.me = lambda: {"uuid": "{me}"}
+        engine.refresh_person = lambda uuid: None
+        engine.pushed = lambda force=False: []
+        engine.file_merged = lambda uuid, raw: {"id": pr["id"], "state": "MERGED"}
+        return actions, engine, pr
+
+    def test_options_read_the_branch_and_write_bitbuckets_message(self):
+        actions, engine, pr = self._engine()
+        out = actions.merge_options(engine, pr["repo"], pr["id"])
+        self.assertEqual(out["strategies"], ["merge_commit", "squash", "fast_forward"])
+        self.assertEqual(out["default"], "merge_commit")
+        self.assertTrue(out["close_source_branch"])
+        self.assertTrue(out["message"].startswith(f"Merged in {pr['source']} (pull request #42)"))
+        self.assertIn("Approved-by: Alice Reviewer", out["message"])
+        self.assertNotIn("Bob Reviewer", out["message"])
+        self.assertEqual(out["ticket"]["key"], "ABC-9001")
+
+    def test_the_chosen_strategy_message_and_branch_reach_bitbucket(self):
+        actions, engine, pr = self._engine()
+        actions.merge(engine, {"repo": pr["repo"], "id": pr["id"], "strategy": "squash", "message": "  Squashed  ", "close_source_branch": False})
+        method, path, body = engine.client.calls[-1]
+        self.assertEqual(path, "/repositories/acme/shop-api/pullrequests/42/merge")
+        self.assertEqual(body, {"type": "pullrequest", "merge_strategy": "squash", "message": "Squashed", "close_source_branch": False})
+
+    def test_a_strategy_the_branch_does_not_allow_is_refused_before_bitbucket(self):
+        actions, engine, pr = self._engine()
+        with self.assertRaises(ValueError):
+            actions.merge(engine, {"repo": pr["repo"], "id": pr["id"], "strategy": "rebase_merge"})
+        with self.assertRaises(ValueError):
+            actions.merge(engine, {"repo": pr["repo"], "id": pr["id"], "message": "x" * 6000})
+        self.assertNotIn("POST", [c[0] for c in engine.client.calls])
+
+
+class JiraTest(unittest.TestCase):
+    """The ticket card in the merge popup, over a fake Jira."""
+
+    def setUp(self):
+        import jira
+        self.jira_mod = jira
+        self.requests = []
+        self.status = "In Progress"
+        os.environ.update(JIRA_SITE="https://acme.atlassian.net", JIRA_TOKEN="scoped-token", JIRA_EMAIL="me@acme.test")
+        self.addCleanup(lambda: [os.environ.pop(k, None) for k in ("JIRA_SITE", "JIRA_TOKEN", "JIRA_EMAIL")])
+
+    def _open(self, req, timeout=None):
+        import io
+        import urllib.error
+        url = req.full_url
+        self.requests.append((req.get_method(), url, req.data))
+        reply = None
+        if url == "https://acme.atlassian.net/rest/api/3/myself":
+            raise urllib.error.HTTPError(url, 401, "no", {}, io.BytesIO(b'{"errorMessages":["Client must be authenticated"]}'))
+        if url == "https://acme.atlassian.net/_edge/tenant_info":
+            reply = {"cloudId": "0123abcd-0000-4000-8000-00000000abcd"}
+        base = "https://api.atlassian.com/ex/jira/0123abcd-0000-4000-8000-00000000abcd"
+        if url == base + "/rest/api/3/myself":
+            reply = {"displayName": "Pat Author"}
+        if url.startswith(base + "/rest/api/3/issue/ABC-9001?"):
+            reply = {"fields": {"summary": "Cheaper bundle", "status": {"name": self.status, "statusCategory": {"key": "indeterminate"}}}}
+        if url == base + "/rest/api/3/issue/ABC-9001/transitions":
+            if req.get_method() == "POST":
+                self.status = "Done"
+                reply = None
+            else:
+                reply = {"transitions": [{"id": "31", "name": "Done", "to": {"name": "Done", "statusCategory": {"key": "done"}}}]}
+        if reply is None and req.get_method() != "POST":
+            raise urllib.error.HTTPError(url, 404, "no", {}, io.BytesIO(b"{}"))
+
+        class Res(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+        return Res(json.dumps(reply).encode() if reply is not None else b"")
+
+    def test_a_scoped_token_goes_through_the_gateway_and_moves_the_ticket(self):
+        j = self.jira_mod.Jira(opener=self._open)
+        t = j.ticket("ABC-9001")
+        self.assertEqual((t["status"]["name"], t["url"]), ("In Progress", "https://acme.atlassian.net/browse/ABC-9001"))
+        self.assertEqual([x["to"] for x in t["transitions"]], ["Done"])
+        self.assertEqual(j.status()["me"], "Pat Author")
+        moved = j.move("ABC-9001", "31")
+        self.assertEqual(moved["status"]["name"], "Done")
+        posts = [r for r in self.requests if r[0] == "POST"]
+        self.assertEqual(json.loads(posts[0][2]), {"transition": {"id": "31"}})
+        self.assertNotIn("scoped-token", json.dumps(j.status()), "the status never carries the token")
+
+    def test_refuses_bad_keys_and_steps_jira_does_not_offer(self):
+        j = self.jira_mod.Jira(opener=self._open)
+        for bad in ("abc-1", "ABC-0", "ABC-1/../../x", "", None):
+            with self.assertRaises(ValueError):
+                j.ticket(bad)
+        with self.assertRaises(ValueError):
+            j.move("ABC-9001", "99")
+        self.assertFalse([r for r in self.requests if r[0] == "POST"])
+
+
 class OpenLaneTest(unittest.TestCase):
     def _engine(self, open_lists):
         import engine as engine_mod

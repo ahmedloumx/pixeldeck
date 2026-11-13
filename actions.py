@@ -200,14 +200,12 @@ def decline(engine, body):
     return {"repo": repo, "id": pr_id}
 
 
-def merge(engine, body):
-    """Merge one of your own open pull requests, with its destination's default strategy.
+MERGE_MESSAGE_MAX = 5000
 
-    The pull request is read fresh first: the cache can be minutes old, and the destination
-    branch says which strategies it allows. Bitbucket still runs its own merge checks
-    (approvals, builds, tasks) and its refusal comes back as the error.
-    """
-    repo, pr_id = body.get("repo"), body.get("id")
+
+def _mergeable(engine, repo, pr_id):
+    """Your own pull request, read fresh: the cache can be minutes old, and the destination
+    branch says which strategies it allows."""
     if not isinstance(repo, str) or not isinstance(pr_id, int):
         raise ValueError("repo and id are required")
     pr = engine.find_pr(repo, pr_id)
@@ -217,14 +215,58 @@ def merge(engine, body):
     if pr["author"]["uuid"] != me:
         raise PermissionError("only your own pull requests can be merged from here")
     base = f"/repositories/{engine.client.workspace}/{repo}/pullrequests/{pr_id}"
-    live = engine.client.get(base)
+    # The strategies are not in a pull request by default; asking for them costs no extra call.
+    live = engine.client.get(base, {"fields": "+destination.branch.merge_strategies,+destination.branch.default_merge_strategy"})
     if live.get("state") != "OPEN":
         raise ValueError(f"#{pr_id} is {str(live.get('state', 'unknown')).lower()} on Bitbucket, not open")
     branch = (live.get("destination") or {}).get("branch") or {}
-    strategy = branch.get("default_merge_strategy")
+    default = branch.get("default_merge_strategy")
+    strategies = [s for s in branch.get("merge_strategies") or [] if isinstance(s, str)] or ([default] if default else [])
+    return pr, me, base, live, default, strategies
+
+
+def merge_options(engine, repo, pr_id):
+    """What the merge popup offers: the strategies the destination allows, its default, and
+    Bitbucket's usual commit message, so a merge from here reads like one from the website."""
+    pr, _me, _base, live, default, strategies = _mergeable(engine, repo, pr_id)
+    approvers = [((p.get("user") or {}).get("display_name")) for p in live.get("participants") or [] if p.get("approved")]
+    source = ((live.get("source") or {}).get("branch") or {}).get("name") or pr.get("source")
+    message = f"Merged in {source} (pull request #{pr_id})\n\n{live.get('title') or pr.get('title') or ''}".rstrip()
+    if approvers:
+        message += "\n\n" + "\n".join(f"Approved-by: {name}" for name in approvers if name)
+    return {
+        "repo": repo, "id": pr_id, "source": source, "dest": pr.get("dest"), "title": live.get("title") or pr.get("title"),
+        "strategies": strategies, "default": default if default in strategies else (strategies[0] if strategies else None),
+        "close_source_branch": bool(live.get("close_source_branch")), "message": message, "ticket": pr.get("ticket"),
+    }
+
+
+def merge(engine, body):
+    """Merge one of your own open pull requests.
+
+    The strategy, commit message and closing of the branch come from the merge popup; left
+    out, the destination's default strategy and Bitbucket's own message are used. Bitbucket
+    still runs its own merge checks (approvals, builds, tasks) and its refusal comes back
+    as the error.
+    """
+    repo, pr_id = body.get("repo"), body.get("id")
+    pr, me, base, live, strategy, strategies = _mergeable(engine, repo, pr_id)
+    wanted = body.get("strategy")
+    if wanted is not None:
+        if wanted not in strategies:
+            raise ValueError(f"{pr.get('dest')} does not allow {wanted}; it allows {', '.join(strategies) or 'nothing'}")
+        strategy = wanted
     payload = {"type": "pullrequest"}
     if strategy:
         payload["merge_strategy"] = strategy
+    message = body.get("message")
+    if message is not None:
+        if not isinstance(message, str) or len(message) > MERGE_MESSAGE_MAX:
+            raise ValueError(f"the commit message must be text of at most {MERGE_MESSAGE_MAX} characters")
+        if message.strip():
+            payload["message"] = message.strip()
+    if "close_source_branch" in body:
+        payload["close_source_branch"] = bool(body["close_source_branch"])
     result = engine.client.send("POST", f"{base}/merge", payload)
     merged = None
     if result.get("state") == "MERGED":
