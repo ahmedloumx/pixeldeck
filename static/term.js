@@ -290,6 +290,20 @@ const Term = (() => {
     if (/JSON body/.test(data.error || "")) throw new Error("This needs the newer PixelDeck server: restart it once.");
     throw new Error(data.error || `HTTP ${res.status}`);
   }
+  // The native window hands over real paths (see app_window.py: WebKitGTK hides dropped
+  // files from the page). They go to the terminal you are on, wherever they were dropped.
+  function dropPaths(paths) {
+    const s = sessions.get(current);
+    const clean = (paths || []).filter((p) => typeof p === "string" && p && !/[\u0000-\u001f\u007f]/.test(p)).slice(0, 10);
+    if (!clean.length) return false;
+    if (!s || !s.alive) { toast("Open a terminal first.", "Then drop the files on it."); return false; }
+    if (typeof Layout !== "undefined") Layout.activate("terminal");
+    s.term.paste(`${clean.map(quotePath).join(" ")} `);
+    s.term.focus();
+    return true;
+  }
+  window.PixelDeckDrop = (paths) => dropPaths(paths);
+
   async function dropFiles(dt) {
     // Both lists can only be read during the drop event itself, so before any await.
     const files = [...(dt.files || [])].slice(0, 10);
@@ -588,7 +602,7 @@ const Term = (() => {
   addEventListener("pagehide", () => saveSnapshots(true));
 
   return { mount, attach, select, newShell, showBuild, buildWith, fit: fitCurrent, saveSnapshots, count: () => sessions.size,
-    renderers: () => [...sessions.values()].map((s) => s.renderer), order: () => [...sessions.keys()],
+    renderers: () => [...sessions.values()].map((s) => s.renderer), order: () => [...sessions.keys()], dropPaths,
     // The last lines of the current terminal as text: with WebGL the screen is not in the DOM.
     lines: (n = 5) => {
       const buf = sessions.get(current)?.term.buffer.active;
