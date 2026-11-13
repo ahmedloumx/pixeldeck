@@ -1756,7 +1756,7 @@ async function openTeamDialog() {
 function paintCandidates() {
   const q = $("#team-search").value.trim().toLowerCase();
   const list = candidates.filter((c) => !q || (c.name || "").toLowerCase().includes(q)).sort((a, b) => Number(b.picked) - Number(a.picked) || (a.name || "").localeCompare(b.name || ""));
-  $("#team-list").innerHTML = list.length ? list.map((c) => `<label class="pick"><input type="checkbox" data-uuid="${esc(c.uuid)}"${c.picked ? " checked" : ""}>${face(c)}<span>${esc(c.name)}</span></label>`).join("") : `<p class="empty">No one matches.</p>`;
+  $("#team-list").innerHTML = list.length ? list.map((c, i) => `<label class="pick" style="--k:${Math.min(i, 14)}"><input type="checkbox" data-uuid="${esc(c.uuid)}"${c.picked ? " checked" : ""}>${face(c)}<span>${esc(c.name)}</span></label>`).join("") : `<p class="empty">No one matches.</p>`;
   $("#team-count").textContent = `${candidates.filter((c) => c.picked).length} selected`;
 }
 async function saveTeam() {
