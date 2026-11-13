@@ -286,6 +286,7 @@ class ApiTest(SpotifyBase):
                                        "art": ART.replace("4851", "b273"), "thumb": ART})
         self.assertEqual((now["is_playing"], now["progress_ms"], now["shuffle"], now["repeat"]), (True, 61000, True, "context"))
         self.assertEqual((now["device"]["volume"], now["playlist"], now["disallows"]), (55, "37i9dQZF1DXcBWIGoYBM5M", ["resuming"]))
+        self.assertEqual(now["context"], {"type": "playlist", "id": "37i9dQZF1DXcBWIGoYBM5M", "uri": "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M"})
         self.assertNotIn("device_secret", json.dumps(now))
         self.assertTrue(self.fake.to(API + "/me/player")[-1].url.endswith("additional_types=track%2Cepisode"))
 

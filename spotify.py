@@ -228,10 +228,11 @@ def trim_player(raw):
     """GET /me/player cut down to what the deck shows. None (a 204) means nothing is playing."""
     if not isinstance(raw, dict):
         return {"connected": True, "active": False, "is_playing": False, "progress_ms": 0, "shuffle": False,
-                "repeat": "off", "device": None, "item": None, "playlist": None, "disallows": []}
+                "repeat": "off", "device": None, "item": None, "playlist": None, "context": None, "disallows": []}
     context = raw.get("context") if isinstance(raw.get("context"), dict) else {}
     uri = context.get("uri") if isinstance(context.get("uri"), str) else ""
     playlist = uri.rsplit(":", 1)[-1] if uri.startswith("spotify:playlist:") else None
+    where = CONTEXT_URI_RE.fullmatch(uri)
     disallows = ((raw.get("actions") or {}).get("disallows") or {}) if isinstance(raw.get("actions"), dict) else {}
     return {
         "connected": True, "active": True, "is_playing": bool(raw.get("is_playing")),
@@ -239,6 +240,7 @@ def trim_player(raw):
         "repeat": raw.get("repeat_state") if raw.get("repeat_state") in REPEAT_MODES else "off",
         "device": trim_device(raw.get("device")), "item": trim_item(raw.get("item")),
         "playlist": playlist if playlist and PLAYLIST_ID_RE.fullmatch(playlist) else None,
+        "context": {"type": where.group(1), "id": uri.rsplit(":", 1)[-1], "uri": uri} if where else None,
         "disallows": [k for k in DISALLOWS if isinstance(disallows, dict) and disallows.get(k)],
     }
 
