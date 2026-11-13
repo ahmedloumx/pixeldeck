@@ -2378,6 +2378,7 @@ async function boot() {
     panels: [
       { id: "queue", title: "Queue", copyable: true }, { id: "pr", title: "Pull request" },
       { id: "insights", title: "Insights", copyable: true }, { id: "terminal", title: "Terminal" },
+      { id: "repos", title: "Repos", place: "left" }, { id: "music", title: "Music", place: "hidden" },
     ],
     onChange: () => { for (const b of $$(".chart-box")) b.dataset.drawn = ""; paintCharts(); Term.fit(); },
     paramsFor: (id) => { const v = viewOf(id); return { who: v.who, section: v.section, range: v.range }; },
@@ -2386,6 +2387,8 @@ async function boot() {
   });
   Term.mount(Layout.body("terminal"));
   Arcade.attach(Layout.body("terminal"));
+  Repos.mount(Layout.body("repos"));
+  Music.mount(Layout.body("music"));
   RetroSelect.enhanceAll();
   Prefs.onChange(() => paintLayoutMenu());
   bind();

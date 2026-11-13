@@ -11,14 +11,14 @@ const Layout = (() => {
   const SLOTS = ["left", "main", "right", "bottom"];
   const PRESETS = {
     split: {
-      slots: { left: ["queue"], main: ["pr", "insights"], right: [], bottom: ["terminal"] },
+      slots: { left: ["queue", "repos"], main: ["pr", "insights"], right: [], bottom: ["terminal"] },
       active: { left: "queue", main: "insights", right: "", bottom: "terminal" },
-      size: { left: 30, right: 30, bottom: 34 }, collapsed: {}, hidden: [],
+      size: { left: 30, right: 30, bottom: 34 }, collapsed: {}, hidden: ["music"],
     },
     compact: {
-      slots: { left: [], main: ["queue", "pr", "insights", "terminal"], right: [], bottom: [] },
+      slots: { left: [], main: ["queue", "repos", "pr", "insights", "terminal"], right: [], bottom: [] },
       active: { left: "", main: "queue", right: "", bottom: "" },
-      size: { left: 30, right: 30, bottom: 34 }, collapsed: {}, hidden: [],
+      size: { left: 30, right: 30, bottom: 34 }, collapsed: {}, hidden: ["music"],
     },
   };
   const ICON = {
@@ -74,7 +74,13 @@ const Layout = (() => {
       state.slots[slot] = (state.slots[slot] || []).filter((id) => ids.includes(id) && !seen.has(id) && seen.add(id));
     }
     state.hidden = (state.hidden || []).filter((id) => ids.includes(id) && !seen.has(id) && seen.add(id));
-    for (const id of ids) if (!seen.has(id)) state.slots.main.push(id);
+    // A panel new to a saved layout goes where it asks (place: an area, or "hidden").
+    for (const id of ids) {
+      if (seen.has(id)) continue;
+      const place = panels[id].place;
+      if (place === "hidden") state.hidden.push(id);
+      else state.slots[SLOTS.includes(place) ? place : "main"].push(id);
+    }
     state.active = state.active || {};
     state.collapsed = state.collapsed || {};
     state.size = { ...PRESETS.split.size, ...(state.size || {}) };

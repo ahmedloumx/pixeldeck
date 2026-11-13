@@ -31,6 +31,8 @@ sys.path.insert(0, str(HERE))
 
 import actions  # noqa: E402
 import connections  # noqa: E402
+import repos  # noqa: E402
+import spotify  # noqa: E402
 import jira  # noqa: E402
 import launcher  # noqa: E402
 import terminals  # noqa: E402
@@ -49,7 +51,9 @@ SECRET = secrets.token_urlsafe(32)
 AGENT_KEY = secrets.token_urlsafe(32)
 AGENT_ROUTES = {("POST", "propose"), ("GET", "proposal")}
 PROPOSALS = proposals.Proposals()
-FEATURES = ["merge", "sync", "drop", "proposals", "snapshots", "reviews", "events", "status", "settings", "merge-options", "jira"]
+FEATURES = ["merge", "sync", "drop", "proposals", "snapshots", "reviews", "events", "status", "settings", "merge-options", "jira",
+            *repos.FEATURES, *spotify.FEATURES]
+ROUTE_MODULES = (repos, spotify)  # each answers its own routes, or None
 JIRA = jira.Jira()
 SNAPSHOT_MAX = 4 * 1024 * 1024
 MIN_COLS, MIN_ROWS = 20, 4  # a collapsed panel must not squeeze a program into a sliver
@@ -151,6 +155,9 @@ class Desk(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         if url.path == "/healthz":
             return self._send(200, b"ok", "text/plain")
+        if url.path == "/spotify/callback":  # the browser comes back here from Spotify; no page token
+            status, page = spotify.callback(parse_qs(url.query))
+            return self._send(status, page.encode("utf-8"), "text/html; charset=utf-8")
         if url.path in ("/", "/index.html"):
             return self._index()
         if url.path.startswith("/static/"):
@@ -295,6 +302,12 @@ class Desk(BaseHTTPRequestHandler):
                 repo = (query.get("repo") or [""])[0]
                 pr_id = int((query.get("id") or ["0"])[0])
                 return self._send(200, actions.sync_status(engine, WORKSPACE_ROOT, repo, pr_id))
+            for module in ROUTE_MODULES:
+                answer = module.route(self, engine, method, route, query, body)
+                if isinstance(answer, tuple):
+                    return self._send(200, answer[0], answer[1])
+                if answer is not None:
+                    return self._send(200, answer)
             # The three routes the page polls or opens often answer from memory, never Bitbucket.
             if method == "GET" and route == "events":
                 since = (query.get("since") or [""])[0]
@@ -342,6 +355,8 @@ class Desk(BaseHTTPRequestHandler):
                 return self._send(200, {"browser": opener.open_url(url)})
         except BitbucketError as exc:
             return self._error(HTTPStatus.BAD_GATEWAY, exc.message, upstream=exc.status, auth=engine.auth)
+        except spotify.SpotifyError as exc:
+            return self._error(HTTPStatus.BAD_GATEWAY, exc.message, upstream=exc.status)
         except jira.JiraError as exc:
             return self._error(HTTPStatus.BAD_GATEWAY, exc.message, upstream=exc.status, jira=JIRA.status())
         except actions.SyncConflict as exc:
