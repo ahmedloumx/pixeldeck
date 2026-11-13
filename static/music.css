@@ -118,10 +118,11 @@
 
 /* the visualiser: 8 segments a bar, lit from the bottom; it is made up, and only moves while playing */
 .mu-eq { display: flex; align-items: flex-end; gap: 3px; height: 56px; }
-.mu-eq i { position: relative; flex: 1 1 0; height: 56px; background: repeating-linear-gradient(to top, var(--mu-lcd-dim) 0 5px, transparent 5px 7px); }
+/* segments are one 7 px tile repeated (2 px gap over 5 px lit): a repeating gradient draws hairlines in Firefox */
+.mu-eq i { position: relative; flex: 1 1 0; height: 56px; background: linear-gradient(transparent 2px, var(--mu-lcd-dim) 2px) 0 0 / 100% 7px; }
 .mu-eq i::after { content: ""; position: absolute; inset: 0; clip-path: inset(87.5% 0 0 0);
-  background: repeating-linear-gradient(to top, transparent 0 5px, var(--mu-lcd-bg) 5px 7px),
-    linear-gradient(to top, var(--mu-lcd-ink) 0 62.5%, var(--sprite-yellow) 62.5% 87.5%, var(--sprite-red) 87.5%); }
+  background: linear-gradient(var(--mu-lcd-bg) 2px, transparent 2px) 0 0 / 100% 7px,
+    linear-gradient(to top, var(--mu-lcd-ink) 0 62.5%, var(--sprite-yellow) 62.5% 87.5%, var(--sprite-red) 87.5%) 0 0 / 100% 100% no-repeat; }
 .mu.is-idle .mu-eq i::after { clip-path: inset(100% 0 0 0); }
 .mu.is-playing .mu-eq i::after { animation: mu-eq-a var(--d, 500ms) steps(1, end) var(--o, 0ms) infinite; }
 .mu.is-playing .mu-eq i.mu-eq-b::after { animation-name: mu-eq-b; }

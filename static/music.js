@@ -17,7 +17,7 @@ const Music = (() => {
   const still = () => reducedQuery.matches || document.documentElement.dataset.motion === "calm";
 
   let root = null, mini = null, els = {}, miniEls = {};
-  let status = null, statusFailed = "";
+  let status = null, statusFailed = "", statusSeen = "";
   let view = "", mode = "boot";          // mode: boot, setup, live or demo
   let demo = false;
   let player = null, readAt = 0, holdUntil = 0, pollError = "";
@@ -261,11 +261,11 @@ const Music = (() => {
     const TRACKS = [
       { id: "demo-1", name: "Neon Harbor", artists: ["The Pixel Tides"], album: "Night Drive EP", duration_ms: 222000, art: "demo:sunset" },
       { id: "demo-2", name: "Cartridge Hearts", artists: ["Bit Lagoon"], album: "Save Slot One", duration_ms: 185000, art: "demo:heart" },
-      { id: "demo-3", name: "Slime Time Boogie", artists: ["Gelatin Groove", "DJ Wobble"], album: "Bouncy Castle", duration_ms: 168000, art: "demo:slime" },
+      { id: "demo-3", name: "Slime Time Boogie", artists: ["Gelatin Groove", "Sir Wobbleton 3000"], album: "Bouncy Castle", duration_ms: 168000, art: "demo:slime" },
       { id: "demo-4", name: "Orbit of the Rubber Duck", artists: ["Captain Lint"], album: "Debug Odyssey", duration_ms: 256000, art: "demo:space" },
       { id: "demo-5", name: "Floppy Disk Romance", artists: ["Magnetic Avenue"], album: "1.44 MB of Love", duration_ms: 207000, art: "demo:floppy" },
       { id: "demo-6", name: "Lighthouse Lo-Fi", artists: ["Harbor Static"], album: "Foghorn Tapes", duration_ms: 179000, art: "demo:lighthouse" },
-      { id: "demo-7", name: "Green Build Groove", artists: ["The Merge Conflicts"], album: "All Checks Passed", duration_ms: 213000, art: "demo:city" },
+      { id: "demo-7", name: "Green Build Groove", artists: ["Squash and the Rebasers"], album: "All Checks Passed", duration_ms: 213000, art: "demo:city" },
     ];
     const LISTS = [
       { id: "demoFocus", name: "Focus Mode: Pixels", owner: "You", tracks: 24 },
@@ -711,6 +711,11 @@ const Music = (() => {
       clearTimeout(statusTimer);
       toast("Spotify connected.", status.user ? `Signed in as ${status.user.name}.` : "");
     }
+    // Nothing new: leave the page alone, or the setup card and the Settings dialog would be
+    // rebuilt (and scrolled back up) every few seconds while a sign-in is out in the browser.
+    const seen = `${JSON.stringify(status)}|${statusFailed}`;
+    if (seen === statusSeen && mode !== "boot") return status;
+    statusSeen = seen;
     decide();
     notify();
     return status;
@@ -811,7 +816,9 @@ const Music = (() => {
     paint();
     try {
       await source().control(command, value, command === "play" ? deviceChoice() : undefined);
-      if (mode === "demo" || action === "next" || action === "previous") { holdUntil = 0; await poll(); return; }
+      if (mode === "demo") { holdUntil = 0; await poll(); return; }
+      // Spotify's own state trails a skip by a moment; asking at once would show the old song.
+      if (action === "next" || action === "previous") { holdUntil = 0; schedule(700); return; }
       schedule(HOLD_MS + 200);
     } catch (err) {
       if (err.message === "reloading") return;
