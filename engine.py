@@ -22,6 +22,7 @@ from bitbucket import HOURLY_LIMIT, BitbucketError, Client
 ME_EVERY = 300
 OPEN_EVERY = 60  # your open pull requests alone: one call, so an approval shows within a minute or two
 TEAM_EVERY = 900
+COMMENT_LOOKUPS = 5  # pull requests whose new comments are checked for authors, per refresh
 TEAM_OPEN_EVERY = 300  # a teammate's open list alone, one call: team news within minutes, not a quarter hour
 DETAIL_MAX_AGE = 900
 MERGED_WINDOW_DAYS = 120
@@ -156,7 +157,47 @@ class Engine:
 
     # ---- pull requests --------------------------------------------------
 
+    def _person_lock(self, uuid):
+        """One refresh per person at a time: two at once would both compare against the same
+        old list and log every change twice. Reentrant, since the open lane calls the full one."""
+        with self.lock:
+            locks = self.__dict__.setdefault("_person_locks", {})
+            return locks.setdefault(uuid, threading.RLock())
+
+    def _record(self, uuid, found):
+        self.events.record(uuid, self._who_commented(found))
+
+    def _who_commented(self, found):
+        """A comment count says how many, not who: read the newest comments of a few pull
+        requests and drop yours, so your own replies never notify you. If the read fails the
+        event stays as it was (fail-open: "new comments" beats silence)."""
+        me, out, looked = self._me_uuid(), [], 0
+        for ev in found:
+            if ev.get("kind") != "comments" or looked >= COMMENT_LOOKUPS:
+                out.append(ev)
+                continue
+            looked += 1
+            try:
+                raw = self.client.get(
+                    f"/repositories/{self.client.workspace}/{ev['repo']}/pullrequests/{int(ev['pr_id'])}/comments",
+                    {"sort": "-created_on", "pagelen": max(1, min(50, int(ev.get("count") or 1))),
+                     "fields": "values.user.uuid,values.user.display_name,values.deleted"})
+            except BitbucketError:
+                out.append(ev)
+                continue
+            others = [c for c in raw.get("values") or [] if not c.get("deleted") and (c.get("user") or {}).get("uuid") != me]
+            if not others:
+                continue
+            names = list(dict.fromkeys((c.get("user") or {}).get("display_name") or "Someone" for c in others))
+            out.append({**ev, "count": len(others), "names": names[:5],
+                        "actor": {"uuid": (others[0].get("user") or {}).get("uuid"), "name": names[0]}})
+        return out
+
     def refresh_person(self, uuid, before_open=None):
+        with self._person_lock(uuid):
+            return self._refresh_person(uuid, before_open)
+
+    def _refresh_person(self, uuid, before_open=None):
         """Open PRs in full; merged PRs incrementally.
 
         Merged lists are long (hundreds per person), so after the first full
@@ -197,7 +238,7 @@ class Engine:
         self.auth = {"ok": True, "error": None}
         merged.sort(key=lambda p: p.get("updated_on") or "", reverse=True)
         if previous.get("synced_at"):  # a first sync has nothing to compare with
-            self.events.record(uuid, events.diff(
+            self._record(uuid, events.diff(
                 previous.get("open") if before_open is None else before_open, open_prs,
                 self._me_uuid(), merged=merged, declined=declined))
         with self.lock:
@@ -219,6 +260,10 @@ class Engine:
         declined somewhere else, so the full refresh files it straight away."""
         if self.person(uuid) is None:
             return None  # never synced: the full refresh comes first, so spend no call here
+        with self._person_lock(uuid):
+            return self._refresh_open(uuid)
+
+    def _refresh_open(self, uuid):
         open_prs = [model.slim_pr(p) for p in self.client.user_prs(uuid, "OPEN", max_pages=4)]
         with self.lock:
             entry = self.data["people"].get(uuid)
@@ -229,9 +274,15 @@ class Engine:
             changed = json.dumps(before, sort_keys=True) != json.dumps(open_prs, sort_keys=True)
             entry["open"] = open_prs
         if {(p["repo"], p["id"]) for p in before} - {(p["repo"], p["id"]) for p in open_prs}:
-            return self.refresh_person(uuid, before_open=before)
+            try:
+                return self.refresh_person(uuid, before_open=before)
+            except BitbucketError:
+                # Put the old list back, so the next read still sees what left and logs it.
+                with self.lock:
+                    entry["open"] = before
+                raise
         if changed:
-            self.events.record(uuid, events.diff(before, open_prs, self._me_uuid()))
+            self._record(uuid, events.diff(before, open_prs, self._me_uuid()))
             self._save()
         return entry
 
