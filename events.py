@@ -9,6 +9,7 @@ Nothing is recorded on a person's first sync (there is nothing to compare with),
 nothing you did yourself: your own approval or push is not news to you.
 """
 
+import secrets
 import threading
 import time
 
@@ -45,6 +46,9 @@ def diff(before_open, after_open, me_uuid, merged=None, declined=None):
     for key, pr in after.items():
         old = before.get(key)
         if old is None:
+            # A pull request opened with you already on it asks for your review from the start.
+            if any(r.get("uuid") == me_uuid and r.get("reviewer") for r in pr.get("reviews") or []):
+                out.append(_base(pr, "review_requested", actor=_who(pr.get("author"))))
             if not mine(pr):
                 out.append(_base(pr, "opened", actor=_who(pr.get("author"))))
             continue
@@ -85,11 +89,14 @@ def _review_changes(old, new, me_uuid):
 
 class Log:
     """The event log, kept in the engine's cache so ids keep counting across restarts:
-    a page holding id 40 must never be handed a new event numbered 12."""
+    a page holding id 40 must never be handed a new event numbered 12. When the cache is
+    lost the log starts over with a new epoch, and a page that sees the epoch change
+    drops its cursor and history instead of mistaking new ids for old ones."""
 
     def __init__(self, data, save):
         self.lock = threading.Lock()
         self.data = data.setdefault("events", {"seq": 0, "items": []})
+        self.data.setdefault("epoch", secrets.token_hex(6))
         self.save = save
 
     def record(self, owner_uuid, events):
@@ -113,7 +120,7 @@ class Log:
         """Events after `since`, oldest first; without `since`, the latest ones for the bell."""
         with self.lock:
             items = [ev for ev in self.data["items"] if keep(ev)]
-            last = self.data["seq"]
+            last, epoch = self.data["seq"], self.data["epoch"]
         if since is None:
-            return {"events": items[-PAGE:], "last": last}
-        return {"events": [ev for ev in items if ev["id"] > since][:PAGE], "last": last}
+            return {"events": items[-PAGE:], "last": last, "epoch": epoch}
+        return {"events": [ev for ev in items if ev["id"] > since][:PAGE], "last": last, "epoch": epoch}

@@ -9,6 +9,7 @@
 
 const Notify = (() => {
   const CURSOR_KEY = "prdesk.events.cursor.v1";
+  const EPOCH_KEY = "prdesk.events.epoch.v1";
   const HISTORY_KEY = "prdesk.events.history.v1";
   const PREFS_KEY = "prdesk.notify.v1";
   const HISTORY_MAX = 120;
@@ -35,7 +36,8 @@ const Notify = (() => {
   let history = read(HISTORY_KEY, []);
   if (!Array.isArray(history)) history = [];
   let cursor = read(CURSOR_KEY, null);
-  let opts = null, timer = 0, queue = [], current = null, filter = "all";
+  let epoch = read(EPOCH_KEY, null);
+  let opts = null, timer = 0, queue = [], current = null, filter = "all", polling = false;
   const listeners = new Set();
   const changed = () => { for (const fn of listeners) fn(); paintPanel(); };
 
@@ -51,7 +53,9 @@ const Notify = (() => {
       case "opened": return `${actor} opened ${pr}`;
       case "approved": return `${actor} approved ${whose} ${pr}`;
       case "changes_requested": return `${actor} asked for changes on ${whose} ${pr}`;
-      case "comments": return `${ev.count === 1 ? "A new comment" : `${ev.count} new comments`} on ${whose} ${pr}`;
+      case "comments": return ev.names?.length === 1
+        ? `${first(ev.names[0])} left ${ev.count === 1 ? "a comment" : `${ev.count} comments`} on ${whose} ${pr}`
+        : `${ev.count === 1 ? "A new comment" : `${ev.count} new comments`} on ${whose} ${pr}`;
       case "updated": return `${actor} pushed new commits to ${pr}`;
       case "merged": return ev.actor ? `${actor} merged ${whose} ${pr}` : `${isMine(ev) ? "Your" : whose} ${pr} was merged`;
       case "declined": return ev.actor ? `${actor} declined ${whose} ${pr}` : `${isMine(ev) ? "Your" : whose} ${pr} was declined`;
@@ -84,12 +88,25 @@ const Notify = (() => {
   async function poll() {
     clearTimeout(timer);
     timer = setTimeout(poll, document.hidden ? POLL_HIDDEN_MS : POLL_MS);
-    if (!opts || (opts.ready && !opts.ready())) return;
+    if (!opts || (opts.ready && !opts.ready()) || polling) return;
+    polling = true;  // a tab switch must not start a second poll on the same cursor
+    try { await pollOnce(); } finally { polling = false; }
+  }
+  async function pollOnce() {
     let res;
     try { res = await opts.api(`events${cursor == null ? "" : `?since=${cursor}`}`); } catch { return; }
+    if (res.epoch && res.epoch !== epoch) {
+      // A new log (first run, or the server lost its cache): its ids are not ours. Read
+      // what it holds as history, not news, and forget the old history it would collide with.
+      const all = cursor == null ? res : await opts.api("events").catch(() => res);
+      history = (all.events || []).slice().reverse().map((ev) => ({ ...ev, read: true })).slice(0, HISTORY_MAX);
+      cursor = all.last; epoch = res.epoch;
+      write(CURSOR_KEY, cursor); write(EPOCH_KEY, epoch); write(HISTORY_KEY, history); changed();
+      return;
+    }
     const fresh = res.events || [];
     if (cursor == null || res.last < cursor) {
-      // First run, or the server's log started over: what is there is history, not news.
+      // An older server without epochs: a first run, or its log started over.
       history = mergeHistory(fresh.map((ev) => ({ ...ev, read: true })));
       cursor = res.last;
       write(CURSOR_KEY, cursor); write(HISTORY_KEY, history); changed();

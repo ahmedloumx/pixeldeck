@@ -1672,11 +1672,16 @@ async function mergeGo(button) {
   const body = { repo: m.pr.repo, id: m.pr.id, strategy, message: $("#merge-message").value, close_source_branch: $("#merge-close").checked };
   const err = $("#merge-error");
   err.hidden = true;
-  const ok = await doMerge(m.pr, body, button, (message) => { err.textContent = message; err.hidden = false; });
-  if (!ok) return;
+  const merged = await doMerge(m.pr, body, button, (message) => { err.textContent = message; err.hidden = false; });
+  if (!merged) return;
   $("#pr-dialog").close();
   mergeBox = null;
   if (!transition || !m.ticket) return;
+  if (merged !== "MERGED") {
+    // Bitbucket is still finishing it and can still refuse: the ticket stays where it is.
+    toast(`${m.ticket.key} stays in ${m.ticket.status.name} for now.`, "The merge is still finishing. Move the ticket once it shows as merged.");
+    return;
+  }
   const step = m.ticket.transitions.find((x) => x.id === transition);
   try { localStorage.setItem(TRANSITION_KEY, step?.to || ""); } catch { /* storage blocked */ }
   try {
@@ -1706,7 +1711,7 @@ async function doMerge(pr, body, button, inline = null) {
     }
     await reloadMine();
     if (state.pr && prKey(state.pr.pr) === prKey(pr)) openPr(findPr(prKey(pr)) || state.pr.pr, { force: true });
-    return true;
+    return res.state || "PENDING";
   } catch (err) {
     const behind = state.pr?.sync?.behind;
     let message = `Could not merge: ${err.message}`;

@@ -674,6 +674,100 @@ class EventsTest(unittest.TestCase):
         self.assertEqual(eng.events.last(), 1)
 
 
+class EventEdgeTest(unittest.TestCase):
+    """What the review of the notification log found: each case once broke or misreported."""
+
+    ME = {"uuid": "{me}", "display_name": "Me Myself"}
+
+    def _engine(self, open_lists, people=None):
+        import engine as engine_mod
+        import events
+        eng = engine_mod.Engine.__new__(engine_mod.Engine)
+        eng.lock = __import__("threading").RLock()
+        eng.data = {"me": {"uuid": "{me}"}, "people": people or {"{alice}": {"open": [model.slim_pr(raw_pr())], "merged": [], "synced_at": 1, "open_at": 1}}}
+        eng._save = lambda: None
+        eng.events = events.Log(eng.data, lambda: None)
+        eng.client = _FakeClient(open_lists=open_lists)
+        return eng
+
+    def test_a_new_pull_request_that_asks_you_to_review_says_so(self):
+        import events
+        pr = model.slim_pr(raw_pr(participants=[{"user": self.ME, "role": "REVIEWER", "approved": False, "state": None}]))
+        self.assertEqual(sorted(e["kind"] for e in events.diff([], [pr], "{me}")), ["opened", "review_requested"])
+
+    def test_the_log_has_an_epoch_that_survives_a_restart_but_not_a_lost_cache(self):
+        import events
+        data = {}
+        first = events.Log(data, lambda: None).read()["epoch"]
+        self.assertEqual(events.Log(data, lambda: None).read(since=0)["epoch"], first)
+        self.assertNotEqual(events.Log({}, lambda: None).read()["epoch"], first)
+
+    def test_a_failed_full_refresh_puts_the_open_list_back(self):
+        from bitbucket import BitbucketError
+        eng = self._engine([[]])  # the pull request left the open list
+        before = eng.data["people"]["{alice}"]["open"]
+
+        def boom(uuid, **kw):
+            raise BitbucketError(503, "busy")
+        eng.refresh_person = boom
+        with self.assertRaises(BitbucketError):
+            eng.refresh_open("{alice}")
+        self.assertEqual(eng.data["people"]["{alice}"]["open"], before, "the next read must still see it leave")
+
+    def test_your_own_comments_never_notify_you(self):
+        from bitbucket import BitbucketError
+        eng = self._engine([])
+        ev = {"kind": "comments", "repo": "shop-api", "pr_id": 42, "count": 2}
+        eng.client.get = lambda path, params=None: {"values": [{"user": {"uuid": "{me}", "display_name": "Me"}}, {"user": {"uuid": "{me}", "display_name": "Me"}}]}
+        self.assertEqual(eng._who_commented([ev]), [], "both comments were yours")
+        eng.client.get = lambda path, params=None: {"values": [{"user": {"uuid": "{me}", "display_name": "Me"}}, {"user": {"uuid": "{alice}", "display_name": "Alice Reviewer"}}]}
+        out = eng._who_commented([ev])
+        self.assertEqual((out[0]["count"], out[0]["actor"]["name"], out[0]["names"]), (1, "Alice Reviewer", ["Alice Reviewer"]))
+
+        def down(path, params=None):
+            raise BitbucketError(500, "down")
+        eng.client.get = down
+        self.assertEqual(eng._who_commented([ev]), [ev], "unknown authors: the event stays")
+
+    def test_two_refreshes_at_once_log_a_change_once(self):
+        import threading
+        import time as _time
+        approved = raw_pr(participants=[{"user": BOB, "role": "REVIEWER", "approved": True, "state": "approved"}])
+        eng = self._engine([])
+
+        def slow(uuid, state, **kw):
+            _time.sleep(0.15)
+            return [approved]
+        eng.client.user_prs = slow
+        threads = [threading.Thread(target=eng.refresh_open, args=("{alice}",)) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual([e["kind"] for e in eng.events.read()["events"]], ["approved"])
+
+    def test_jira_wants_https_whole_keys_and_keeps_the_token_off_redirects(self):
+        import jira
+        sent = []
+
+        def opener(req, timeout=None):
+            sent.append(req)
+            raise jira.urllib.error.URLError("offline")
+        os.environ.update(JIRA_SITE="http://acme.atlassian.net", JIRA_TOKEN="t", JIRA_EMAIL="me@acme.test")
+        self.addCleanup(lambda: [os.environ.pop(k, None) for k in ("JIRA_SITE", "JIRA_TOKEN", "JIRA_EMAIL")])
+        j = jira.Jira(opener=opener)
+        with self.assertRaises(jira.JiraError):
+            j.ticket("ABC-1")
+        self.assertEqual(sent, [], "an http site gets nothing, not even a refused token")
+        with self.assertRaises(ValueError):
+            j.ticket("ABC-1\n")
+        os.environ["JIRA_SITE"] = "https://acme.atlassian.net"
+        with self.assertRaises(jira.JiraError):
+            j.ticket("ABC-1")
+        self.assertNotIn("Authorization", sent[0].headers)
+        self.assertIn("Authorization", sent[0].unredirected_hdrs)
+
+
 class DropTest(unittest.TestCase):
     def setUp(self):
         import io

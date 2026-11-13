@@ -51,13 +51,16 @@ class Jira:
     def _call(self, base, method, path, body=None, auth=True):
         site, email, token, _ = self.settings()
         headers = {"Accept": "application/json"}
-        if auth:
-            headers["Authorization"] = "Basic " + base64.b64encode(f"{email}:{token}".encode()).decode()
         data = None
         if body is not None:
             data = json.dumps(body).encode()
             headers["Content-Type"] = "application/json"
-        req = urllib.request.Request(base + path, data=data, method=method, headers=headers)
+        try:
+            req = urllib.request.Request(base + path, data=data, method=method, headers=headers)
+        except ValueError as exc:
+            raise JiraError(0, f"not a usable Jira address: {exc}") from None
+        if auth:  # never carried to a redirect target
+            req.add_unredirected_header("Authorization", "Basic " + base64.b64encode(f"{email}:{token}".encode()).decode())
         try:
             with self.open(req, timeout=TIMEOUT) as res:
                 raw = res.read()
@@ -84,6 +87,8 @@ class Jira:
         site, email, token, _ = self.settings()
         if not site:
             raise JiraError(0, "JIRA_SITE is not set")
+        if not site.startswith("https://"):
+            raise JiraError(0, "JIRA_SITE must start with https:// (the token is sent there)")
         if not token or not email:
             raise JiraError(0, "no Jira token: set JIRA_TOKEN (and JIRA_EMAIL if it differs from BITBUCKET_EMAIL)")
         key = (site, email, token)
@@ -128,7 +133,7 @@ class Jira:
     # ---- tickets -----------------------------------------------------------
 
     def ticket(self, key):
-        if not isinstance(key, str) or not KEY.match(key):
+        if not isinstance(key, str) or not KEY.fullmatch(key):
             raise ValueError("not a ticket key")
         issue = self._request("GET", f"/rest/api/3/issue/{key}?fields=status,summary,assignee")
         moves = self._request("GET", f"/rest/api/3/issue/{key}/transitions")
