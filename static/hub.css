@@ -37,7 +37,7 @@
 @keyframes st-blink { 50% { opacity: 0.25; } }
 .st-next { font-family: var(--font-outlier); font-size: var(--text-xs); color: var(--color-muted); font-variant-numeric: tabular-nums; min-width: 6.5ch; }
 .st-icon { position: relative; display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: var(--rule-hair) solid transparent; background: none; color: var(--color-ink-2); cursor: pointer; }
-.st-icon:hover, .st-icon[aria-expanded="true"] { color: var(--color-ink); background: var(--color-paper-2); border-color: var(--color-rule); }
+.st-icon:hover, .st-icon[aria-expanded="true"], .menu[open] > .st-icon { color: var(--color-ink); background: var(--color-paper-2); border-color: var(--color-rule); }
 .st-icon:focus-visible { outline: var(--pixel) solid var(--color-focus); outline-offset: 1px; }
 .st-icon.is-snoozed { color: var(--color-muted); }
 .st-icon.is-snoozed::after { content: "z"; position: absolute; top: 0; right: 3px; font: 400 8px var(--font-num); color: var(--color-muted); }
