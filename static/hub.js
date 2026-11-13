@@ -136,7 +136,7 @@ const StatusBar = (() => {
 
 const Settings = (() => {
   const TABS = [["connections", "Connections"], ["notifications", "Notifications"], ["look", "Personalise"], ["about", "About"]];
-  let tab = "connections", report = null, loading = false;
+  let tab = "connections", report = null, loading = false, musicHooked = false;
   const dialog = () => document.getElementById("settings-dialog");
   const pill = (ok, yes, no) => `<span class="set-pill is-${ok === true ? "ok" : ok === false ? "bad" : "warn"}">${esc(ok === true ? yes : ok === false ? no : "Checking")}</span>`;
   const row = (label, value, opts = {}) => value == null || value === "" ? "" :
@@ -163,7 +163,25 @@ const Settings = (() => {
         <dl class="set-rows">${row("Program", cl.path, { code: true })}${row("Version", cl.version)}</dl>
         <p class="set-hint">The Claude buttons on a pull request start it in a terminal here. Point <code>${esc(cl.setting)}</code> at it when it is not on your PATH.</p></section>
       <section class="set-card"><header><h3>Git and terminals</h3>${pill(git.ok && !app.terminal, "Ready", git.ok ? "Terminals unavailable" : "git missing")}</header>
-        <dl class="set-rows">${row("git", git.version)}${row("Terminals", app.terminal || "ready")}${row("Your clones", app.workspace_root, { code: true })}${row("Brief templates", app.briefs_dir, { code: true })}</dl></section>`;
+        <dl class="set-rows">${row("git", git.version)}${row("Terminals", app.terminal || "ready")}${row("Your clones", app.workspace_root, { code: true })}${row("Brief templates", app.briefs_dir, { code: true })}</dl></section>
+      ${spotifyHtml()}`;
+  }
+  // The music player owns the Spotify connection; this card shows it and borrows its buttons.
+  function spotifyHtml() {
+    if (typeof Music === "undefined" || !(state.features || []).includes("spotify")) return "";
+    const sp = Music.status();
+    if (!sp) return `<section class="set-card"><header><h3>Spotify</h3>${pill(null)}</header><p class="set-hint">Asking the server…</p></section>`;
+    const tone = sp.connected ? "ok" : sp.configured ? "warn" : "bad";
+    const label = sp.connected ? (sp.user ? `Connected as ${sp.user.name}` : "Connected") : sp.configured ? "Not connected" : "Not set up";
+    const plan = sp.user ? (sp.user.premium ? "Premium" : "Free: shows what plays, cannot control it") : "";
+    const buttons = sp.connected
+      ? '<button class="btn" type="button" data-music="open">Open the player</button> <button class="btn btn--quiet" type="button" data-music="disconnect">Disconnect</button>'
+      : `<button class="btn btn--primary" type="button" data-music="connect"${sp.configured && sp.client_id_ok ? "" : " disabled"}>Connect</button> <button class="btn btn--quiet" type="button" data-music="open">${sp.configured ? "Open the player" : "How to set it up"}</button>`;
+    return `<section class="set-card"><header><h3>Spotify</h3><span class="set-pill is-${tone}">${esc(label)}</span></header>
+        ${sp.error ? `<p class="set-error">${esc(sp.error)}</p>` : ""}
+        <dl class="set-rows">${row("Plan", plan)}${row("Client ID", sp.configured ? (sp.client_id_ok ? "set" : "set, but it does not look like a Spotify client ID") : `missing: ${sp.setting}`)}${row("Redirect URI", sp.redirect_uri, { code: true, copy: true })}</dl>
+        <p class="set-hint">For the Music panel. Register the redirect URI exactly as shown in your Spotify app, and put its Client ID in <code>${esc(sp.setting)}</code>. Play, pause, skip, seek and volume need Spotify Premium, for you and for the app's owner.</p>
+        <p>${buttons}</p></section>`;
   }
   function lookHtml() {
     const p = Prefs.get();
@@ -197,6 +215,11 @@ const Settings = (() => {
         <button class="btn btn--quiet" type="button" data-settings-close aria-label="Close settings">Close</button></header>${body}</section></div>`;
   }
   async function load(test = false) {
+    if (typeof Music !== "undefined" && (state.features || []).includes("spotify")) {
+      // music.js loads after this file, so the card subscribes the first time the dialog opens
+      if (!musicHooked) { musicHooked = true; Music.onStatus(() => { if (dialog()?.open && tab === "connections") paint(); }); }
+      Music.refresh();
+    }
     if (!(state.features || []).includes("settings")) { report = null; paint(); return; }
     loading = true; paint();
     try { report = await api(test ? "settings-test" : "settings", test ? { method: "POST", body: {} } : undefined); } catch (err) { toast("Could not read the settings.", err.message, true); }
