@@ -676,7 +676,8 @@ function insightsPerson(view, id) {
     stat("Median to merge", med ? med.n : null, { unit: med ? med.unit : "", i: 5 }),
     stat("Average to merge", avg ? avg.n : null, { unit: avg ? avg.unit : "", i: 6 }),
   ].join("");
-  const bucket = [["under 4 hours", 0, 4 * HOUR], ["4 to 24 hours", 4 * HOUR, DAY], ["1 to 3 days", DAY, 3 * DAY], ["3 to 7 days", 3 * DAY, 7 * DAY], ["over a week", 7 * DAY, Infinity]]
+  const bucket = [["under 30 minutes", 0, HOUR / 2], ["30 minutes to 1 hour", HOUR / 2, HOUR], ["1 hour to 1 day", HOUR, DAY],
+    ["1 to 2 days", DAY, 2 * DAY], ["2 days to a week", 2 * DAY, 7 * DAY], ["over a week", 7 * DAY, Infinity]]
     .map(([label, lo, hi]) => [label, st.took.filter((v) => v >= lo && v < hi).length]);
   const topRepos = st.byRepo.slice(0, 6);
   const other = st.byRepo.slice(6).reduce((n, r) => n + r[1], 0);
