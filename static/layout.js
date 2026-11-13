@@ -161,7 +161,7 @@ const Layout = (() => {
         <button class="slot-tab${isCopy(id) ? " is-copy" : ""}" type="button" role="tab" draggable="true" data-tab="${id}" aria-selected="${state.active[slot] === id}">
           <span class="slot-tab-title">${esc(panels[id].label || panels[id].title)}</span>${badges[id] ? `<span class="slot-badge">${esc(badges[id])}</span>` : ""}
         </button>`).join("");
-      const tool = (act, ic, label) => `<button class="slot-tool" type="button" data-act="${act}" data-area="${slot}" title="${label}" aria-label="${label}">${icon(ic)}</button>`;
+      const tool = (act, ic, label) => `<button class="slot-tool" type="button" data-act="${act}" data-area="${slot}" data-tip="${label}" aria-label="${label}">${icon(ic)}</button>`;
       const active = state.active[slot];
       const tools = [];
       if (!solo && active) {

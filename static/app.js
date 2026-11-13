@@ -2282,19 +2282,31 @@ function bind() {
   $("#filter").addEventListener("input", (e) => { state.filter = e.target.value; renderQueue(); });
   document.addEventListener("keydown", onKey);
 
+  // A small target (an icon, a chip) gets its tip beside it, above or else below, so the tip
+  // never covers what you point at; a large one (a chart) gets it above the pointer.
   const tip = $("#tooltip");
+  let tipFor = null;
+  const placeTip = (e) => {
+    const w = tip.offsetWidth, h = tip.offsetHeight;
+    const r = tipFor.getBoundingClientRect();
+    const small = r.height <= 56 && r.width <= 260;
+    let y = small ? r.top - h - 8 : e.clientY - h - 14;
+    if (y < 8) y = small ? r.bottom + 8 : e.clientY + 22;
+    const x = small ? r.left + r.width / 2 - w / 2 : e.clientX - w / 2;
+    tip.style.left = `${Math.round(Math.min(innerWidth - w - 8, Math.max(8, x)))}px`;
+    tip.style.top = `${Math.round(Math.min(innerHeight - h - 8, y))}px`;
+  };
   document.addEventListener("mouseover", (e) => {
     const g = e.target.closest("[data-tip]");
-    if (!g) { tip.hidden = true; return; }
+    if (!g) { tip.hidden = true; tipFor = null; return; }
+    if (g === tipFor && !tip.hidden) return;
+    tipFor = g;
     tip.textContent = g.dataset.tip;
     tip.hidden = false;
+    placeTip(e);
   });
-  document.addEventListener("mousemove", (e) => {
-    if (tip.hidden) return;
-    const w = tip.offsetWidth;
-    tip.style.left = `${Math.min(innerWidth - w - 8, Math.max(8, e.clientX - w / 2))}px`;
-    tip.style.top = `${e.clientY - 36}px`;
-  });
+  document.addEventListener("mousemove", (e) => { if (!tip.hidden && tipFor) placeTip(e); });
+  document.addEventListener("pointerdown", () => { tip.hidden = true; }, true);
   window.addEventListener("hashchange", () => {
     const r = parseHash();
     if (r.who !== state.route.who || r.section !== state.route.section) go(r);
