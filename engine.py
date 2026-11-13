@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import config
+import events
 import gitscan
 import model
 from bitbucket import HOURLY_LIMIT, BitbucketError, Client
@@ -21,6 +22,7 @@ from bitbucket import HOURLY_LIMIT, BitbucketError, Client
 ME_EVERY = 300
 OPEN_EVERY = 60  # your open pull requests alone: one call, so an approval shows within a minute or two
 TEAM_EVERY = 900
+TEAM_OPEN_EVERY = 300  # a teammate's open list alone, one call: team news within minutes, not a quarter hour
 DETAIL_MAX_AGE = 900
 MERGED_WINDOW_DAYS = 120
 FULL_WALK_EVERY = 6 * 3600
@@ -28,6 +30,7 @@ HISTORY_WINDOW_DAYS = 30
 PROJECT_LIST_MAX_AGE = 24 * 3600
 DECLINED_WINDOW_DAYS = 90
 BACKGROUND_CEILING = int(HOURLY_LIMIT * 0.8)
+TICK = 30  # the refresh loop wakes this often
 
 
 def _atomic_write(path, payload):
@@ -53,6 +56,7 @@ class Engine:
         self._pushed = {"at": 0, "items": []}
         self._seed_tried = False
         self._load()
+        self.events = events.Log(self.data, self._save)
 
     # ---- persistence ----------------------------------------------------
 
@@ -108,6 +112,9 @@ class Engine:
     def me(self):
         return self.data.get("me")
 
+    def _me_uuid(self):
+        return (self.data.get("me") or {}).get("uuid")
+
     # ---- team -----------------------------------------------------------
 
     def candidates(self):
@@ -149,12 +156,14 @@ class Engine:
 
     # ---- pull requests --------------------------------------------------
 
-    def refresh_person(self, uuid):
+    def refresh_person(self, uuid, before_open=None):
         """Open PRs in full; merged PRs incrementally.
 
         Merged lists are long (hundreds per person), so after the first full
         walk of the window only pages newer than the newest cached merge are
         read, with a full walk every few hours to catch anything missed.
+        `before_open` is the open list to compare with when the caller already
+        replaced it (the open lane), so a merge still reads as one.
         """
         window_start = (datetime.now(timezone.utc) - timedelta(days=MERGED_WINDOW_DAYS)).isoformat()
         previous = self.person(uuid) or {}
@@ -187,6 +196,10 @@ class Engine:
             raise
         self.auth = {"ok": True, "error": None}
         merged.sort(key=lambda p: p.get("updated_on") or "", reverse=True)
+        if previous.get("synced_at"):  # a first sync has nothing to compare with
+            self.events.record(uuid, events.diff(
+                previous.get("open") if before_open is None else before_open, open_prs,
+                self._me_uuid(), merged=merged, declined=declined))
         with self.lock:
             self.data["people"][uuid] = {
                 "open": open_prs,
@@ -204,6 +217,8 @@ class Engine:
     def refresh_open(self, uuid):
         """Only the open pull requests, in one call. One that left the list was merged or
         declined somewhere else, so the full refresh files it straight away."""
+        if self.person(uuid) is None:
+            return None  # never synced: the full refresh comes first, so spend no call here
         open_prs = [model.slim_pr(p) for p in self.client.user_prs(uuid, "OPEN", max_pages=4)]
         with self.lock:
             entry = self.data["people"].get(uuid)
@@ -214,8 +229,9 @@ class Engine:
             changed = json.dumps(before, sort_keys=True) != json.dumps(open_prs, sort_keys=True)
             entry["open"] = open_prs
         if {(p["repo"], p["id"]) for p in before} - {(p["repo"], p["id"]) for p in open_prs}:
-            return self.refresh_person(uuid)
+            return self.refresh_person(uuid, before_open=before)
         if changed:
+            self.events.record(uuid, events.diff(before, open_prs, self._me_uuid()))
             self._save()
         return entry
 
@@ -419,6 +435,24 @@ class Engine:
         entry = self.person(uuid)
         return not entry or time.time() - (entry.get("synced_at") or 0) > every
 
+    def _open_due(self, uuid, every):
+        entry = self.person(uuid)
+        return bool(entry) and time.time() - (entry.get("open_at") or entry.get("synced_at") or 0) > every
+
+    def schedule(self):
+        """When your pull requests were read and when the next read is due, for the status bar.
+        The loop wakes every TICK seconds, so a read is due at most that much after it is owed."""
+        me = (self.person(self._me_uuid()) or {}) if self._me_uuid() else {}
+        synced, open_at = me.get("synced_at"), me.get("open_at")
+        owed = min((open_at or 0) + OPEN_EVERY, (synced or 0) + ME_EVERY)
+        team = [self.person(m["uuid"]) or {} for m in self.team()]
+        team_at = [t.get("open_at") or t.get("synced_at") for t in team if t.get("synced_at")]
+        return {
+            "synced_at": synced, "open_at": open_at, "next_at": max(time.time(), owed) if synced else None,
+            "tick": TICK, "team_at": max(team_at) if team_at else None,
+            "paused": self.client.calls_last_hour() > BACKGROUND_CEILING,
+        }
+
     def _env_mtime(self):
         return config.mtime()
 
@@ -442,10 +476,16 @@ class Engine:
             elif time.time() - ((self.person(me) or {}).get("open_at") or 0) > OPEN_EVERY:
                 self.refresh_open(me)
                 self.warm_details(me)
+            full = None
             for mate in self.team():
                 if self._due(mate["uuid"], TEAM_EVERY):
                     self.refresh_person(mate["uuid"])
+                    full = mate["uuid"]
                     break  # one teammate per tick spreads the calls out
+            if full is None:
+                stale = [m for m in self.team() if self._open_due(m["uuid"], TEAM_OPEN_EVERY)]
+                if stale:
+                    self.refresh_open(min(stale, key=lambda m: (self.person(m["uuid"]) or {}).get("open_at") or 0)["uuid"])
             if not self.warm_history(me, budget=8):
                 for mate in self.team():
                     if self.warm_history(mate["uuid"], budget=4):
@@ -453,7 +493,8 @@ class Engine:
         except BitbucketError:
             pass
 
-    def run_forever(self, interval=30):
+    def run_forever(self, interval=None):
+        interval = interval or TICK
         def loop():
             while True:
                 self.tick()
@@ -487,14 +528,17 @@ class Engine:
         name = next((p["name"] for p in (self.data.get("projects") or {}).get("items", []) if p["key"] == key), key)
         return {"key": key, "name": name}
 
-    def project_repos(self):
-        """Repository slugs of the chosen project, cached for a day. None means every project."""
+    def project_repos(self, offline=False):
+        """Repository slugs of the chosen project, cached for a day. None means every project.
+        `offline` answers from the cache only, however old: the polled routes never call Bitbucket."""
         key = self.config.get("project")
         if not key:
             return None
         cache = (self.data.get("project_repos") or {}).get(key) or {}
-        if cache.get("slugs") is not None and time.time() - cache.get("at", 0) < PROJECT_LIST_MAX_AGE:
+        if cache.get("slugs") is not None and (offline or time.time() - cache.get("at", 0) < PROJECT_LIST_MAX_AGE):
             return set(cache["slugs"])
+        if offline:
+            return None
         try:
             raw = self.client.paged(f"/repositories/{self.client.workspace}",
                                     {"q": f'project.key="{key}"', "pagelen": 100, "fields": "values.slug,next"},

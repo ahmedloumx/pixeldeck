@@ -449,8 +449,9 @@ class OpenLaneTest(unittest.TestCase):
         eng.data = {"people": {"{me}": {"open": [a, b], "merged": [], "synced_at": 1, "open_at": 1}}}
         eng.saved = 0
         eng._save = lambda: setattr(eng, "saved", eng.saved + 1)
+        eng.events = __import__("events").Log(eng.data, lambda: None)
         eng.full = 0
-        eng.refresh_person = lambda uuid: setattr(eng, "full", eng.full + 1)
+        eng.refresh_person = lambda uuid, **kw: setattr(eng, "full", eng.full + 1)
         return eng, a, b
 
     def test_a_new_approval_is_taken_in_one_call(self):
@@ -467,6 +468,84 @@ class OpenLaneTest(unittest.TestCase):
         eng.client.open_lists = [[raw_pr()]]
         eng.refresh_open("{me}")
         self.assertEqual(eng.full, 1)
+
+
+class EventsTest(unittest.TestCase):
+    """The notification log: what moved between two reads, and never what you did yourself."""
+
+    ME = {"uuid": "{me}", "display_name": "Me Myself"}
+
+    def _pr(self, **over):
+        return model.slim_pr(raw_pr(**over))
+
+    def test_approval_changes_and_comments_on_a_teammates_pull_request(self):
+        import events
+        before = [self._pr()]
+        after = [self._pr(comment_count=5, participants=[
+            {"user": ALICE, "role": "REVIEWER", "approved": True, "state": "approved"},
+            {"user": BOB, "role": "REVIEWER", "approved": False, "state": "changes_requested"},
+        ])]
+        kinds = sorted((e["kind"], (e.get("actor") or {}).get("name"), e.get("count")) for e in events.diff(before, after, "{me}"))
+        self.assertEqual(kinds, [("approved", "Alice Reviewer", None), ("changes_requested", "Bob Reviewer", None), ("comments", None, 2)])
+
+    def test_your_own_review_and_push_are_not_news(self):
+        import events
+        mine_reviewing = [self._pr(participants=[{"user": self.ME, "role": "REVIEWER", "approved": False, "state": None}])]
+        approved_by_me = [self._pr(participants=[{"user": self.ME, "role": "REVIEWER", "approved": True, "state": "approved"}])]
+        self.assertEqual(events.diff(mine_reviewing, approved_by_me, "{me}"), [])
+        own = self._pr(author=self.ME)
+        pushed = self._pr(author=self.ME, source={"branch": {"name": "feat/x"}, "commit": {"hash": "def456"}})
+        self.assertEqual(events.diff([own], [pushed], "{me}"), [], "a push to your own branch is yours")
+        self.assertEqual(events.diff([], [own], "{me}"), [], "opening your own pull request is yours")
+
+    def test_a_review_asked_of_you(self):
+        import events
+        before = [self._pr(participants=[])]
+        after = [self._pr(participants=[{"user": self.ME, "role": "REVIEWER", "approved": False, "state": None}])]
+        out = events.diff(before, after, "{me}")
+        self.assertEqual([e["kind"] for e in out], ["review_requested"])
+        self.assertEqual(out[0]["actor"]["name"], "Pat Author")
+
+    def test_a_pull_request_that_left_says_merged_or_declined_only_when_known(self):
+        import events
+        pr = self._pr()
+        merged = {**pr, "state": "MERGED", "closed_by": {"uuid": "{alice}", "name": "Alice Reviewer"}}
+        self.assertEqual([e["kind"] for e in events.diff([pr], [], "{me}", merged=[merged])], ["merged"])
+        self.assertEqual([e["kind"] for e in events.diff([pr], [], "{me}", declined=[{**pr, "state": "DECLINED"}])], ["declined"])
+        self.assertEqual(events.diff([pr], [], "{me}"), [], "left for an unknown reason: no guess")
+        by_me = {**merged, "closed_by": {"uuid": "{me}", "name": "Me Myself"}}
+        self.assertEqual(events.diff([pr], [], "{me}", merged=[by_me]), [], "you merged it yourself")
+
+    def test_ids_keep_counting_and_the_log_stays_short(self):
+        import events
+        data = {}
+        log = events.Log(data, lambda: None)
+        log.record("{alice}", [{"kind": "opened", "repo": "shop-api"} for _ in range(events.KEEP + 5)])
+        self.assertEqual(len(data["events"]["items"]), events.KEEP)
+        self.assertEqual(log.last(), events.KEEP + 5)
+        again = events.Log(data, lambda: None)  # a restart reads the same cache
+        again.record("{alice}", [{"kind": "opened", "repo": "shop-api"}])
+        self.assertEqual(again.last(), events.KEEP + 6)
+        page = again.read(since=events.KEEP + 4)
+        self.assertEqual([e["id"] for e in page["events"]], [events.KEEP + 5, events.KEEP + 6])
+        self.assertEqual(len(again.read()["events"]), events.PAGE)
+        scoped = again.read(since=0, keep=lambda ev: ev["repo"] == "other")
+        self.assertEqual(scoped["events"], [])
+
+    def test_the_open_lane_records_and_a_first_sync_does_not(self):
+        import engine as engine_mod
+        import events
+        eng = engine_mod.Engine.__new__(engine_mod.Engine)
+        eng.lock = __import__("threading").RLock()
+        eng.data = {"me": {"uuid": "{me}"}, "people": {"{alice}": {"open": [self._pr()], "merged": [], "synced_at": 1, "open_at": 1}}}
+        eng._save = lambda: None
+        eng.events = events.Log(eng.data, lambda: None)
+        approved = raw_pr(participants=[{"user": BOB, "role": "REVIEWER", "approved": True, "state": "approved"}])
+        eng.client = _FakeClient(open_lists=[[approved]])
+        eng.refresh_open("{alice}")
+        self.assertEqual([(e["kind"], e["owner"]) for e in eng.events.read()["events"]], [("approved", "{alice}")])
+        self.assertIsNone(eng.refresh_open("{nobody}"), "never synced: nothing to compare with")
+        self.assertEqual(eng.events.last(), 1)
 
 
 class DropTest(unittest.TestCase):
