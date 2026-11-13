@@ -1677,14 +1677,7 @@ function renderBar() {
   if (proj.dataset.html !== phtml) { proj.innerHTML = phtml; proj.dataset.html = phtml; }
   proj.value = key;
   const { used, limit } = state.budget;
-  const left = Math.max(0, Math.ceil((1 - used / limit) * 10));
-  const energy = $("#energy");
-  energy.innerHTML = Array.from({ length: 10 }, (_, i) => `<i class="${i < left ? "on" : ""}"></i>`).join("");
-  energy.classList.toggle("is-low", left <= 3);
-  energy.title = `${limit - used} of ${limit} Bitbucket API calls left this hour`;
-  const data = currentData();
-  const synced = data?.synced_at;
-  $("#sync-text").textContent = synced ? `synced ${clock(synced)}` : "not synced";
+  StatusBar.paint();
   $("#refresh").title = `Refresh from Bitbucket (r). ${used} of ${limit} API calls used this hour.`;
   $("#panels-menu-list").innerHTML = Layout.visibility().map((p) => `<label class="check"><input type="checkbox" data-panel-toggle="${p.id}"${p.hidden ? "" : " checked"}> ${esc(p.title)}</label>`).join("");
 }
@@ -1747,6 +1740,7 @@ function showMerged(pr, merged) {
 const REVIEWS_KEY = "prdesk.mine.reviews.v1";
 const BANNER_WORD = { approved: "APPROVED", changes_requested: "ASKED FOR CHANGES", commented: "COMMENTED" };
 function watchReviews(data) {
+  if ((state.features || []).includes("events")) return;  // the notification centre has them
   let before = null;
   try { before = JSON.parse(localStorage.getItem(REVIEWS_KEY)); } catch { /* none yet */ }
   const now = {};
@@ -2092,6 +2086,7 @@ function bind() {
     if (action === "preset-split") { Layout.preset("split"); return; }
     if (action === "preset-compact") { Layout.preset("compact"); return; }
     if (action === "close-help") return $("#help-dialog").close();
+    if (action === "open-keys") { $("#settings-dialog").close(); return $("#help-dialog").showModal(); }
     if (action === "pr-fold") return applyFold(!state.prFolded);
     if (["fx-merge", "fx-die", "fx-run", "fx-review"].includes(action)) return replay(action, t.closest("[data-action]"));
   });
@@ -2234,6 +2229,18 @@ async function boot() {
   setInterval(() => { if (!document.hidden) loadView({ silent: true }); }, 30000);
   pollProposals();
   setInterval(pollProposals, 3000);
+  StatusBar.start();
+  if (!Layout.isSolo() && (state.features || []).includes("events")) {
+    Notify.start({
+      api, me: () => state.me, ready: () => !!state.me,
+      onSettings: (tab) => Settings.open(tab),
+      onOpen: (ev) => {
+        const pr = findPr(`${ev.repo}#${ev.pr_id}`);
+        if (pr) openPr(pr);
+        else if (ev.url) openExternal(ev.url);
+      },
+    });
+  }
 }
 
 boot();
