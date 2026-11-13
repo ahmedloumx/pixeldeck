@@ -1,1 +1,313 @@
-/* The Music panel and its mini player. */
+/* The Music panel and its mini player: a pixel boombox with a CRT for the album art and a
+   green phosphor LCD. Every rule sits under .mu, .mu-panel or .st-music. Motion is stepped
+   so it reads as 8-bit, runs only while music plays, and stops under reduced motion and
+   the calm setting. */
+
+:root {
+  --mu-lcd-bg: oklch(23% 0.05 148); --mu-lcd-edge: oklch(33% 0.065 148); --mu-lcd-ink: oklch(88% 0.2 142);
+  --mu-lcd-dim: oklch(33% 0.07 146); --mu-lcd-glow: oklch(80% 0.2 142 / 0.5);
+  --mu-box: oklch(27% 0.012 250); --mu-box-hi: oklch(35% 0.012 250); --mu-box-lo: oklch(20% 0.01 250);
+  --mu-metal: oklch(40% 0.01 250); --mu-paper: oklch(93% 0.025 88); --mu-paper-ink: oklch(24% 0.02 260);
+}
+
+.mu-panel.panel-body { padding: var(--space-md) var(--space-lg) var(--space-xl); }
+.mu { display: grid; gap: var(--space-md); max-width: 1080px; margin-inline: auto; }
+.mu [hidden] { display: none !important; }
+.mu-hint { color: var(--color-muted); font-size: var(--text-sm); }
+
+/* ------------------------------------------------------------ pixel parts */
+.mu-ink { fill: currentColor; }
+.mu-p-k { fill: var(--sprite-dark); } .mu-p-s { fill: var(--sprite-stone-deep); } .mu-p-w { fill: var(--sprite-white); }
+.mu-p-r { fill: oklch(21% 0.01 250); } .mu-p-c { fill: oklch(29% 0.012 250); } .mu-p-h { fill: var(--sprite-stone); }
+.mu-p-t { fill: var(--color-accent); }
+.mu-glyph { display: block; }
+
+/* ------------------------------------------------------------ boot and the ribbon */
+.mu-boot { display: grid; justify-items: center; gap: var(--space-sm); padding: var(--space-xl) 0; color: var(--color-muted); text-align: center; }
+.mu-boot .num8 { font-size: 10px; color: var(--mu-lcd-ink); text-shadow: 0 0 6px var(--mu-lcd-glow); }
+
+.mu-ribbon { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-xs) var(--space-sm); padding: var(--space-xs) var(--space-sm);
+  border: var(--pixel) solid var(--color-accent); background: var(--color-accent-soft); font-size: var(--text-sm); color: var(--color-ink); }
+.mu-ribbon-tag { padding: 3px 6px; background: var(--color-accent); color: var(--color-accent-ink); font-size: 8px; }
+.mu-ribbon-tools { display: flex; gap: var(--space-2xs); margin-left: auto; }
+.mu-ribbon .btn { min-height: 30px; font-size: var(--text-sm); }
+
+/* ------------------------------------------------------------ the boombox */
+.mu-stage { position: relative; padding-top: 58px; }
+.mu-crew { position: absolute; inset: 0 0 auto 0; height: 58px; pointer-events: none; }
+.mu-slime, .mu-bot { position: absolute; bottom: -2px; line-height: 0; }
+.mu-slime { left: 7%; }
+.mu-bot { right: 7%; bottom: -1px; }
+:root.no-mascots .mu-crew { visibility: hidden; }
+
+.mu-box {
+  position: relative; display: grid; gap: var(--space-md); padding: 34px 22px 22px;
+  background: linear-gradient(var(--mu-box-hi), var(--mu-box) 14%, var(--mu-box) 86%, var(--mu-box-lo));
+  border: var(--pixel) solid var(--sprite-dark);
+  box-shadow: inset 0 0 0 var(--pixel) var(--color-rule-2), inset 0 4px 0 var(--pixel) oklch(42% 0.012 250), inset 0 -5px 0 var(--pixel) oklch(18% 0.01 250), 6px 6px 0 var(--color-paper-3);
+}
+/* the carry handle: a chunky metal bar on two feet */
+.mu-handle { position: absolute; left: 25%; right: 25%; top: -34px; height: 36px; border: 8px solid var(--mu-metal); border-bottom: 0;
+  box-shadow: 0 0 0 var(--pixel) var(--sprite-dark), inset 0 0 0 var(--pixel) var(--sprite-dark), inset 0 4px 0 var(--pixel) var(--color-paper); }
+.mu-handle::before { content: ""; position: absolute; inset: -8px 8px auto; height: 3px; background: oklch(55% 0.012 250); }
+.mu-handle::after { content: ""; position: absolute; left: -14px; right: -14px; bottom: -4px; height: 10px; pointer-events: none;
+  background: linear-gradient(90deg, var(--mu-box-hi) 0 22px, transparent 22px calc(100% - 22px), var(--mu-box-hi) calc(100% - 22px));
+  box-shadow: none; }
+.mu-brand { position: absolute; top: 8px; left: 50%; display: flex; align-items: baseline; gap: var(--space-xs); transform: translateX(-50%); white-space: nowrap; }
+.mu-brand b { font: 700 14px/1 var(--font-pixel); letter-spacing: 0.18em; color: var(--sprite-stone); text-shadow: 0 1px 0 var(--sprite-dark); }
+.mu-brand small { font: 400 7px/1 var(--font-num); color: var(--color-muted); letter-spacing: 0.08em; }
+.mu-power { align-self: center; width: 6px; height: 6px; background: oklch(32% 0.06 25); box-shadow: 0 0 0 var(--pixel) var(--sprite-dark); }
+.mu-power.is-on { background: var(--sprite-red); box-shadow: 0 0 0 var(--pixel) var(--sprite-dark), 0 0 8px var(--sprite-red); }
+
+.mu-face { display: grid; grid-template-columns: 124px auto minmax(0, 1fr) 124px; gap: var(--space-md); align-items: stretch; }
+
+/* speakers: a perforated grille, a tweeter and a woofer whose cone thumps on the beat */
+.mu-spk { display: grid; justify-items: center; align-content: space-evenly; gap: var(--space-xs); padding: var(--space-xs) 0;
+  background: linear-gradient(90deg, var(--mu-box-hi) 2px, transparent 2px) 0 0 / 4px 4px, linear-gradient(var(--mu-box-hi) 2px, transparent 2px) 0 0 / 4px 4px, var(--sprite-dark);
+  border: var(--pixel) solid var(--sprite-dark); box-shadow: inset 0 0 0 var(--pixel) var(--mu-box-lo); }
+.mu-spk svg { filter: drop-shadow(2px 2px 0 var(--sprite-dark)); }
+.mu-cone { transform-box: fill-box; transform-origin: center; }
+
+/* the CRT: a deep bezel, the art 6x up, scanlines, a vignette and a glare */
+.mu-crt { position: relative; align-self: center; padding: 14px 14px 24px; background: linear-gradient(oklch(31% 0.01 250), oklch(23% 0.01 250));
+  border: var(--pixel) solid var(--sprite-dark); box-shadow: inset 0 0 0 var(--pixel) oklch(40% 0.012 250), 4px 4px 0 var(--mu-box-lo); }
+.mu-art { display: block; width: 192px; height: 192px; image-rendering: pixelated; background: var(--sprite-dark);
+  border-radius: 8px; box-shadow: 0 0 0 3px var(--sprite-dark), 0 0 22px oklch(72% 0.08 250 / 0.22); }
+.mu-crt::after { content: ""; position: absolute; inset: 14px 14px 24px; border-radius: 8px; pointer-events: none;
+  background: repeating-linear-gradient(to bottom, oklch(0% 0 0 / 0.26) 0 1px, transparent 1px 3px),
+    radial-gradient(ellipse at center, transparent 58%, oklch(0% 0 0 / 0.5) 100%),
+    linear-gradient(135deg, oklch(100% 0 0 / 0.12), transparent 38%); }
+.mu-crt-knobs { position: absolute; right: 14px; bottom: 6px; display: flex; gap: 6px; }
+.mu-crt-knobs i { width: 10px; height: 10px; background: var(--sprite-stone-deep); box-shadow: 0 0 0 var(--pixel) var(--sprite-dark), inset 2px 2px 0 var(--sprite-stone); }
+.mu-crt-knobs i:first-child { background: var(--color-accent-deep); }
+
+/* the LCD: green phosphor on a dark green glass, a faint line raster, a soft glow */
+.mu-lcd { display: grid; grid-template-rows: auto auto auto auto 1fr auto auto; gap: 8px; min-width: 0; padding: 14px 16px 12px;
+  background: repeating-linear-gradient(0deg, oklch(0% 0 0 / 0.16) 0 1px, transparent 1px 3px), var(--mu-lcd-bg);
+  border: var(--pixel) solid var(--sprite-dark); box-shadow: inset 0 0 0 var(--pixel) var(--mu-lcd-edge), inset 0 0 28px oklch(0% 0 0 / 0.55);
+  color: var(--mu-lcd-ink); font-family: var(--font-num); text-shadow: 0 0 6px var(--mu-lcd-glow); }
+.mu-lcd-row { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-sm); min-width: 0; }
+.mu-mode, .mu-dev { font-size: 8px; line-height: 1; letter-spacing: 0.06em; white-space: nowrap; }
+.mu-dev { overflow: hidden; text-overflow: ellipsis; opacity: 0.75; }
+.mu-mode::before { content: ""; display: inline-block; width: 6px; height: 7px; margin-right: 6px; vertical-align: -1px; background: currentColor; }
+.mu-mode[data-state="play"]::before { clip-path: polygon(0 0, 100% 50%, 0 100%); }
+.mu-mode[data-state="pause"]::before { clip-path: polygon(0 0, 33% 0, 33% 100%, 0 100%, 0 0, 67% 0, 100% 0, 100% 100%, 67% 100%, 67% 0); }
+.mu-mode[data-state="pause"] { animation: mu-blink 1s steps(1, end) infinite; }
+.mu-mq { overflow: hidden; white-space: nowrap; min-width: 0; }
+.mu-mq-track { display: inline-flex; gap: 48px; will-change: transform; }
+.mu-mq-text + .mu-mq-text { display: none; }
+.mu-mq:not(.is-running) .mu-mq-track { display: block; overflow: hidden; text-overflow: ellipsis; }
+.mu-mq.is-running .mu-mq-text + .mu-mq-text { display: inline; }
+.mu-mq.is-running .mu-mq-track { animation: mu-scroll var(--mq-dur, 10s) steps(var(--mq-steps, 100), end) infinite; }
+.mu-mq--title { font-size: 16px; line-height: 1.35; }
+.mu-mq--sub { font-size: 10px; line-height: 1.5; }
+.mu-mq--album { margin-top: -4px; font-size: 8px; line-height: 1.5; opacity: 0.65; }
+.mu-times { align-items: flex-end; }
+.mu-pos { font-size: 24px; line-height: 1; }
+.mu-dur { font-size: 10px; line-height: 1; opacity: 0.7; }
+
+/* position: 32 blocks, the lit ones are played, the next one blinks while playing */
+.mu-seek { display: grid; grid-template-columns: repeat(32, minmax(0, 1fr)); gap: 2px; height: 14px; padding: 2px; cursor: pointer;
+  box-shadow: inset 0 0 0 1px var(--mu-lcd-dim); }
+.mu-seek i { background: var(--mu-lcd-dim); }
+.mu-seek i.is-on { background: var(--mu-lcd-ink); box-shadow: 0 0 4px var(--mu-lcd-glow); }
+.mu.is-playing .mu-seek i.is-head { animation: mu-blink 0.5s steps(1, end) infinite; background: var(--mu-lcd-ink); }
+.mu-seek:hover { box-shadow: inset 0 0 0 1px var(--mu-lcd-ink); }
+.mu-seek:focus-visible, .mu-vol-blocks:focus-visible { outline: var(--pixel) solid var(--color-focus); outline-offset: 3px; }
+.mu-seek[aria-disabled="true"] { cursor: default; }
+
+/* the visualiser: 8 segments a bar, lit from the bottom; it is made up, and only moves while playing */
+.mu-eq { display: flex; align-items: flex-end; gap: 3px; height: 56px; }
+.mu-eq i { position: relative; flex: 1 1 0; height: 56px; background: repeating-linear-gradient(to top, var(--mu-lcd-dim) 0 5px, transparent 5px 7px); }
+.mu-eq i::after { content: ""; position: absolute; inset: 0; clip-path: inset(87.5% 0 0 0);
+  background: repeating-linear-gradient(to top, transparent 0 5px, var(--mu-lcd-bg) 5px 7px),
+    linear-gradient(to top, var(--mu-lcd-ink) 0 62.5%, var(--sprite-yellow) 62.5% 87.5%, var(--sprite-red) 87.5%); }
+.mu.is-idle .mu-eq i::after { clip-path: inset(100% 0 0 0); }
+.mu.is-playing .mu-eq i::after { animation: mu-eq-a var(--d, 500ms) steps(1, end) var(--o, 0ms) infinite; }
+.mu.is-playing .mu-eq i.mu-eq-b::after { animation-name: mu-eq-b; }
+.mu.is-playing .mu-eq i.mu-eq-c::after { animation-name: mu-eq-c; }
+
+/* ------------------------------------------------------------ keys */
+.mu-keys { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-md) var(--space-lg); padding-top: var(--space-2xs); }
+.mu-transport, .mu-toggles { display: flex; gap: var(--space-xs); }
+.mu-key { appearance: none; display: grid; justify-items: center; align-content: center; gap: 6px; min-width: 66px; height: 58px; margin-bottom: 5px; padding: 6px 10px;
+  color: var(--color-ink); background: linear-gradient(oklch(42% 0.012 250), oklch(33% 0.012 250)); border: var(--pixel) solid var(--sprite-dark); border-radius: 0;
+  box-shadow: inset 0 3px 0 oklch(52% 0.012 250), inset 0 -4px 0 oklch(27% 0.012 250), 0 5px 0 var(--sprite-dark);
+  font: 400 8px/1 var(--font-num); letter-spacing: 0.06em; cursor: pointer; }
+.mu-key:hover { background: linear-gradient(oklch(47% 0.012 250), oklch(37% 0.012 250)); }
+.mu-key:active, .mu-key[aria-pressed="true"], .mu-key--play.is-playing { transform: translateY(4px); box-shadow: inset 0 3px 0 oklch(30% 0.012 250), inset 0 -2px 0 oklch(27% 0.012 250), 0 1px 0 var(--sprite-dark); }
+.mu-key:focus-visible { outline: var(--pixel) solid var(--color-focus); outline-offset: 3px; }
+.mu-key:disabled { color: var(--color-muted); opacity: 0.55; cursor: not-allowed; transform: none; }
+.mu-key--play { min-width: 92px; color: var(--color-accent-ink); background: linear-gradient(var(--color-accent), var(--color-accent-deep));
+  box-shadow: inset 0 3px 0 color-mix(in oklch, var(--color-accent) 60%, white), inset 0 -4px 0 var(--color-accent-deep), 0 5px 0 var(--sprite-dark); }
+.mu-key--play:hover { background: linear-gradient(color-mix(in oklch, var(--color-accent) 80%, white), var(--color-accent-deep)); }
+.mu-key--play.is-playing { box-shadow: inset 0 3px 0 var(--color-accent-deep), inset 0 -2px 0 var(--color-accent-deep), 0 1px 0 var(--sprite-dark); }
+.mu-key--play .mu-glyph--pause, .mu-key--play.is-playing .mu-glyph--play { display: none; }
+.mu-key--play.is-playing .mu-glyph--pause { display: block; }
+.mu-key--toggle { min-width: 58px; height: 46px; }
+.mu-led { width: 8px; height: 6px; background: oklch(30% 0.04 145); box-shadow: 0 0 0 var(--pixel) var(--sprite-dark); }
+.mu-key--toggle[aria-pressed="true"] .mu-led { background: var(--mu-lcd-ink); box-shadow: 0 0 0 var(--pixel) var(--sprite-dark), 0 0 8px var(--mu-lcd-glow); }
+.mu-key--toggle[data-mode="track"] .mu-led { background: var(--sprite-yellow); box-shadow: 0 0 0 var(--pixel) var(--sprite-dark), 0 0 8px var(--sprite-yellow); }
+
+.mu-vol { display: grid; grid-template-columns: auto auto auto; align-items: end; gap: var(--space-xs); margin-bottom: 5px; }
+.mu-vol-label, .mu-device-label { font-size: 8px; color: var(--color-muted); }
+.mu-vol-blocks { display: flex; align-items: flex-end; gap: 3px; height: 40px; padding: 4px; cursor: pointer; background: var(--sprite-dark); box-shadow: inset 0 0 0 1px var(--mu-box-lo); }
+.mu-vol-blocks i { width: 9px; height: var(--h); background: var(--mu-lcd-dim); }
+.mu-vol-blocks i.is-on { background: var(--mu-lcd-ink); box-shadow: 0 0 4px var(--mu-lcd-glow); }
+.mu-vol-blocks i.is-hot { background: var(--sprite-yellow); }
+.mu-vol-blocks i.is-hot:last-child { background: var(--sprite-red); }
+.mu-vol-blocks[aria-disabled="true"] { cursor: not-allowed; opacity: 0.6; }
+.mu-vol-num { min-width: 3ch; font-size: 10px; color: var(--mu-lcd-ink); text-shadow: 0 0 6px var(--mu-lcd-glow); }
+.mu-device { display: grid; gap: 6px; margin: 0 0 5px auto; }
+.mu-device .rs-button { width: 15rem; min-height: 40px; background: var(--mu-box-lo); }
+
+.mu-note { padding: var(--space-xs) var(--space-sm); border-left: 4px solid var(--color-accent); background: var(--color-paper-3); color: var(--color-ink-2); font-size: var(--text-sm); }
+
+/* ------------------------------------------------------------ tapes */
+.mu-tapes { display: grid; gap: var(--space-sm); margin-top: var(--space-xs); }
+.mu-tapes-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-xs) var(--space-sm); }
+.mu-tapes-head h3 { font: 500 var(--text-md) var(--font-pixel); letter-spacing: 0; }
+.mu-tapes-empty { color: var(--color-muted); font-size: var(--text-sm); }
+.mu-tape-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(158px, 1fr)); gap: var(--space-md); }
+.mu-tape { --tape: var(--sprite-orange); position: relative; display: grid; grid-template-rows: 1fr auto; padding: 7px 9px 0; min-width: 0;
+  color: var(--mu-paper-ink); text-align: left; cursor: pointer; border: var(--pixel) solid var(--sprite-dark); border-radius: 0;
+  background:
+    linear-gradient(var(--sprite-stone-deep), var(--sprite-stone-deep)) 3px 3px / 3px 3px no-repeat,
+    linear-gradient(var(--sprite-stone-deep), var(--sprite-stone-deep)) calc(100% - 3px) 3px / 3px 3px no-repeat,
+    linear-gradient(var(--sprite-stone-deep), var(--sprite-stone-deep)) 3px calc(100% - 3px) / 3px 3px no-repeat,
+    linear-gradient(var(--sprite-stone-deep), var(--sprite-stone-deep)) calc(100% - 3px) calc(100% - 3px) / 3px 3px no-repeat,
+    oklch(25% 0.012 250);
+  box-shadow: inset 0 2px 0 oklch(36% 0.012 250), 4px 4px 0 var(--color-paper-3); }
+.mu-tape:hover { transform: translateY(-3px); box-shadow: inset 0 2px 0 oklch(36% 0.012 250), 4px 7px 0 var(--color-paper-3); }
+.mu-tape:focus-visible { outline: var(--pixel) solid var(--color-focus); outline-offset: 3px; }
+.mu-tape.is-loading { opacity: 0.7; cursor: progress; }
+.mu-tape-label { display: grid; gap: 3px; min-width: 0; padding: 6px 8px 8px; background: var(--mu-paper); border-top: 7px solid var(--tape);
+  box-shadow: inset 0 -2px 0 oklch(84% 0.03 88); }
+.mu-tape-top { display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
+.mu-tape-side { flex: none; display: grid; place-items: center; width: 16px; height: 16px; background: var(--mu-paper-ink); color: var(--mu-paper); font-size: 8px; }
+.mu-tape-label b { display: -webkit-box; min-width: 0; min-height: 2.4em; overflow: hidden; font: 600 15px/1.2 var(--font-pixel); overflow-wrap: anywhere;
+  -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+.mu-tape-label small { overflow: hidden; color: oklch(45% 0.02 260); font: 400 7px/1.4 var(--font-num); text-overflow: ellipsis; white-space: nowrap; }
+.mu-tape-window { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: 4px 10% 0; padding: 4px 10px; background: var(--sprite-dark);
+  box-shadow: inset 0 0 0 var(--pixel) oklch(40% 0.01 250); }
+.mu-reel { width: 20px; height: 20px; border-radius: 50%;
+  background: radial-gradient(circle, var(--sprite-dark) 0 3px, transparent 3.5px), repeating-conic-gradient(var(--sprite-white) 0 18deg, var(--sprite-stone) 18deg 60deg);
+  box-shadow: 0 0 0 3px oklch(36% 0.06 50); }
+.mu-tape-run { flex: 1; height: 6px; background: oklch(36% 0.06 50); box-shadow: inset 0 -2px 0 oklch(28% 0.05 50); }
+.mu-tape-foot { justify-self: center; display: flex; justify-content: center; gap: 14px; width: 66%; height: 15px; padding-top: 4px; margin-top: 6px;
+  background: oklch(30% 0.012 250); clip-path: polygon(9% 0, 91% 0, 100% 100%, 0 100%); }
+.mu-tape-foot i { width: 5px; height: 5px; background: var(--sprite-dark); }
+.mu-tape-sticker { position: absolute; top: -9px; right: -6px; padding: 4px 5px; background: var(--sprite-red); color: var(--sprite-white); font-size: 7px;
+  box-shadow: 2px 2px 0 var(--sprite-dark); transform: rotate(4deg); visibility: hidden; }
+.mu-tape.is-on { box-shadow: inset 0 2px 0 oklch(36% 0.012 250), 0 0 0 var(--pixel) var(--tape), 4px 4px 0 var(--color-paper-3); }
+.mu-tape.is-on .mu-tape-sticker { visibility: visible; }
+.mu.is-playing .mu-tape.is-on .mu-reel { animation: mu-reel 540ms steps(3, end) infinite; }
+
+/* ------------------------------------------------------------ setup */
+.mu-setup { display: grid; gap: var(--space-md); max-width: 46rem; margin: 0 auto; padding: var(--space-lg);
+  background: var(--color-paper-3); border: var(--pixel) solid var(--color-rule-2);
+  box-shadow: inset 0 0 0 var(--pixel) var(--color-paper), inset 0 0 0 4px var(--color-rule), 6px 6px 0 var(--sprite-dark); }
+.mu-setup-head { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: var(--space-lg); }
+.mu-setup-art { filter: drop-shadow(4px 4px 0 var(--sprite-dark)); }
+.mu-kicker { margin-bottom: 6px; font-size: 8px; color: var(--mu-lcd-ink); text-shadow: 0 0 6px var(--mu-lcd-glow); letter-spacing: 0.1em; }
+.mu-setup h2 { max-width: none; font: 600 var(--text-xl)/1.15 var(--font-pixel); letter-spacing: 0; }
+.mu-lead { margin-top: 6px; color: var(--color-ink-2); }
+.mu-steps { display: grid; gap: var(--space-sm); margin: 0; padding: 0; list-style: none; counter-reset: none; }
+.mu-step { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: var(--space-sm); padding: var(--space-sm); background: var(--color-paper); border: var(--rule-hair) solid var(--color-rule); }
+.mu-step-n { display: grid; place-items: center; width: 32px; height: 32px; background: var(--mu-lcd-bg); color: var(--mu-lcd-ink); font-size: 12px;
+  box-shadow: 0 0 0 var(--pixel) var(--sprite-dark), 3px 3px 0 var(--sprite-dark); text-shadow: 0 0 6px var(--mu-lcd-glow); }
+.mu-step.is-done .mu-step-n { font-size: 8px; background: var(--color-ok-soft); color: var(--color-ok); text-shadow: none; }
+.mu-step-body { display: grid; gap: 6px; min-width: 0; font-size: var(--text-sm); color: var(--color-ink-2); }
+.mu-step-body h4 { margin: 4px 0 0; font: 500 var(--text-md)/1.2 var(--font-pixel); color: var(--color-ink); }
+.mu-code { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-xs); }
+.mu-code code, .mu-step code { padding: 3px 6px; background: var(--color-paper-3); border: var(--rule-hair) solid var(--color-rule); font-family: var(--font-term); font-size: var(--text-sm); color: var(--color-ink); overflow-wrap: anywhere; }
+.mu-copy-btn { min-height: 28px; font-size: var(--text-sm); }
+.mu-warn { color: var(--color-bad); }
+.mu-actions { display: flex; flex-wrap: wrap; gap: var(--space-xs); }
+.mu-wait { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-xs); padding: var(--space-xs); border: var(--rule-hair) dashed var(--color-accent); color: var(--color-ink); }
+.mu-wait-led { width: 8px; height: 8px; background: var(--color-accent); animation: mu-blink 0.8s steps(1, end) infinite; }
+.mu-premium { display: flex; gap: var(--space-sm); align-items: flex-start; font-size: var(--text-sm); color: var(--color-ink-2); }
+.mu-premium-tag { flex: none; padding: 4px 6px; background: var(--sprite-grass); color: var(--sprite-dark); font-size: 8px; }
+.mu-setup-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-sm); padding-top: var(--space-sm); border-top: var(--rule-hair) solid var(--color-rule); color: var(--color-muted); font-size: var(--text-sm); }
+
+/* ------------------------------------------------------------ the mini player in the status bar */
+.st-music { display: inline-flex; align-items: center; gap: 2px; height: 32px; padding: 2px; border: var(--rule-hair) solid var(--color-rule); background: var(--color-paper-3); }
+.st-music .mm-play { display: grid; place-items: center; width: 28px; height: 26px; padding: 0; border: 0; color: var(--color-accent-ink); background: var(--color-accent); cursor: pointer;
+  box-shadow: inset 0 -2px 0 var(--color-accent-deep); }
+.st-music .mm-play:disabled { background: var(--color-paper-2); color: var(--color-muted); box-shadow: none; cursor: default; }
+.st-music .mm-play .mu-glyph--pause, .st-music .mm-play.is-playing .mu-glyph--play { display: none; }
+.st-music .mm-play.is-playing .mu-glyph--pause { display: block; }
+.st-music .mm-title { display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 6px 0 4px; border: 0; background: var(--mu-lcd-bg); color: var(--mu-lcd-ink); cursor: pointer;
+  font: 400 8px/1 var(--font-num); text-shadow: 0 0 5px var(--mu-lcd-glow); box-shadow: inset 0 0 0 1px var(--mu-lcd-edge); }
+.st-music .mm-title:hover { box-shadow: inset 0 0 0 1px var(--mu-lcd-ink); }
+.st-music button:focus-visible { outline: var(--pixel) solid var(--color-focus); outline-offset: 1px; }
+.st-music .mm-art { width: 18px; height: 18px; image-rendering: pixelated; box-shadow: 0 0 0 1px var(--sprite-dark); }
+.st-music .mm-mq { width: 150px; }
+.st-music .mm-eq { display: flex; align-items: flex-end; gap: 1px; width: 10px; height: 12px; }
+.st-music .mm-eq i { flex: 1; height: 25%; background: var(--mu-lcd-ink); }
+.st-music.is-playing .mm-eq i { animation: mm-eq 600ms steps(1, end) infinite; }
+.st-music.is-playing .mm-eq i:nth-child(2) { animation-duration: 450ms; animation-delay: -200ms; }
+.st-music.is-playing .mm-eq i:nth-child(3) { animation-duration: 520ms; animation-delay: -90ms; }
+@media (max-width: 1280px) { .st-music .mm-mq { width: 96px; } }
+@media (max-width: 1000px) { .st-music .mm-title .mm-mq, .st-music .mm-eq { display: none; } }
+
+/* ------------------------------------------------------------ the crew dances while it plays */
+.mu.is-playing .mu-slime { animation: mu-bob 520ms steps(2, jump-none) infinite; }
+.mu-slime { --bob: -8px; } .mu-bot { --nod: 4px; }
+.mu.is-playing .mu-slime g[data-f="1"] { display: inline; animation: mu-show 520ms steps(1, end) infinite; }
+.mu.is-playing .mu-slime g[data-f="0"] { animation: mu-hide 520ms steps(1, end) infinite; }
+.mu.is-playing .mu-bot { animation: mu-nod 520ms steps(2, jump-none) 260ms infinite; }
+.mu.is-playing .mu-bot g[data-f="2"] { display: inline; animation: mu-show 520ms steps(1, end) 260ms infinite; opacity: 0; }
+.mu.is-playing .mu-bot g[data-f="0"] { animation: mu-hide 520ms steps(1, end) 260ms infinite; }
+.mu.is-playing .mu-cone { animation: mu-thump 520ms steps(1, end) infinite; }
+
+@keyframes mu-scroll { to { transform: translateX(calc(-1 * var(--mq-dist, 0px))); } }
+@keyframes mu-blink { 50% { opacity: 0; } }
+@keyframes mu-bob { from { transform: translateY(0); } to { transform: translateY(var(--bob, -6px)); } }
+@keyframes mu-nod { from { transform: translateY(0); } to { transform: translateY(var(--nod, 3px)); } }
+@keyframes mu-show { 0% { opacity: 1; } 50% { opacity: 0; } }
+@keyframes mu-hide { 0% { opacity: 0; } 50% { opacity: 1; } }
+@keyframes mu-thump { 0% { transform: scale(1.07); } 50% { transform: scale(1); } }
+@keyframes mu-reel { to { transform: rotate(60deg); } }
+@keyframes mu-eq-a { 0% { clip-path: inset(75% 0 0 0); } 17% { clip-path: inset(25% 0 0 0); } 33% { clip-path: inset(50% 0 0 0); } 50% { clip-path: inset(12.5% 0 0 0); } 67% { clip-path: inset(62.5% 0 0 0); } 83% { clip-path: inset(37.5% 0 0 0); } }
+@keyframes mu-eq-b { 0% { clip-path: inset(50% 0 0 0); } 20% { clip-path: inset(87.5% 0 0 0); } 40% { clip-path: inset(25% 0 0 0); } 60% { clip-path: inset(62.5% 0 0 0); } 80% { clip-path: inset(0% 0 0 0); } }
+@keyframes mu-eq-c { 0% { clip-path: inset(62.5% 0 0 0); } 25% { clip-path: inset(37.5% 0 0 0); } 50% { clip-path: inset(75% 0 0 0); } 75% { clip-path: inset(12.5% 0 0 0); } }
+@keyframes mm-eq { 0% { height: 25%; } 25% { height: 100%; } 50% { height: 50%; } 75% { height: 75%; } }
+
+/* still: nothing moves; a playing deck keeps a fixed skyline in its meter so it still reads as on */
+@media (prefers-reduced-motion: reduce) {
+  .mu *, .mu *::before, .mu *::after, .st-music * { animation: none !important; }
+  .mu.is-playing .mu-eq i::after { clip-path: inset(var(--rest, 50%) 0 0 0); }
+  .mu.is-playing .mu-slime g[data-f="1"], .mu.is-playing .mu-bot g[data-f="2"] { display: none; }
+  .mu.is-playing .mu-slime g[data-f="0"], .mu.is-playing .mu-bot g[data-f="0"] { opacity: 1; }
+  .st-music.is-playing .mm-eq i:nth-child(2) { height: 100%; } .st-music.is-playing .mm-eq i:nth-child(3) { height: 60%; }
+  .mu-tape:hover { transform: none; }
+}
+:root[data-motion="calm"] .mu *, :root[data-motion="calm"] .mu *::before, :root[data-motion="calm"] .mu *::after, :root[data-motion="calm"] .st-music * { animation: none !important; }
+:root[data-motion="calm"] .mu.is-playing .mu-eq i::after { clip-path: inset(var(--rest, 50%) 0 0 0); }
+:root[data-motion="calm"] .mu.is-playing .mu-slime g[data-f="1"], :root[data-motion="calm"] .mu.is-playing .mu-bot g[data-f="2"] { display: none; }
+:root[data-motion="calm"] .mu.is-playing .mu-slime g[data-f="0"], :root[data-motion="calm"] .mu.is-playing .mu-bot g[data-f="0"] { opacity: 1; }
+:root[data-motion="calm"] .st-music.is-playing .mm-eq i:nth-child(2) { height: 100%; }
+:root[data-motion="calm"] .st-music.is-playing .mm-eq i:nth-child(3) { height: 60%; }
+:root[data-motion="calm"] .mu-tape:hover { transform: none; }
+
+/* ------------------------------------------------------------ narrow panels */
+@container (max-width: 980px) {
+  .mu-face { grid-template-columns: 92px auto minmax(0, 1fr) 92px; }
+  .mu-spk .mu-woofer { width: 78px; height: 78px; }
+  .mu-spk .mu-tweeter { width: 30px; height: 30px; }
+}
+@container (max-width: 820px) {
+  .mu-face { grid-template-columns: auto minmax(0, 1fr); }
+  .mu-spk { display: none; }
+  .mu-device { margin-left: 0; }
+}
+@container (max-width: 560px) {
+  .mu-face { grid-template-columns: minmax(0, 1fr); }
+  .mu-crt { justify-self: center; }
+  .mu-art { width: 128px; height: 128px; }
+  .mu-box { padding-inline: var(--space-sm); }
+  .mu-brand small { display: none; }
+  .mu-setup-head { grid-template-columns: minmax(0, 1fr); }
+  .mu-device .rs-button { width: 100%; }
+}
