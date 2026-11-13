@@ -2288,7 +2288,9 @@ function parseHashFrom(href) {
 
 /* The title screen. Each step is a real stage of the first load; the screen stays up at
    least MIN ms from page start so it reads as a title screen, and any key or click skips
-   what is left of that. A load slower than GIVE_UP opens the app anyway, still syncing. */
+   what is left of that. A load slower than GIVE_UP opens the app anyway, still syncing.
+   The slime and the bot race along the bar: friends, but the lead changes at every step,
+   one of them wins at the end and the other says GG. */
 const BootScreen = (() => {
   const el = document.getElementById("boot");
   const MIN = new URLSearchParams(location.search).has("panel") ? 0 : 1300;
@@ -2299,8 +2301,14 @@ const BootScreen = (() => {
   const onSkip = () => { skip = true; };
   addEventListener("keydown", onSkip);
   el?.addEventListener("pointerdown", onSkip);
-  const runner = el?.querySelector(".boot-runner");
-  if (runner) { runner.innerHTML = Sprites.svg("bot", { scale: 3 }); Sprites.play(runner.firstElementChild, [[0, 2], 140]); }
+  const RACERS = { bot: { run: [[0, 2], 140], happy: 4, ko: 3, name: "BOT" }, buddy: { run: [[0, 1], 170], happy: 2, ko: 3, name: "SLIME" } };
+  const racers = [["bot", el?.querySelector(".boot-runner.is-bot")], ["buddy", el?.querySelector(".boot-runner.is-blob")]].filter(([, r]) => r);
+  for (const [who, r] of racers) { r.innerHTML = Sprites.svg(who, { scale: 3 }); Sprites.play(r.firstElementChild, RACERS[who].run); }
+  let leader = Math.random() < 0.5 ? 0 : 1;
+  function jostle() {
+    leader = 1 - leader;
+    racers.forEach(([, r], i) => r.style.setProperty("--lead", i === leader ? "12px" : "-12px"));
+  }
   // A warm load is done in a few ms, so each step holds a moment and the bar visibly fills.
   const HOLD = MIN ? 260 : 0;
   let shown = 0, queue = Promise.resolve();
@@ -2311,6 +2319,7 @@ const BootScreen = (() => {
       if (gone) return;
       const [p, label] = STEPS[name];
       el.style.setProperty("--p", p);
+      if (name !== "ready") jostle();
       el.querySelector("#boot-step").textContent = text || label;
       shown = performance.now();
     });
@@ -2318,11 +2327,18 @@ const BootScreen = (() => {
   }
   async function finish(error = "") {
     if (gone || el.classList.contains("is-ready") || el.classList.contains("is-error")) return;
-    await step("ready", error);
+    const winner = Math.random() < 0.5 ? 0 : 1;
+    const [winWho] = racers[winner] || ["bot"];
+    await step("ready", error || `READY! ${RACERS[winWho].name} WINS`);
     if (gone) return;
     el.classList.add(error ? "is-error" : "is-ready");
-    if (runner?.firstElementChild) Sprites.stop(runner.firstElementChild, error ? 3 : 4);
-    const until = Math.max(performance.now() + (error ? 1500 : 350), MIN);
+    racers.forEach(([who, r], i) => {
+      Sprites.stop(r.firstElementChild, error ? RACERS[who].ko : RACERS[who].happy);
+      r.style.setProperty("--lead", error ? "0px" : i === winner ? "16px" : "-16px");
+      r.classList.toggle("is-winner", !error && i === winner);
+      r.classList.toggle("is-gg", !error && i !== winner);
+    });
+    const until = Math.max(performance.now() + (error ? 1500 : 1000), MIN);  // long enough to see who won
     while (performance.now() < until && !skip) await new Promise((r) => setTimeout(r, 40));
     gone = true;
     removeEventListener("keydown", onSkip);
@@ -2360,7 +2376,7 @@ async function boot() {
   api("projects").then((r) => { state.projects = r.projects; state.project = r.project; renderBar(); }).catch(() => {});
   BootScreen.step("data");
   await loadView();
-  BootScreen.finish(state.me ? "" : "NO CONNECTION");
+  BootScreen.finish(state.me ? "" : "NO CONNECTION").then(() => Guide.firstRun());
   if (state.route.pr) { const pr = findPr(state.route.pr); if (pr) openPr(pr); }
   // The server re-reads your open pull requests every minute; the page asks it twice as often.
   setInterval(() => { if (!document.hidden) loadView({ silent: true }); }, 30000);

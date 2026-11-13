@@ -23,7 +23,7 @@
 :root.no-mascots .spr-seat, :root.no-mascots .fx-layer .spr { visibility: hidden; }
 
 /* ---------------------------------------------------------------- status bar */
-.status { display: flex; align-items: center; gap: var(--space-2xs); margin-left: auto; }
+.statusbar { display: flex; align-items: center; gap: var(--space-2xs); margin-left: auto; }
 .st-item { display: inline-flex; align-items: center; gap: var(--space-2xs); height: 32px; padding: 0 var(--space-xs); border: var(--rule-hair) solid var(--color-rule); background: var(--color-paper-3); white-space: nowrap; cursor: default; }
 .st-item:focus-visible { outline: var(--pixel) solid var(--color-focus); outline-offset: 1px; }
 .st-label { font: 400 9px var(--font-num); color: var(--color-muted); letter-spacing: 0.04em; }
@@ -252,3 +252,32 @@
 @keyframes bubble-in { from { transform: scale(0.6) translateY(-8px); opacity: 0; } }
 @keyframes bubble-out { to { transform: scale(0.8) translateY(-6px); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .bot-bubble, .bot-bubble.is-leaving, .rs-pop { animation: none; } }
+
+/* ---------------------------------------------------------------- the loading race */
+.boot-runner { left: calc(3px + var(--p, 0) * (100% - 6px) + var(--lead, 0px)); }
+.boot-runner.is-bot { z-index: 1; }
+.boot-runner.is-blob { bottom: calc(100% + 2px); }
+.boot-runner.is-winner { animation: boot-win 420ms steps(4, end) 3; }
+.boot-runner.is-gg::after { content: "GG!"; position: absolute; left: 50%; bottom: calc(100% + 4px); transform: translateX(-50%); font: 400 9px var(--font-num); color: var(--sprite-yellow); white-space: nowrap; animation: boot-blink 700ms steps(1, end) infinite; }
+@keyframes boot-win { 50% { transform: translateX(-50%) translateY(-14px); } }
+@media (prefers-reduced-motion: reduce) { .boot-runner.is-winner, .boot-runner.is-gg::after { animation: none; } }
+
+/* ---------------------------------------------------------------- the guide */
+.guide { position: fixed; inset: 0; z-index: calc(var(--z-tooltip) + 5); }
+.guide-hole { position: fixed; border: var(--pixel) solid var(--color-accent); box-shadow: 0 0 0 9999px var(--color-scrim), 0 0 0 4px oklch(0% 0 0 / 0.35) inset; pointer-events: none; transition: left 260ms steps(5, end), top 260ms steps(5, end), width 260ms steps(5, end), height 260ms steps(5, end); }
+.guide.is-center .guide-hole { left: 50%; top: 50%; width: 0; height: 0; border: 0; }
+.guide-card { position: fixed; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-sm) var(--space-md); width: min(30rem, calc(100vw - 24px)); padding: var(--space-md);
+  background: var(--color-paper); border: var(--pixel) solid var(--color-rule-2); box-shadow: inset 0 0 0 var(--pixel) var(--color-paper-2), inset 0 0 0 4px var(--color-rule), 8px 8px 0 oklch(0% 0 0 / 0.45);
+  animation: guide-in 220ms steps(4, end); outline: none; }
+.guide.is-center .guide-card { left: 50% !important; top: 50% !important; transform: translate(-50%, -50%); }
+.guide-who { display: flex; align-items: flex-end; gap: 4px; padding-top: 4px; }
+.guide-who .spr { animation: guide-bob 900ms steps(2, jump-none) infinite; }
+.guide-words h2 { margin: 0 0 var(--space-2xs); font: 500 var(--text-lg) var(--font-pixel); letter-spacing: 0; color: var(--color-accent); }
+.guide-words p { margin: 0; color: var(--color-ink-2); font-size: var(--text-sm); line-height: 1.55; }
+.guide-foot { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--space-xs); }
+.guide-dots { display: flex; gap: 4px; margin-right: auto; }
+.guide-dots i { width: 6px; height: 6px; background: var(--color-rule-2); }
+.guide-dots i.is-on { background: var(--color-accent); }
+@keyframes guide-in { from { opacity: 0; } }
+@keyframes guide-bob { 50% { transform: translateY(-3px); } }
+@media (prefers-reduced-motion: reduce) { .guide-card, .guide-who .spr { animation: none; } .guide-hole { transition: none; } }

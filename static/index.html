@@ -29,6 +29,7 @@
 <script src="/static/hub.js" defer></script>
 <script src="/static/retro.js" defer></script>
 <script src="/static/dock.js" defer></script>
+<script src="/static/guide.js" defer></script>
 <script src="/static/app.js" defer></script>
 </head>
 <body>
@@ -38,7 +39,7 @@
   <div class="boot-stage">
     <div class="boot-hero" aria-hidden="true"><img src="/static/app-icon.svg" alt="" width="112" height="112"><span class="boot-shadow"></span></div>
     <p class="boot-title" aria-label="PixelDeck"><span style="--i:0">P</span><span style="--i:1">I</span><span style="--i:2">X</span><span style="--i:3">E</span><span style="--i:4">L</span><span style="--i:5">D</span><span style="--i:6">E</span><span style="--i:7">C</span><span style="--i:8">K</span></p>
-    <div class="boot-bar" aria-hidden="true"><span class="boot-fill"></span><span class="boot-runner"></span></div>
+    <div class="boot-bar" aria-hidden="true"><span class="boot-fill"></span><span class="boot-runner is-bot"></span><span class="boot-runner is-blob"></span></div>
     <p class="boot-status"><span id="boot-step">LOADING ASSETS</span><span class="boot-dots" aria-hidden="true">...</span></p>
     <p class="boot-hint" aria-hidden="true">PRESS ANY KEY</p>
   </div>
@@ -68,7 +69,7 @@
         <p class="menu-hint">Drag a panel's tab onto another area to move it. Drag the dividers to resize. A copy keeps its own person and range.</p>
       </div>
     </details>
-    <div class="sync status" id="status" role="group" aria-label="Status">
+    <div class="sync statusbar" id="status" role="group" aria-label="Status">
       <span class="st-item st-api" id="st-api" tabindex="0">
         <span class="st-label" aria-hidden="true">API</span><span class="energy" id="energy" role="img" aria-label="Bitbucket API calls left this hour"></span>
         <span class="st-num num8" id="st-api-num">0/1000</span><span class="st-unit">/h</span></span>
