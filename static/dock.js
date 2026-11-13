@@ -129,7 +129,7 @@ const Arcade = (() => {
     const s = signals(pr);
     const pending = (pr.reviews || []).filter((r) => r.reviewer && r.state === "pending").map((r) => firstName(r.name));
     const age = duration(Date.now() - new Date(pr.created_on).getTime());
-    return { id: pr.id, repo: pr.repo, branch: pr.source, approved: s.approved, who: pending.length ? listNames(pending) : "the reviewers",
+    return { id: pr.id, repo: pr.repo, branch: pr.source, approved: s.approved, who: pending.length > 2 ? `${pending.slice(0, 2).join(", ")} and ${pending.length - 2} more` : pending.length ? listNames(pending) : "the reviewers",
       age: age ? `${age.n} ${{ min: "minute", h: "hour", d: "day" }[age.unit] || age.unit}${age.n === 1 ? "" : "s"}` : "a while" };
   }
   function maybeSuggest(force = false) {
@@ -164,7 +164,8 @@ const Arcade = (() => {
       <button class="btn btn--quiet" type="button" data-bubble-later>Not now</button></div>`;
     const m = mascot.getBoundingClientRect(), b = bar.getBoundingClientRect();
     // The bubble hangs from the bar's right edge; its tail points up at the bot.
-    bubble.style.setProperty("--tail-r", `${Math.max(8, Math.round(b.right - (m.left + m.width / 2) - 8 - 6))}px`);
+    // From the bubble's inner right edge (bar edge, 8px gap, 12px frame) to the tail's tip.
+    bubble.style.setProperty("--tail-r", `${Math.max(0, Math.round(b.right - (m.left + m.width / 2) - 8 - 12 - 4))}px`);
     bar.append(bubble);
     const svgEl = mascot.querySelector(".spr");
     if (svgEl && typeof Sprites !== "undefined") Sprites.flash(svgEl, 4, 700);  // a little wave

@@ -676,7 +676,8 @@ function insightsPerson(view, id) {
     stat("Median to merge", med ? med.n : null, { unit: med ? med.unit : "", i: 5 }),
     stat("Average to merge", avg ? avg.n : null, { unit: avg ? avg.unit : "", i: 6 }),
   ].join("");
-  const bucket = [["under 4 hours", 0, 4 * HOUR], ["4 to 24 hours", 4 * HOUR, DAY], ["1 to 3 days", DAY, 3 * DAY], ["3 to 7 days", 3 * DAY, 7 * DAY], ["over a week", 7 * DAY, Infinity]]
+  const bucket = [["under 30 minutes", 0, HOUR / 2], ["30 minutes to 1 hour", HOUR / 2, HOUR], ["1 hour to 1 day", HOUR, DAY],
+    ["1 to 2 days", DAY, 2 * DAY], ["2 days to a week", 2 * DAY, 7 * DAY], ["over a week", 7 * DAY, Infinity]]
     .map(([label, lo, hi]) => [label, st.took.filter((v) => v >= lo && v < hi).length]);
   const topRepos = st.byRepo.slice(0, 6);
   const other = st.byRepo.slice(6).reduce((n, r) => n + r[1], 0);
@@ -2020,6 +2021,24 @@ function setCopyWho(id, who) {
   loadView({ silent: true });
 }
 
+/* A notification opens its pull request here, never in the browser: from what is loaded,
+   else from its owner's list (a teammate not shown yet), else read on its own. */
+async function openFromEvent(ev) {
+  const key = `${ev.repo}#${ev.pr_id}`;
+  let pr = findPr(key);
+  if (!pr && ev.owner && !isMeUuid(ev.owner) && state.people[ev.owner] === undefined) {
+    try { await loadPerson(ev.owner); } catch { /* read it on its own below */ }
+    pr = findPr(key);
+  }
+  if (!pr) {
+    try { pr = (await api(`pr?repo=${encodeURIComponent(ev.repo)}&id=${Number(ev.pr_id)}`)).pr; } catch (err) {
+      toast(`Could not open #${ev.pr_id}.`, err.message, true);
+      return;
+    }
+  }
+  openPr(pr);
+}
+
 async function loadView({ silent = false } = {}) {
   if (!silent) setSyncing(true);
   let changed = !silent;
@@ -2264,19 +2283,31 @@ function bind() {
   $("#filter").addEventListener("input", (e) => { state.filter = e.target.value; renderQueue(); });
   document.addEventListener("keydown", onKey);
 
+  // A small target (an icon, a chip) gets its tip beside it, above or else below, so the tip
+  // never covers what you point at; a large one (a chart) gets it above the pointer.
   const tip = $("#tooltip");
+  let tipFor = null;
+  const placeTip = (e) => {
+    const w = tip.offsetWidth, h = tip.offsetHeight;
+    const r = tipFor.getBoundingClientRect();
+    const small = r.height <= 56 && r.width <= 260;
+    let y = small ? r.top - h - 8 : e.clientY - h - 14;
+    if (y < 8) y = small ? r.bottom + 8 : e.clientY + 22;
+    const x = small ? r.left + r.width / 2 - w / 2 : e.clientX - w / 2;
+    tip.style.left = `${Math.round(Math.min(innerWidth - w - 8, Math.max(8, x)))}px`;
+    tip.style.top = `${Math.round(Math.min(innerHeight - h - 8, y))}px`;
+  };
   document.addEventListener("mouseover", (e) => {
     const g = e.target.closest("[data-tip]");
-    if (!g) { tip.hidden = true; return; }
+    if (!g) { tip.hidden = true; tipFor = null; return; }
+    if (g === tipFor && !tip.hidden) return;
+    tipFor = g;
     tip.textContent = g.dataset.tip;
     tip.hidden = false;
+    placeTip(e);
   });
-  document.addEventListener("mousemove", (e) => {
-    if (tip.hidden) return;
-    const w = tip.offsetWidth;
-    tip.style.left = `${Math.min(innerWidth - w - 8, Math.max(8, e.clientX - w / 2))}px`;
-    tip.style.top = `${e.clientY - 36}px`;
-  });
+  document.addEventListener("mousemove", (e) => { if (!tip.hidden && tipFor) placeTip(e); });
+  document.addEventListener("pointerdown", () => { tip.hidden = true; }, true);
   window.addEventListener("hashchange", () => {
     const r = parseHash();
     if (r.who !== state.route.who || r.section !== state.route.section) go(r);
@@ -2360,6 +2391,7 @@ async function boot() {
     panels: [
       { id: "queue", title: "Queue", copyable: true }, { id: "pr", title: "Pull request" },
       { id: "insights", title: "Insights", copyable: true }, { id: "terminal", title: "Terminal" },
+      { id: "repos", title: "Repos", place: "left" }, { id: "music", title: "Music", place: "hidden" },
     ],
     onChange: () => { for (const b of $$(".chart-box")) b.dataset.drawn = ""; paintCharts(); Term.fit(); },
     paramsFor: (id) => { const v = viewOf(id); return { who: v.who, section: v.section, range: v.range }; },
@@ -2368,6 +2400,8 @@ async function boot() {
   });
   Term.mount(Layout.body("terminal"));
   Arcade.attach(Layout.body("terminal"));
+  Repos.mount(Layout.body("repos"));
+  Music.mount(Layout.body("music"));
   RetroSelect.enhanceAll();
   Prefs.onChange(() => paintLayoutMenu());
   bind();
@@ -2392,11 +2426,7 @@ async function boot() {
     Notify.start({
       api, me: () => state.me, ready: () => !!state.me,
       onSettings: (tab) => Settings.open(tab),
-      onOpen: (ev) => {
-        const pr = findPr(`${ev.repo}#${ev.pr_id}`);
-        if (pr) openPr(pr);
-        else if (ev.url) openExternal(ev.url);
-      },
+      onOpen: openFromEvent,
     });
   }
 }
