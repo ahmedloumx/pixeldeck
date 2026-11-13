@@ -30,6 +30,8 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import actions  # noqa: E402
+import connections  # noqa: E402
+import jira  # noqa: E402
 import launcher  # noqa: E402
 import terminals  # noqa: E402
 import opener  # noqa: E402
@@ -47,7 +49,8 @@ SECRET = secrets.token_urlsafe(32)
 AGENT_KEY = secrets.token_urlsafe(32)
 AGENT_ROUTES = {("POST", "propose"), ("GET", "proposal")}
 PROPOSALS = proposals.Proposals()
-FEATURES = ["merge", "sync", "drop", "proposals", "snapshots", "reviews"]
+FEATURES = ["merge", "sync", "drop", "proposals", "snapshots", "reviews", "events", "status", "settings", "merge-options", "jira"]
+JIRA = jira.Jira()
 SNAPSHOT_MAX = 4 * 1024 * 1024
 MIN_COLS, MIN_ROWS = 20, 4  # a collapsed panel must not squeeze a program into a sliver
 TERMS = terminals.Terminals()
@@ -292,6 +295,28 @@ class Desk(BaseHTTPRequestHandler):
                 repo = (query.get("repo") or [""])[0]
                 pr_id = int((query.get("id") or ["0"])[0])
                 return self._send(200, actions.sync_status(engine, WORKSPACE_ROOT, repo, pr_id))
+            # The three routes the page polls or opens often answer from memory, never Bitbucket.
+            if method == "GET" and route == "events":
+                since = (query.get("since") or [""])[0]
+                return self._send(200, self._events(int(since) if since.isdigit() else None))
+            if method == "GET" and route == "status":
+                return self._send(200, self._status())
+            if method == "GET" and route == "settings":
+                return self._send(200, {**connections.report(engine, self.port, WORKSPACE_ROOT, terminals.UNAVAILABLE), "jira": JIRA.status()})
+            if method == "POST" and route == "settings-test":
+                try:
+                    engine.refresh_identity()
+                except BitbucketError:
+                    pass  # the report carries the refusal
+                return self._send(200, {**connections.report(engine, self.port, WORKSPACE_ROOT, terminals.UNAVAILABLE), "jira": JIRA.check()})
+            if method == "GET" and route == "merge-options":
+                repo = (query.get("repo") or [""])[0]
+                pr_id = int((query.get("id") or ["0"])[0])
+                return self._send(200, actions.merge_options(engine, repo, pr_id))
+            if method == "GET" and route == "ticket":
+                return self._send(200, JIRA.ticket((query.get("key") or [""])[0]))
+            if method == "POST" and route == "ticket-move":
+                return self._send(200, JIRA.move(body.get("key"), body.get("transition")))
             if method == "GET" and route == "projects":
                 return self._send(200, {"projects": engine.projects(), "project": engine.project()})
             if method == "POST" and route == "project":
@@ -317,6 +342,8 @@ class Desk(BaseHTTPRequestHandler):
                 return self._send(200, {"browser": opener.open_url(url)})
         except BitbucketError as exc:
             return self._error(HTTPStatus.BAD_GATEWAY, exc.message, upstream=exc.status, auth=engine.auth)
+        except jira.JiraError as exc:
+            return self._error(HTTPStatus.BAD_GATEWAY, exc.message, upstream=exc.status, jira=JIRA.status())
         except actions.SyncConflict as exc:
             return self._error(HTTPStatus.CONFLICT, str(exc), conflicts=exc.files)
         except KeyError as exc:
@@ -351,6 +378,17 @@ class Desk(BaseHTTPRequestHandler):
             "terminal": terminals.UNAVAILABLE or "",
             "features": FEATURES,
             "now": time.time(),
+        }
+
+    def _events(self, since):
+        repos = self.engine.project_repos(offline=True)
+        return self.engine.events.read(since, keep=lambda ev: repos is None or ev.get("repo") in repos)
+
+    def _status(self):
+        engine = self.engine
+        return {
+            "budget": engine.budget(), "auth": engine.auth, "schedule": engine.schedule(),
+            "events_last": engine.events.last(), "now": time.time(),
         }
 
     def _with_history(self, prs):

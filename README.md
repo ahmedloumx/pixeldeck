@@ -18,6 +18,7 @@ Full documentation, with the architecture, security model and measured performan
   declined. A colour-coded merge tree shows what branched off and came back.
 - **Pull request view.** Overview with the description rendered from Markdown, the diff with
   per-file "viewed" marks, threads, commits and tasks. The header folds away so the diff gets the room.
+  **Copy link** puts the pull request's address on the clipboard in one click.
 - **Copy review comments.** One click copies every thread (or the open ones, or one thread) as
   plain Markdown, ready to paste into a Claude prompt.
 - **Claude Code on a pull request.** Fix, Fix and push, Read and summarize, or Review. PixelDeck
@@ -32,19 +33,41 @@ Full documentation, with the architecture, security model and measured performan
   such as Claude Code runs `pixeldeck.py --propose` and waits. A notification shows the branch,
   its target and its size: **Proceed** opens it as proposed, **Review** opens the popup (target
   branch, close the branch after the merge, the diff), **Decline** says no. See below.
-- **Review banners.** When someone approves, asks for changes or comments on one of your pull
-  requests, a banner drops in from the top with who it was.
-- **Team and insights.** Your teammates' queues, review load and merge history.
+- **Notifications.** Each refresh is compared with the last one: a pull request opened, an
+  approval, changes asked, new comments, a review asked of you, a merge or a decline. News spins
+  in as a slot machine banner (one per burst, with a count) and lands behind the bell with its
+  history. Silence it per kind, keep only your own pull requests, or snooze it. Your own actions
+  never notify you.
+- **Status bar.** Bitbucket API calls used this hour, when your pull requests were read and the
+  next read, the connection, the bell, settings and the guide.
+- **Settings.** What PixelDeck is connected to (Bitbucket, Jira, the Claude Code CLI, git and
+  terminals), what notifies you, and your look: accent colour, number font, motion, mascots.
+- **Team and insights.** Your teammates' queues, review load and merge history. Insights pick a
+  range, from 7 days to 120; a month or less is charted per day.
+- **Panel copies.** Copy the Queue or Insights panel: each copy keeps its own person, section
+  and range, so two people or two ranges sit side by side. Copies are saved with the layout and
+  open in their own window too.
 - **Reviews.** Approve or request changes on a teammate's open pull request, and take either
   back, from the pull request's toolbar.
 - **Actions.** Open a pull request from a pushed branch; sync, merge or decline your own pull
   request; delete a pushed branch. Each asks for a second click in place. When your branch is behind its
   target, a bar says by how much and offers **Sync now**, like Bitbucket's.
+- **Merge popup.** Like Bitbucket's: the strategies the target branch allows (merge commit,
+  squash, fast forward and the rebase ones, its default picked), the commit message Bitbucket
+  would write, closing the branch, and the ticket from Jira with its status. Pick the status it
+  should move to and PixelDeck moves it once the merge is through (needs `JIRA_TOKEN`).
 - **Arcade layer.** A title screen while it loads, pixel sprites, and small game moments for
   merges, deletions and new shells. Two mascots: the green slime does AI work (it comes when you
   start Claude and builds its terminal tab), the blue bot does PixelDeck's own work (it stands by
-  a button while a merge, sync, decline or delete runs) and its eyes follow your pointer. Reduced
-  motion turns them off.
+  a button while a merge, sync, decline or delete runs) and its eyes follow your pointer. They
+  race each other along the loading bar. Reduced motion, or Calm in the settings, turns the
+  motion off.
+- **Arcade dock.** Tetris, Snake and Flappy, played with the slime and the bot, open beside the
+  terminal from the Layout menu. While one of your pull requests waits on reviewers or on its
+  merge, the bot on the terminal bar now and then suggests a round, with a line it has not said
+  lately. It never takes focus from a terminal; switch it off in the Layout menu.
+- **Guide.** A short tour on the first start, a spotlight on each part with a mascot telling it.
+  The **?** in the status bar brings it back.
 
 ## Requirements
 
@@ -109,6 +132,7 @@ in the real environment wins over the file, and the file is re-read when it chan
 | `BITBUCKET_WORKSPACE` | The workspace slug, as in `bitbucket.org/<workspace>/<repo>`. Required. |
 | `BITBUCKET_PROJECT` | Start scoped to one project key. Empty: every project. |
 | `JIRA_SITE`, `TICKET_PREFIXES` | Turn ticket keys such as `ABC-123` in branches and titles into Jira links. |
+| `JIRA_TOKEN`, `JIRA_EMAIL` | An Atlassian API token with Jira access, to show and move a ticket's status in the merge popup. Classic and scoped tokens both work; the Bitbucket token is never sent to Jira. `JIRA_EMAIL` defaults to `BITBUCKET_EMAIL`. |
 | `PIXELDECK_WORKSPACE_ROOT` | The folder with your local clones. Default: the folder PixelDeck sits in. |
 | `PIXELDECK_RELEASE_REPOS` | Glob patterns of repos whose pull requests target master or main before develop. |
 | `PIXELDECK_BRIEFS_DIR` | Your own Claude brief templates (see below). |
@@ -157,6 +181,10 @@ folder. Files you leave out come from `briefs/`. Placeholders such as `{source}`
   reach PixelDeck, and your `.env`, anyway.
 - Fix and push tells Claude to push with `--force-with-lease` on the exact remote commit. That
   is an instruction to Claude, not a check PixelDeck enforces.
+- The settings report says whether a token is set and where the settings file is, never the
+  token. The Jira site comes from `.env` only, never from the page, and a ticket key must look
+  like one before it reaches a URL.
+- The routes the page polls (events, status) answer from memory and never call Bitbucket.
 
 ## Development
 
@@ -171,6 +199,9 @@ on every request, so a reload shows a change. The documentation describes each f
 
 - [xterm.js](https://xtermjs.org/) and its fit, WebGL, Unicode 11 and serialize add-ons, MIT license.
 - Fonts: Press Start 2P, Pixelify Sans and Host Grotesk, SIL Open Font License 1.1.
+- Numbers use the ArcadeClassic font by Pizzadude when it is installed on your computer. Its
+  license allows personal use only, so PixelDeck does not ship it; without it, Press Start 2P
+  stands in.
 
 Their license texts are in [licenses/](licenses/).
 

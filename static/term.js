@@ -78,7 +78,10 @@ const Term = (() => {
     root.innerHTML = `<div class="term-bar"><div class="term-tabs" role="tablist" aria-label="Terminals"></div>
       <span class="term-mascot">${Sprites.svg("bot", { scale: 2, idle: "blink", follow: true })}</span>
       <button class="btn btn--quiet" type="button" data-term-new>New shell</button></div>
-      <div class="term-panes"><div class="empty term-empty">${Sprites.svg("buddy", { scale: 3 })}<p>No terminal yet. The Claude button on a pull request opens one here, or start a shell.</p></div></div>`;
+      <div class="term-split"><div class="term-panes"><div class="empty term-empty">${Sprites.svg("buddy", { scale: 3 })}<p>No terminal yet. The Claude button on a pull request opens one here, or start a shell.</p></div></div>
+      <aside class="games-dock" aria-label="Arcade" hidden><div class="dock-handle" role="separator" aria-orientation="vertical" aria-label="Resize the arcade"></div>
+        <header class="dock-head"><span>Arcade</span><button class="slot-tool" type="button" data-dock-close aria-label="Close the arcade" title="Close the arcade">×</button></header>
+        <div class="games-slot"></div></aside></div>`;
     tabsEl = root.querySelector(".term-tabs");
     panesEl = root.querySelector(".term-panes");
     root.addEventListener("click", (e) => {
@@ -290,6 +293,20 @@ const Term = (() => {
     if (/JSON body/.test(data.error || "")) throw new Error("This needs the newer PixelDeck server: restart it once.");
     throw new Error(data.error || `HTTP ${res.status}`);
   }
+  // The native window hands over real paths (see app_window.py: WebKitGTK hides dropped
+  // files from the page). They go to the terminal you are on, wherever they were dropped.
+  function dropPaths(paths) {
+    const s = sessions.get(current);
+    const clean = (paths || []).filter((p) => typeof p === "string" && p && !/[\u0000-\u001f\u007f]/.test(p)).slice(0, 10);
+    if (!clean.length) return false;
+    if (!s || !s.alive) { toast("Open a terminal first.", "Then drop the files on it."); return false; }
+    if (typeof Layout !== "undefined") Layout.activate("terminal");
+    s.term.paste(`${clean.map(quotePath).join(" ")} `);
+    s.term.focus();
+    return true;
+  }
+  window.PixelDeckDrop = (paths) => dropPaths(paths);
+
   async function dropFiles(dt) {
     // Both lists can only be read during the drop event itself, so before any await.
     const files = [...(dt.files || [])].slice(0, 10);
@@ -588,7 +605,7 @@ const Term = (() => {
   addEventListener("pagehide", () => saveSnapshots(true));
 
   return { mount, attach, select, newShell, showBuild, buildWith, fit: fitCurrent, saveSnapshots, count: () => sessions.size,
-    renderers: () => [...sessions.values()].map((s) => s.renderer), order: () => [...sessions.keys()],
+    renderers: () => [...sessions.values()].map((s) => s.renderer), order: () => [...sessions.keys()], dropPaths,
     // The last lines of the current terminal as text: with WebGL the screen is not in the DOM.
     lines: (n = 5) => {
       const buf = sessions.get(current)?.term.buffer.active;

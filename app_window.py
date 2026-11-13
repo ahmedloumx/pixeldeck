@@ -113,7 +113,36 @@ class DeskApp(Gtk.Application):
         view.connect("create", self._on_create)
         view.connect("close", lambda _v: win.destroy())
         view.connect("load-failed", self._on_load_failed)
+        self._file_drops(view)
         return win
+
+    def _file_drops(self, view):
+        """Files dragged in from a file manager reach the page as their paths.
+
+        WebKitGTK shows the page a dragged file as a link (text/uri-list) and hides both the
+        file and its path, so the page alone cannot paste it. A drop target in the capture
+        phase takes file drops before WebKit does and hands the real paths to the page.
+        """
+        target = Gtk.DropTarget.new(Gdk.FileList, Gdk.DragAction.COPY)
+        target.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+
+        def on_drop(_target, value, x, y):
+            paths = [f.get_path() for f in value.get_files() if f.get_path()]
+            if not paths:
+                return False
+            zoom = view.get_zoom_level() or 1.0
+            # WebKit refuses a string array as an argument, so the paths travel as JSON.
+            script = "return window.PixelDeckDrop ? window.PixelDeckDrop(JSON.parse(paths), x, y) : false"
+            args = GLib.Variant("a{sv}", {
+                "paths": GLib.Variant("s", json.dumps(paths[:10])),
+                "x": GLib.Variant("d", x / zoom),
+                "y": GLib.Variant("d", y / zoom),
+            })
+            view.call_async_javascript_function(script, -1, args, None, None, None, None, None)
+            return True
+
+        target.connect("drop", on_drop)
+        view.add_controller(target)
 
     def _actions(self):
         def add(name, keys, handler):

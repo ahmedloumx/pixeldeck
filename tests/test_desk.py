@@ -439,6 +439,132 @@ class MergeTest(unittest.TestCase):
         self.assertNotIn("POST", [c[0] for c in engine.client.calls])
 
 
+class MergeOptionsTest(unittest.TestCase):
+    """The merge popup: strategies the branch allows, a message like Bitbucket's, the ticket."""
+
+    def _engine(self):
+        import actions
+        pr = model.slim_pr(raw_pr(author={"uuid": "{me}", "display_name": "Me"}))
+
+        class Client(_FakeClient):
+            def get(self, path, params=None):
+                self.calls.append(("GET", path, None))
+                return {"state": "OPEN", "title": pr["title"], "close_source_branch": True,
+                        "source": {"branch": {"name": pr["source"]}},
+                        "participants": [{"user": ALICE, "approved": True}, {"user": BOB, "approved": False}],
+                        "destination": {"branch": {"name": "develop", "default_merge_strategy": "merge_commit",
+                                                   "merge_strategies": ["merge_commit", "squash", "fast_forward"]}}}
+        engine = type("E", (), {})()
+        engine.client = Client()
+        engine.find_pr = lambda repo, pr_id: pr
+        engine.me = lambda: {"uuid": "{me}"}
+        engine.refresh_person = lambda uuid: None
+        engine.pushed = lambda force=False: []
+        engine.file_merged = lambda uuid, raw: {"id": pr["id"], "state": "MERGED"}
+        return actions, engine, pr
+
+    def test_options_read_the_branch_and_write_bitbuckets_message(self):
+        actions, engine, pr = self._engine()
+        out = actions.merge_options(engine, pr["repo"], pr["id"])
+        self.assertEqual(out["strategies"], ["merge_commit", "squash", "fast_forward"])
+        self.assertEqual(out["default"], "merge_commit")
+        self.assertTrue(out["close_source_branch"])
+        self.assertTrue(out["message"].startswith(f"Merged in {pr['source']} (pull request #42)"))
+        self.assertIn("Approved-by: Alice Reviewer", out["message"])
+        self.assertNotIn("Bob Reviewer", out["message"])
+        self.assertEqual(out["ticket"]["key"], "ABC-9001")
+
+    def test_the_chosen_strategy_message_and_branch_reach_bitbucket(self):
+        actions, engine, pr = self._engine()
+        actions.merge(engine, {"repo": pr["repo"], "id": pr["id"], "strategy": "squash", "message": "  Squashed  ", "close_source_branch": False})
+        method, path, body = engine.client.calls[-1]
+        self.assertEqual(path, "/repositories/acme/shop-api/pullrequests/42/merge")
+        self.assertEqual(body, {"type": "pullrequest", "merge_strategy": "squash", "message": "Squashed", "close_source_branch": False})
+
+    def test_a_strategy_the_branch_does_not_allow_is_refused_before_bitbucket(self):
+        actions, engine, pr = self._engine()
+        with self.assertRaises(ValueError):
+            actions.merge(engine, {"repo": pr["repo"], "id": pr["id"], "strategy": "rebase_merge"})
+        with self.assertRaises(ValueError):
+            actions.merge(engine, {"repo": pr["repo"], "id": pr["id"], "message": "x" * 6000})
+        self.assertNotIn("POST", [c[0] for c in engine.client.calls])
+
+
+class JiraTest(unittest.TestCase):
+    """The ticket card in the merge popup, over a fake Jira."""
+
+    def setUp(self):
+        import jira
+        self.jira_mod = jira
+        self.requests = []
+        self.status = "In Progress"
+        os.environ.update(JIRA_SITE="https://acme.atlassian.net", JIRA_TOKEN="scoped-token", JIRA_EMAIL="me@acme.test")
+        self.addCleanup(lambda: [os.environ.pop(k, None) for k in ("JIRA_SITE", "JIRA_TOKEN", "JIRA_EMAIL")])
+
+    def _open(self, req, timeout=None):
+        import io
+        import urllib.error
+        url = req.full_url
+        self.requests.append((req.get_method(), url, req.data))
+        reply = None
+        if url == "https://acme.atlassian.net/rest/api/3/myself":
+            raise urllib.error.HTTPError(url, 401, "no", {}, io.BytesIO(b'{"errorMessages":["Client must be authenticated"]}'))
+        if url == "https://acme.atlassian.net/_edge/tenant_info":
+            reply = {"cloudId": "0123abcd-0000-4000-8000-00000000abcd"}
+        base = "https://api.atlassian.com/ex/jira/0123abcd-0000-4000-8000-00000000abcd"
+        if url == base + "/rest/api/3/myself":
+            reply = {"displayName": "Pat Author"}
+        if url.startswith(base + "/rest/api/3/issue/ABC-9001?"):
+            reply = {"fields": {"summary": "Cheaper bundle", "status": {"name": self.status, "statusCategory": {"key": "indeterminate"}}}}
+        if url == base + "/rest/api/3/issue/ABC-9001/transitions":
+            if req.get_method() == "POST":
+                self.status = "Done"
+                reply = None
+            else:
+                reply = {"transitions": [{"id": "31", "name": "Done", "to": {"name": "Done", "statusCategory": {"key": "done"}}}]}
+        if reply is None and req.get_method() != "POST":
+            raise urllib.error.HTTPError(url, 404, "no", {}, io.BytesIO(b"{}"))
+
+        class Res(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+        return Res(json.dumps(reply).encode() if reply is not None else b"")
+
+    def test_a_scoped_token_goes_through_the_gateway_and_moves_the_ticket(self):
+        j = self.jira_mod.Jira(opener=self._open)
+        t = j.ticket("ABC-9001")
+        self.assertEqual((t["status"]["name"], t["url"]), ("In Progress", "https://acme.atlassian.net/browse/ABC-9001"))
+        self.assertEqual([x["to"] for x in t["transitions"]], ["Done"])
+        self.assertEqual(j.status()["me"], "Pat Author")
+        moved = j.move("ABC-9001", "31")
+        self.assertEqual(moved["status"]["name"], "Done")
+        posts = [r for r in self.requests if r[0] == "POST"]
+        self.assertEqual(json.loads(posts[0][2]), {"transition": {"id": "31"}})
+        self.assertNotIn("scoped-token", json.dumps(j.status()), "the status never carries the token")
+
+    def test_the_bitbucket_token_is_never_sent_to_jira(self):
+        os.environ.pop("JIRA_TOKEN")
+        os.environ["BITBUCKET_TOKEN"] = "bitbucket-secret"
+        self.addCleanup(lambda: os.environ.pop("BITBUCKET_TOKEN", None))
+        j = self.jira_mod.Jira(opener=self._open)
+        with self.assertRaises(self.jira_mod.JiraError):
+            j.ticket("ABC-9001")
+        self.assertEqual(self.requests, [], "no Jira token: nothing is sent at all")
+        self.assertFalse(j.status()["token_set"])
+
+    def test_refuses_bad_keys_and_steps_jira_does_not_offer(self):
+        j = self.jira_mod.Jira(opener=self._open)
+        for bad in ("abc-1", "ABC-0", "ABC-1/../../x", "", None):
+            with self.assertRaises(ValueError):
+                j.ticket(bad)
+        with self.assertRaises(ValueError):
+            j.move("ABC-9001", "99")
+        self.assertFalse([r for r in self.requests if r[0] == "POST"])
+
+
 class OpenLaneTest(unittest.TestCase):
     def _engine(self, open_lists):
         import engine as engine_mod
@@ -449,8 +575,9 @@ class OpenLaneTest(unittest.TestCase):
         eng.data = {"people": {"{me}": {"open": [a, b], "merged": [], "synced_at": 1, "open_at": 1}}}
         eng.saved = 0
         eng._save = lambda: setattr(eng, "saved", eng.saved + 1)
+        eng.events = __import__("events").Log(eng.data, lambda: None)
         eng.full = 0
-        eng.refresh_person = lambda uuid: setattr(eng, "full", eng.full + 1)
+        eng.refresh_person = lambda uuid, **kw: setattr(eng, "full", eng.full + 1)
         return eng, a, b
 
     def test_a_new_approval_is_taken_in_one_call(self):
@@ -467,6 +594,84 @@ class OpenLaneTest(unittest.TestCase):
         eng.client.open_lists = [[raw_pr()]]
         eng.refresh_open("{me}")
         self.assertEqual(eng.full, 1)
+
+
+class EventsTest(unittest.TestCase):
+    """The notification log: what moved between two reads, and never what you did yourself."""
+
+    ME = {"uuid": "{me}", "display_name": "Me Myself"}
+
+    def _pr(self, **over):
+        return model.slim_pr(raw_pr(**over))
+
+    def test_approval_changes_and_comments_on_a_teammates_pull_request(self):
+        import events
+        before = [self._pr()]
+        after = [self._pr(comment_count=5, participants=[
+            {"user": ALICE, "role": "REVIEWER", "approved": True, "state": "approved"},
+            {"user": BOB, "role": "REVIEWER", "approved": False, "state": "changes_requested"},
+        ])]
+        kinds = sorted((e["kind"], (e.get("actor") or {}).get("name"), e.get("count")) for e in events.diff(before, after, "{me}"))
+        self.assertEqual(kinds, [("approved", "Alice Reviewer", None), ("changes_requested", "Bob Reviewer", None), ("comments", None, 2)])
+
+    def test_your_own_review_and_push_are_not_news(self):
+        import events
+        mine_reviewing = [self._pr(participants=[{"user": self.ME, "role": "REVIEWER", "approved": False, "state": None}])]
+        approved_by_me = [self._pr(participants=[{"user": self.ME, "role": "REVIEWER", "approved": True, "state": "approved"}])]
+        self.assertEqual(events.diff(mine_reviewing, approved_by_me, "{me}"), [])
+        own = self._pr(author=self.ME)
+        pushed = self._pr(author=self.ME, source={"branch": {"name": "feat/x"}, "commit": {"hash": "def456"}})
+        self.assertEqual(events.diff([own], [pushed], "{me}"), [], "a push to your own branch is yours")
+        self.assertEqual(events.diff([], [own], "{me}"), [], "opening your own pull request is yours")
+
+    def test_a_review_asked_of_you(self):
+        import events
+        before = [self._pr(participants=[])]
+        after = [self._pr(participants=[{"user": self.ME, "role": "REVIEWER", "approved": False, "state": None}])]
+        out = events.diff(before, after, "{me}")
+        self.assertEqual([e["kind"] for e in out], ["review_requested"])
+        self.assertEqual(out[0]["actor"]["name"], "Pat Author")
+
+    def test_a_pull_request_that_left_says_merged_or_declined_only_when_known(self):
+        import events
+        pr = self._pr()
+        merged = {**pr, "state": "MERGED", "closed_by": {"uuid": "{alice}", "name": "Alice Reviewer"}}
+        self.assertEqual([e["kind"] for e in events.diff([pr], [], "{me}", merged=[merged])], ["merged"])
+        self.assertEqual([e["kind"] for e in events.diff([pr], [], "{me}", declined=[{**pr, "state": "DECLINED"}])], ["declined"])
+        self.assertEqual(events.diff([pr], [], "{me}"), [], "left for an unknown reason: no guess")
+        by_me = {**merged, "closed_by": {"uuid": "{me}", "name": "Me Myself"}}
+        self.assertEqual(events.diff([pr], [], "{me}", merged=[by_me]), [], "you merged it yourself")
+
+    def test_ids_keep_counting_and_the_log_stays_short(self):
+        import events
+        data = {}
+        log = events.Log(data, lambda: None)
+        log.record("{alice}", [{"kind": "opened", "repo": "shop-api"} for _ in range(events.KEEP + 5)])
+        self.assertEqual(len(data["events"]["items"]), events.KEEP)
+        self.assertEqual(log.last(), events.KEEP + 5)
+        again = events.Log(data, lambda: None)  # a restart reads the same cache
+        again.record("{alice}", [{"kind": "opened", "repo": "shop-api"}])
+        self.assertEqual(again.last(), events.KEEP + 6)
+        page = again.read(since=events.KEEP + 4)
+        self.assertEqual([e["id"] for e in page["events"]], [events.KEEP + 5, events.KEEP + 6])
+        self.assertEqual(len(again.read()["events"]), events.PAGE)
+        scoped = again.read(since=0, keep=lambda ev: ev["repo"] == "other")
+        self.assertEqual(scoped["events"], [])
+
+    def test_the_open_lane_records_and_a_first_sync_does_not(self):
+        import engine as engine_mod
+        import events
+        eng = engine_mod.Engine.__new__(engine_mod.Engine)
+        eng.lock = __import__("threading").RLock()
+        eng.data = {"me": {"uuid": "{me}"}, "people": {"{alice}": {"open": [self._pr()], "merged": [], "synced_at": 1, "open_at": 1}}}
+        eng._save = lambda: None
+        eng.events = events.Log(eng.data, lambda: None)
+        approved = raw_pr(participants=[{"user": BOB, "role": "REVIEWER", "approved": True, "state": "approved"}])
+        eng.client = _FakeClient(open_lists=[[approved]])
+        eng.refresh_open("{alice}")
+        self.assertEqual([(e["kind"], e["owner"]) for e in eng.events.read()["events"]], [("approved", "{alice}")])
+        self.assertIsNone(eng.refresh_open("{nobody}"), "never synced: nothing to compare with")
+        self.assertEqual(eng.events.last(), 1)
 
 
 class DropTest(unittest.TestCase):

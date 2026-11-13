@@ -15,7 +15,7 @@ const state = {
   people: {}, teamData: null, loadedAt: {},
   pr: null,          // { pr, detail, extra, diff, tab }
   filter: "", launches: [], busy: false,
-  animate: { queue: true, insights: true },
+  animate: {},      // panel id -> false once its first paint has animated
   showAll: false, cursor: -1,
   prFolded: false,
 };
@@ -129,12 +129,21 @@ function weeks(n = 12) {
   const now = mondayOf(new Date());
   return Array.from({ length: n }, (_, i) => { const s = new Date(now); s.setDate(s.getDate() - 7 * (n - 1 - i)); return s; });
 }
-function perWeek(items, field, starts) {
+function dayOf(value) {
+  const d = new Date(value);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+function lastDays(n) {
+  const today = dayOf(new Date());
+  return Array.from({ length: n }, (_, i) => { const s = new Date(today); s.setDate(s.getDate() - (n - 1 - i)); return s; });
+}
+function perWeek(items, field, starts, bucketOf = mondayOf) {
   const index = new Map(starts.map((s, i) => [s.getTime(), i]));
   const counts = starts.map(() => 0);
   for (const it of items) {
     if (!it[field]) continue;
-    const i = index.get(mondayOf(it[field]).getTime());
+    const i = index.get(bucketOf(it[field]).getTime());
     if (i !== undefined) counts[i]++;
   }
   return counts;
@@ -208,7 +217,24 @@ function matches(pr) {
 }
 
 const isMeUuid = (uuid) => state.me && uuid === state.me.uuid;
-const whoUuid = () => (state.route.who === "me" ? state.me?.uuid : state.route.who);
+const whoUuid = (view = state.route) => (view.who === "me" ? state.me?.uuid : view.who);
+
+/* A view is what one Queue or Insights panel shows: whose pull requests, which section and
+   which time range. The first panel of each follows the address bar; a copy keeps its own
+   view in the saved layout, so two people or two ranges can sit side by side. */
+const RANGE_KEY = "prdesk.insights.range.v1";
+// Merged pull requests are kept for 120 days, so no range reaches further back.
+const RANGES = [["7", "7 days", "the last 7 days"], ["30", "30 days", "the last 30 days"], ["84", "12 weeks", "the last 12 weeks"], ["120", "120 days", "the last 120 days"]];
+let insightsRange = (() => { try { const r = localStorage.getItem(RANGE_KEY); return RANGES.some(([id]) => id === r) ? r : "84"; } catch { return "84"; } })();
+const rangeLabel = (r) => (RANGES.find(([id]) => id === r) || RANGES[2])[1];
+const rangeNote = (r) => (RANGES.find(([id]) => id === r) || RANGES[2])[2];
+function viewOf(id) {
+  const p = Layout.params(id);
+  if (!p) return { ...state.route, range: insightsRange };
+  const range = RANGES.some(([r]) => r === p.range) ? p.range : insightsRange;
+  return { who: p.who || "me", section: p.section || "", pr: null, range };
+}
+const panelOf = (el) => el?.closest?.("[data-panel]")?.dataset.panel || null;
 const youReview = (pr) => (pr.reviews || []).some((r) => isMeUuid(r.uuid) && r.reviewer && (r.state === "pending" || r.state === "commented"));
 
 let teamAgg = { src: null, data: null };
@@ -225,9 +251,9 @@ function teamAggregate() {
   teamAgg = { src: state.teamData, data };
   return data;
 }
-function currentData() {
-  if (state.route.who === "team") return teamAggregate();
-  return state.people[whoUuid()] || null;
+function currentData(view = state.route) {
+  if (view.who === "team") return teamAggregate();
+  return state.people[whoUuid(view)] || null;
 }
 
 function buckets(data, kind) {
@@ -250,26 +276,28 @@ function buckets(data, kind) {
   };
 }
 
-function overviewStats(data) {
-  const now = Date.now();
-  const starts = weeks(12);
-  const since12 = starts[0].getTime();
+// Every figure covers the same range: a month or less is drawn per day, longer per week.
+function overviewStats(data, range = "84") {
+  const days = Number(range) || 84;
+  const daily = days <= 31;
+  const starts = daily ? lastDays(days) : weeks(Math.ceil(days / 7));
+  const since = daily ? starts[0].getTime() : Math.min(starts[0].getTime(), Date.now() - days * DAY);
   const merged = data.merged || [];
   const created = [...(data.open || []), ...merged, ...(data.declined || [])];
-  const merged12 = merged.filter((p) => new Date(p.updated_on).getTime() >= since12);
-  const merged30 = merged.filter((p) => now - new Date(p.updated_on).getTime() <= 30 * DAY);
-  const took30 = merged30.map(tookMs).filter((v) => v >= 0);
-  const known = merged30.filter((p) => Array.isArray(p.changes_requested_by));
+  const mergedIn = merged.filter((p) => new Date(p.updated_on).getTime() >= since);
+  const took = mergedIn.map(tookMs).filter((v) => v >= 0);
+  const known = mergedIn.filter((p) => Array.isArray(p.changes_requested_by));
   const fixed = known.filter((p) => p.changes_requested_by.length);
+  const bucketOf = daily ? dayOf : mondayOf;
   return {
-    starts,
-    opened: perWeek(created, "created_on", starts),
-    merged: perWeek(merged, "updated_on", starts),
-    opened12: created.filter((p) => new Date(p.created_on).getTime() >= since12).length,
-    merged12: merged12.length, merged30,
-    median30: median(took30), mean30: mean(took30), took30, known, fixed,
-    byRepo: tally(merged12.map((p) => p.repo)),
-    approvers: tally(merged12.flatMap((p) => (p.reviews || []).filter((r) => r.state === "approved").map((r) => r.name))),
+    range, days, unit: daily ? "day" : "week", starts,
+    opened: perWeek(created, "created_on", starts, bucketOf),
+    merged: perWeek(merged, "updated_on", starts, bucketOf),
+    openedN: created.filter((p) => new Date(p.created_on).getTime() >= since).length,
+    mergedN: mergedIn.length, mergedIn,
+    median: median(took), mean: mean(took), took, known, fixed,
+    byRepo: tally(mergedIn.map((p) => p.repo)),
+    approvers: tally(mergedIn.flatMap((p) => (p.reviews || []).filter((r) => r.state === "approved").map((r) => r.name))),
     askers: tally(fixed.flatMap((p) => p.changes_requested_by)),
   };
 }
@@ -383,14 +411,15 @@ function weeklyChart(st, width) {
   st.starts.forEach((start, i) => {
     const cx = Math.round(i * slot + slot / 2);
     const o = st.opened[i], m = st.merged[i];
-    out += `<g data-tip="${esc(`${i === n - 1 ? "This week" : `Week of ${shortDate(start)}`}: ${o} opened, ${m} merged`)}">`;
+    const when = st.unit === "day" ? (i === n - 1 ? "Today" : start.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })) : i === n - 1 ? "This week" : `Week of ${shortDate(start)}`;
+    out += `<g data-tip="${esc(`${when}: ${o} opened, ${m} merged`)}">`;
     out += stack(cx - bw - 1, blocksFor(o), "px-opened", i) + stack(cx + 1, blocksFor(m), "px-merged", i);
     out += `<rect class="hit" x="${i * slot}" y="0" width="${slot}" height="${base}"/></g>`;
     if (i === 0 || i === n - 1 || i === Math.floor(n / 2)) {
-      out += `<text class="tick" x="${cx}" y="${height - 5}" text-anchor="middle">${i === n - 1 ? "this week" : esc(shortDate(start))}</text>`;
+      out += `<text class="tick" x="${cx}" y="${height - 5}" text-anchor="middle">${i === n - 1 ? (st.unit === "day" ? "today" : "this week") : esc(shortDate(start))}</text>`;
     }
   });
-  return `<svg class="chart" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img" aria-label="Pull requests opened and merged per week, last 12 weeks">${out}</svg>`;
+  return `<svg class="chart" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img" aria-label="Pull requests opened and merged per ${st.unit}, ${esc(rangeNote(st.range))}">${out}</svg>`;
 }
 
 const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -431,9 +460,9 @@ function heatmapHtml(h) {
     <div class="heat" role="img" aria-label="Merged pull requests per day, last ${h.weeksBack} weeks">${cells}</div></div>`;
 }
 const heatLegend = () => `<span class="heat-legend" aria-hidden="true">less ${[0, 1, 2, 3, 4].map((l) => `<span class="heat-cell" data-l="${l}"></span>`).join("")} more</span>`;
-function punchcard(data) {
+function punchcard(merged) {
   const grid = Array.from({ length: 7 }, () => Array(24).fill(0));
-  for (const pr of data.merged || []) { const d = new Date(pr.updated_on); grid[(d.getDay() + 6) % 7][d.getHours()]++; }
+  for (const pr of merged || []) { const d = new Date(pr.updated_on); grid[(d.getDay() + 6) % 7][d.getHours()]++; }
   const max = Math.max(0, ...grid.flat());
   let peak = null;
   grid.forEach((row, r) => row.forEach((v, h) => { if (v && (!peak || v > peak.v)) peak = { v, r, h }; }));
@@ -453,11 +482,12 @@ function hbars(rows, opts = {}) {
       <span class="hbar-value">${value}</span></li>`).join("")}</ol>`;
 }
 function paintCharts() {
-  const data = currentData();
   for (const box of $$(".chart-box")) {
+    const view = viewOf(panelOf(box) || "insights");
+    const data = currentData(view);
     const width = Math.floor(box.clientWidth);
     if (!width || !data || Number(box.dataset.drawn) === width) continue;
-    box.innerHTML = weeklyChart(overviewStats(data), width);
+    box.innerHTML = weeklyChart(overviewStats(data, view.range), width);
     box.dataset.drawn = String(width);
   }
 }
@@ -491,7 +521,7 @@ const SECTIONS = [
   { id: "merged", label: "Merged", kinds: ["me", "mate", "team"], empty: "No merges in the last 120 days." },
   { id: "declined", label: "Declined", kinds: ["me", "mate", "team"], empty: "Nothing declined in the last 90 days." },
 ];
-const viewKind = () => (state.route.who === "team" ? "team" : state.route.who === "me" ? "me" : "mate");
+const viewKind = (view = state.route) => (view.who === "team" ? "team" : view.who === "me" ? "me" : "mate");
 const sectionsFor = (kind) => SECTIONS.filter((s) => s.kinds.includes(kind));
 const VISUAL_TITLE = {
   needs: "How long each has waited", changes: "How long each has waited", open: "How long each has waited",
@@ -506,19 +536,40 @@ function personName(uuid) {
   return state.team.find((m) => m.uuid === uuid)?.name || "Teammate";
 }
 
-function renderQueue() {
-  const el = Layout.body("queue");
+function shortWho(view) {
+  const kind = viewKind(view);
+  return kind === "team" ? "Team" : kind === "me" ? "You" : firstName(personName(whoUuid(view)));
+}
+function whoOptions(value, { edit = false } = {}) {
+  const opt = (v, label) => `<option value="${esc(v)}"${v === value ? " selected" : ""}>${esc(label)}</option>`;
+  const out = [];
+  if (state.me) out.push(opt("me", `${state.me.name} (you)`));
+  if (state.team.length) out.push(`<optgroup label="Team">${state.team.map((m) => opt(m.uuid, m.name)).join("")}</optgroup>`);
+  out.push(opt("team", "Whole team"));
+  if (edit) out.push(opt("edit-team", "Edit team…"));
+  return out.join("");
+}
+// A copy picks its own person here; the first panel follows the picker in the top bar.
+const whoPicker = (id, who) => `<label class="field copy-who"><span class="visually-hidden">Whose pull requests this copy shows</span>
+  <select data-copy-who="${esc(id)}" data-retro>${whoOptions(who)}</select></label>`;
+
+function renderQueue() { for (const id of Layout.instances("queue")) renderQueueIn(id); }
+function renderQueueIn(id) {
+  const el = Layout.body(id);
   if (!el) return;
-  const kind = viewKind();
-  const data = currentData();
+  const copy = Layout.isCopy(id);
+  const view = viewOf(id);
+  const kind = viewKind(view);
+  const data = currentData(view);
   const list = sectionsFor(kind);
-  const sec = list.find((s) => s.id === state.route.section) || list[0];
+  const sec = list.find((s) => s.id === view.section) || list[0];
   const b = buckets(data, kind);
-  const who = kind === "team" ? "Your team" : kind === "me" ? "Your pull requests" : `${personName(whoUuid())}`;
+  const who = kind === "team" ? "Your team" : kind === "me" ? "Your pull requests" : `${personName(whoUuid(view))}`;
   const chips = list.map((s) => {
     const n = data ? b[s.id].length : "";
     const tone = n && s.id === "needs" ? " is-due" : n && s.id === "changes" ? " is-bad" : "";
-    return `<a class="sec-chip${s.id === sec.id ? " is-current" : ""}" role="tab" aria-selected="${s.id === sec.id}" href="${hashFor({ ...state.route, section: s.id, pr: null })}">
+    const link = copy ? `href="#" data-copy-section="${s.id}"` : `href="${hashFor({ ...state.route, section: s.id, pr: null })}"`;
+    return `<a class="sec-chip${s.id === sec.id ? " is-current" : ""}" role="tab" aria-selected="${s.id === sec.id}" ${link}>
       <span class="sec-label"><span class="sec-long">${esc(s.label)}</span><span class="sec-short">${esc(s.short || s.label)}</span></span><span class="sec-n${tone}">${n}</span></a>`;
   }).join("");
   let visual = "", body;
@@ -536,17 +587,19 @@ function renderQueue() {
     visual = ageChart(b[sec.id].filter(matches), { showAuthor: kind !== "me" || sec.id === "requests" });
     body = queueTable(b[sec.id], { empty: sec.empty, showAuthor: kind !== "me" || sec.id === "requests" });
   }
-  el.classList.toggle("calm", !state.animate.queue);
+  el.classList.toggle("calm", state.animate[id] === false);
+  const title = copy ? `${whoPicker(id, view.who)}` : `<h2 class="panel-title">${esc(who)}</h2>`;
   // The sections sit in a rail beside the list; a narrow panel wraps them above it instead.
   el.innerHTML = `<div class="queue-split">
     <nav class="sec-chips" role="tablist" aria-label="Sections" aria-orientation="vertical">${chips}</nav>
     <div class="queue-main">${authNotice()}
-      <header class="panel-head-row"><h2 class="panel-title">${esc(who)}</h2><span class="note">${esc(projectNote())}</span></header>
+      <header class="panel-head-row">${title}<span class="note">${esc(projectNote())}</span></header>
       ${data ? dateBar(sec.id, sec.id === "pushed" ? b.pushed.filter((x) => matches({ repo: x.repo, title: x.subject, source: x.branch, dest: x.dest, pushed_at: x.pushed_at })).length : b[sec.id].filter(matches).length, b[sec.id].length) : ""}
       ${visual ? `<figure class="section-visual"><figcaption>${esc(VISUAL_TITLE[sec.id] || "")}</figcaption>${visual}</figure>` : ""}
       <section class="block">${body}</section>
     </div></div>`;
-  if (data) state.animate.queue = false;
+  if (data) state.animate[id] = false;
+  if (copy) { RetroSelect.enhanceAll(el); Layout.setLabel(id, `Queue: ${shortWho(view)}`); return; }
   Layout.setBadge("queue", data && kind === "me" ? b.needs.length || "" : "");
   const needs = state.me && state.people[state.me.uuid] ? buckets(state.people[state.me.uuid], "me").needs.length : 0;
   document.title = needs ? `(${needs}) PixelDeck` : "PixelDeck";
@@ -573,24 +626,41 @@ function authNotice() {
     <p><button class="btn" type="button" data-action="retry">Try again now</button></p></section>`;
 }
 
-function renderInsights() {
-  const el = Layout.body("insights");
-  if (!el) return;
-  el.classList.toggle("calm", !state.animate.insights);
-  el.innerHTML = viewKind() === "team" ? insightsTeam() : insightsPerson();
-  paintCharts();
-  if (state.animate.insights && currentData()) { countUp(el); state.animate.insights = false; }
+function rangeBar(id, range) {
+  const chips = RANGES.map(([r, label]) => `<button class="date-chip" type="button" data-range="${r}" data-range-panel="${esc(id)}" aria-pressed="${r === range}">${label}</button>`).join("");
+  return `<div class="date-bar range-bar" role="group" aria-label="Time range of these numbers" data-tip="Merged pull requests go back 120 days, declined ones 90."><span class="date-basis">Range</span>${chips}</div>`;
+}
+function setRange(id, range) {
+  if (!RANGES.some(([r]) => r === range)) return;
+  if (Layout.isCopy(id)) Layout.setParams(id, { range });
+  else { insightsRange = range; try { localStorage.setItem(RANGE_KEY, range); } catch { /* storage blocked */ } }
+  state.animate[id] = true;
+  renderInsightsIn(id);
 }
 
-function insightsPerson() {
-  const data = currentData();
-  const kind = viewKind();
-  const name = kind === "me" ? "Your numbers" : personName(whoUuid());
-  if (!data) return `<header class="head"><h1>${esc(name)}</h1></header>${skeleton()}`;
+function renderInsights() { for (const id of Layout.instances("insights")) renderInsightsIn(id); }
+function renderInsightsIn(id) {
+  const el = Layout.body(id);
+  if (!el) return;
+  const view = viewOf(id);
+  el.classList.toggle("calm", state.animate[id] === false);
+  el.innerHTML = viewKind(view) === "team" ? insightsTeam(view, id) : insightsPerson(view, id);
+  paintCharts();
+  if (state.animate[id] !== false && currentData(view)) { countUp(el); state.animate[id] = false; }
+  if (Layout.isCopy(id)) { RetroSelect.enhanceAll(el); Layout.setLabel(id, `Insights: ${shortWho(view)}`); }
+}
+const insightsTools = (view, id) => `<div class="head-tools">${Layout.isCopy(id) ? whoPicker(id, view.who) : ""}${rangeBar(id, view.range)}</div>`;
+
+function insightsPerson(view, id) {
+  const data = currentData(view);
+  const kind = viewKind(view);
+  const name = kind === "me" ? "Your numbers" : personName(whoUuid(view));
+  if (!data) return `<header class="head"><h1>${esc(name)}</h1>${insightsTools(view, id)}</header>${skeleton()}`;
   const b = buckets(data, kind);
-  const st = overviewStats(data);
+  const st = overviewStats(data, view.range);
+  const span = rangeLabel(view.range), note = rangeNote(view.range);
   const awaiting = (data.open || []).map(signals).reduce((n, s) => n + s.awaiting, 0);
-  const med = duration(st.median30), avg = duration(st.mean30);
+  const med = duration(st.median), avg = duration(st.mean);
   const asked = listNames(b.changes.flatMap((pr) => pr.reviews.filter((r) => r.state === "changes_requested").map((r) => r.name)));
   const line = [
     kind === "me" ? (b.needs.length ? `${plural(b.needs.length, "pull request")} ${b.needs.length === 1 ? "needs" : "need"} you.` : "Nothing needs you right now.") : `${plural((data.open || []).length, "open pull request")}.`,
@@ -601,24 +671,26 @@ function insightsPerson() {
     kind === "me" ? stat("Needs you", b.needs.length, { reading: true, due: b.needs.length > 0, i: 0 }) : stat("Open", (data.open || []).length, { reading: true, i: 0 }),
     stat("Changes requested", b.changes.length, { i: 1 }),
     kind === "me" ? stat("Threads to answer", awaiting, { i: 2 }) : stat("Your review", b.requests.length, { i: 2 }),
-    stat("Opened", st.opened12, { unit: "12 weeks", i: 3 }),
-    stat("Merged", st.merged12, { unit: data.merged_total ? `12 weeks, ${data.merged_total} all time` : "12 weeks", i: 4 }),
+    stat("Opened", st.openedN, { unit: span, i: 3 }),
+    stat("Merged", st.mergedN, { unit: data.merged_total ? `${span}, ${data.merged_total} all time` : span, i: 4 }),
     stat("Median to merge", med ? med.n : null, { unit: med ? med.unit : "", i: 5 }),
     stat("Average to merge", avg ? avg.n : null, { unit: avg ? avg.unit : "", i: 6 }),
   ].join("");
   const bucket = [["under 4 hours", 0, 4 * HOUR], ["4 to 24 hours", 4 * HOUR, DAY], ["1 to 3 days", DAY, 3 * DAY], ["3 to 7 days", 3 * DAY, 7 * DAY], ["over a week", 7 * DAY, Infinity]]
-    .map(([label, lo, hi]) => [label, st.took30.filter((v) => v >= lo && v < hi).length]);
+    .map(([label, lo, hi]) => [label, st.took.filter((v) => v >= lo && v < hi).length]);
   const topRepos = st.byRepo.slice(0, 6);
   const other = st.byRepo.slice(6).reduce((n, r) => n + r[1], 0);
   if (other) topRepos.push([`${st.byRepo.length - 6} other repos`, other]);
-  const heat = dailyHeat(data);
-  const punch = punchcard(data);
+  const heat = dailyHeat(data, Math.min(18, Math.max(5, Math.ceil(st.days / 7) + 1)));
+  const punch = punchcard(st.mergedIn);
   const busy = heat.busiest ? `on ${heat.busiest.date.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })}` : "";
+  // Review history is read for the last 30 days of merges only, so a longer range says so.
+  const history = st.mergedN ? `history read for ${st.known.length} of ${st.mergedN}${st.days > 30 ? ", kept for 30 days" : ""}` : note;
   return `${authNotice()}
-    <header class="head reveal" style="--i:0"><h1>${esc(name)}</h1><p class="status">${esc(line)}</p></header>
+    <header class="head reveal" style="--i:0"><h1>${esc(name)}</h1><p class="status">${esc(line)}</p>${insightsTools(view, id)}</header>
     <dl class="stats reveal" style="--i:1">${figures}</dl>
     <div class="panels reveal" style="--i:2">
-      <figure class="panel panel--lead"><div class="panel-head"><h2>Opened and merged, per week</h2>
+      <figure class="panel panel--lead"><div class="panel-head"><h2>Opened and merged, per ${st.unit}</h2>
         <span class="legend"><span><span class="swatch swatch--opened"></span>Opened</span><span><span class="swatch swatch--merged"></span>Merged</span></span></div>
         <div class="chart-box"></div></figure>
       <figure class="panel panel--lead"><div class="panel-head"><h2>Merge tree, by ticket</h2><span class="panel-note">the last 14 merges and what is still open</span></div>
@@ -630,43 +702,45 @@ function insightsPerson() {
             <div><dt>Longest run</dt><dd><span class="num8" data-count="${heat.longest}">${heat.longest}</span><small>${heat.longest === 1 ? "day" : "days"} in a row</small></dd></div>
             <div><dt>Busiest day</dt><dd><span class="num8">${heat.busiest ? heat.busiest.merged : 0}</span><small>${esc(busy)}</small></dd></div>
           </dl></div></figure>
-      <figure class="panel panel--lead"><div class="panel-head"><h2>When the merges land</h2><span class="panel-note">${esc(punch.peak ? `most often ${DAY_NAMES[punch.peak.r]} around ${String(punch.peak.h).padStart(2, "0")}:00` : "last 120 days")}</span></div>${punch.html}</figure>
-      <figure class="panel"><div class="panel-head"><h2>Time to merge</h2><span class="panel-note">last 30 days</span></div>${hbars(st.took30.length ? bucket : [], { empty: "No merges in the last 30 days." })}</figure>
-      <figure class="panel"><div class="panel-head"><h2>Merged by repository</h2><span class="panel-note">12 weeks</span></div>${hbars(topRepos, { empty: "No merges in 12 weeks." })}</figure>
-      <figure class="panel"><div class="panel-head"><h2>Who approved the merges</h2><span class="panel-note">12 weeks</span></div>${hbars(st.approvers.slice(0, 7), { empty: "No approvals recorded." })}</figure>
-      <figure class="panel"><div class="panel-head"><h2>Changes requested, then merged</h2><span class="panel-note">${esc(st.merged30.length ? `history read for ${st.known.length} of ${st.merged30.length}` : "last 30 days")}</span></div>
+      <figure class="panel panel--lead"><div class="panel-head"><h2>When the merges land</h2><span class="panel-note">${esc(punch.peak ? `most often ${DAY_NAMES[punch.peak.r]} around ${String(punch.peak.h).padStart(2, "0")}:00` : note)}</span></div>${punch.html}</figure>
+      <figure class="panel"><div class="panel-head"><h2>Time to merge</h2><span class="panel-note">${esc(note)}</span></div>${hbars(st.took.length ? bucket : [], { empty: `No merges in ${note}.` })}</figure>
+      <figure class="panel"><div class="panel-head"><h2>Merged by repository</h2><span class="panel-note">${esc(span)}</span></div>${hbars(topRepos, { empty: `No merges in ${note}.` })}</figure>
+      <figure class="panel"><div class="panel-head"><h2>Who approved the merges</h2><span class="panel-note">${esc(span)}</span></div>${hbars(st.approvers.slice(0, 7), { empty: "No approvals recorded." })}</figure>
+      <figure class="panel"><div class="panel-head"><h2>Changes requested, then merged</h2><span class="panel-note">${esc(history)}</span></div>
         <p class="panel-figure"><span class="reading-s num8" data-count="${st.fixed.length}">${st.fixed.length}</span><span>of ${st.known.length} merges went through a round of requested changes</span></p>
         ${hbars(st.askers.slice(0, 5), { tone: "bad", empty: st.known.length ? "Nobody asked for changes on these merges." : "History is still loading." })}</figure>
     </div>`;
 }
 
-function insightsTeam() {
+function insightsTeam(view, id) {
   const td = state.teamData;
-  if (!td) return `<header class="head"><h1>Your team</h1></header>${skeleton(6)}`;
-  const stripMax = Math.max(1, ...td.members.flatMap((m) => overviewStats(m).merged));
+  if (!td) return `<header class="head"><h1>Your team</h1>${insightsTools(view, id)}</header>${skeleton(6)}`;
+  const stats = new Map(td.members.map((m) => [m, overviewStats(m, view.range)]));
+  const stripMax = Math.max(1, ...td.members.flatMap((m) => stats.get(m).merged));
+  const unit = stats.size ? [...stats.values()][0].unit : "week";
   const rows = td.members.map((m, i) => {
     const synced = !!m.synced_at;
-    const st = overviewStats(m);
+    const st = stats.get(m);
     const open = (m.open || []).length;
     const changes = (m.open || []).filter((pr) => signals(pr).changes.length).length;
     const asks = m.user.is_me ? 0 : (m.open || []).filter(youReview).length;
-    const med = duration(st.median30);
+    const med = duration(st.median);
     const cell = (v, cls = "") => synced ? `<span class="reading num8${cls}">${v}</span>` : `<span class="reading is-zero">…</span>`;
     return `<tr class="row" data-person="${esc(m.user.is_me ? "me" : m.user.uuid)}" style="--i:${Math.min(i, 14)}">
       <td><span class="who">${face(m.user)}<span>${esc(m.user.name)}${m.user.is_me ? ' <span class="you-tag">you</span>' : ""}</span></span></td>
       <td class="num">${cell(open, open ? "" : " is-zero")}</td>
       <td class="num">${cell(changes, changes ? " is-bad" : " is-zero")}</td>
       <td class="num">${cell(asks, asks ? " is-you" : " is-zero")}</td>
-      <td class="num">${cell(st.merged12, st.merged12 ? "" : " is-zero")}</td>
+      <td class="num">${cell(st.mergedN, st.mergedN ? "" : " is-zero")}</td>
       <td class="num"><span class="figure-cell">${synced && med ? `${med.n} ${med.unit}` : "none"}</span></td>
       <td>${synced ? heatStrip(st.merged, stripMax) : ""}</td></tr>`;
   }).join("");
   const total = td.members.reduce((t, m) => t + (m.open || []).length, 0);
   return `${authNotice()}
     <header class="head reveal" style="--i:0"><h1>Your team</h1>
-      <p class="status">${esc(`${plural(total, "open pull request")} across ${plural(td.members.length, "person", "people")}. Pick a name to see their pull requests.`)}</p></header>
+      <p class="status">${esc(`${plural(total, "open pull request")} across ${plural(td.members.length, "person", "people")}. Pick a name to see their pull requests.`)}</p>${insightsTools(view, id)}</header>
     <section class="block reveal" style="--i:1"><table class="queue team">
-      <thead><tr><th>Person</th><th class="num">Open</th><th class="num">Changes requested</th><th class="num">Your review</th><th class="num">Merged, 12 weeks</th><th class="num">Median to merge</th><th>Merged per week</th></tr></thead>
+      <thead><tr><th>Person</th><th class="num">Open</th><th class="num">Changes requested</th><th class="num">Your review</th><th class="num">Merged, ${esc(rangeLabel(view.range))}</th><th class="num">Median to merge</th><th>Merged per ${unit}</th></tr></thead>
       <tbody>${rows}</tbody></table>
       <p><button class="btn btn--quiet" type="button" data-action="edit-team">Choose who is on the team</button></p></section>`;
 }
@@ -874,7 +948,7 @@ function prTools(pr) {
       + `<span class="tool-sep" aria-hidden="true"></span>`
       + tool(`tool--merge${signals(pr).approved ? " is-ready" : ""}`, "data-merge", Sprites.svg("merge", { scale: 2 }), "Merge",
         signals(pr).approved
-          ? `Merge into ${pr.dest} with the branch's default strategy. Asks you to confirm.`
+          ? `Merge into ${pr.dest}: pick the strategy, the message and the ticket's next status first.`
           : `Not approved yet. Bitbucket's merge checks decide whether it can merge into ${pr.dest}. Asks you to confirm.`)
       + tool("tool--danger", "data-decline", Sprites.svg("decline", { scale: 2 }), "Decline", "Decline this pull request. Asks you to confirm.")
     : tool("tool--agent", 'data-launch="review"', buddy, "Review with the rubric", `Review with the rubric: Claude reviews it in the Terminal panel. ${shift}`)
@@ -1099,6 +1173,14 @@ async function copyText(text) {
   area.remove();
   return ok;
 }
+async function copyLink(btn) {
+  const ok = await copyText(btn.dataset.copyLink);
+  if (!ok) return toast("Could not copy the link.", btn.dataset.copyLink, true);
+  clearTimeout(btn._reset);
+  btn.textContent = "Copied!";
+  btn.classList.add("is-copied");
+  btn._reset = setTimeout(() => { btn.textContent = "Copy link"; btn.classList.remove("is-copied"); }, 1400);
+}
 async function copyThreads(btn) {
   const { pr, detail } = state.pr || {};
   if (!detail?.threads) return;
@@ -1155,7 +1237,7 @@ function renderPr() {
     <div class="pr-view${state.prFolded ? " is-folded" : ""}">
       <header class="pr-head"${state.prFolded ? " inert" : ""}>
         <div class="pr-top"><span class="id">${esc(full.repo)} #${full.id}</span>${stateChip(full)}<span>${esc(full.author.name)}</span><time class="when">${esc(ago(full.updated_on))}</time>
-          <span class="spacer"></span><button class="link" type="button" data-external="${esc(full.url)}">Bitbucket</button>${ticket}
+          <span class="spacer"></span><button class="link" type="button" data-external="${esc(full.url)}">Bitbucket</button><button class="link copy-link" type="button" data-copy-link="${esc(full.url)}" title="Copy the link to this pull request">Copy link</button>${ticket}
           <button class="link" type="button" data-action="reload-pr">Reload</button><button class="btn btn--quiet" type="button" data-action="close-pr">Close</button></div>
         <h2>${esc(full.title)}</h2>
         <div class="branch">${esc(full.source)} into ${esc(full.dest)}</div>
@@ -1508,11 +1590,111 @@ async function deleteBranch(button, repo, branch, sha) {
     await reloadMine();
   } catch (err) { toast("Could not delete the branch.", err.message, true); }
 }
+/* Merging opens a popup like Bitbucket's: the strategies the target branch allows (its
+   default picked), the commit message Bitbucket would write, closing the branch, and the
+   Jira ticket with its status, which can move on once the merge is through. */
+const STRATEGY = {
+  merge_commit: ["Merge commit", "Keeps every commit and adds a merge commit."],
+  squash: ["Squash", "One commit with all the changes, on top of the target."],
+  fast_forward: ["Fast forward", "Moves the target to the branch tip. Refused when the target moved on."],
+  squash_fast_forward: ["Squash, fast forward only", "One commit, only while the branch is up to date."],
+  rebase_fast_forward: ["Rebase, fast forward", "Replays the commits on the target, no merge commit."],
+  rebase_merge: ["Rebase, merge", "Replays the commits, then adds a merge commit."],
+};
+const TRANSITION_KEY = "prdesk.merge.transition.v1";
+let mergeBox = null;
+function mergeTicketHtml() {
+  const m = mergeBox;
+  const key = m.opts?.ticket?.key || m.pr.ticket?.key;
+  if (!key || !(state.features || []).includes("jira")) return "";
+  const url = m.opts?.ticket?.url || m.pr.ticket?.url;
+  const link = url ? `<button class="link" type="button" data-external="${esc(url)}">${esc(key)}</button>` : esc(key);
+  if (m.ticketState === "loading") return `<section class="merge-ticket"><h3>Ticket</h3><p class="set-hint">Reading ${esc(key)} from Jira…</p></section>`;
+  if (m.ticketState === "error") {
+    return `<section class="merge-ticket"><h3>Ticket ${link}</h3><p class="set-hint">Could not read it from Jira: ${esc(m.ticketError)}</p>
+      <p class="set-hint">Set <code>JIRA_TOKEN</code> in the settings file to see and move its status here. <button class="link" type="button" data-merge-settings>Connections</button></p></section>`;
+  }
+  const t = m.ticket;
+  let remembered = "";
+  try { remembered = localStorage.getItem(TRANSITION_KEY) || ""; } catch { /* storage blocked */ }
+  const options = [`<option value="">Leave it in ${esc(t.status.name)}</option>`, ...t.transitions.map((x) =>
+    `<option value="${esc(x.id)}"${x.name === remembered || x.to === remembered ? " selected" : ""}>${esc(x.name === x.to ? x.to : `${x.name}: ${x.to}`)}</option>`)].join("");
+  return `<section class="merge-ticket"><h3>Ticket ${link}</h3>
+    <p class="merge-ticket-line"><span class="jira-status" data-category="${esc(t.status.category || "")}">${esc(t.status.name)}</span><span>${esc(t.summary)}</span></p>
+    <label class="field-block"><span>After the merge, move it to</span><select id="merge-transition">${options}</select></label></section>`;
+}
+function paintMerge() {
+  const m = mergeBox;
+  if (!m) return;
+  const body = $("#pr-dialog-body");
+  if (!m.opts) {
+    body.innerHTML = `<header class="pr-dialog-head"><h2 id="pr-dialog-title">Merge #${esc(m.pr.id)}</h2></header>
+      ${m.error ? `<p class="set-error">${esc(m.error)}</p>` : `<p class="set-hint">Reading the pull request from Bitbucket…</p>`}
+      <footer class="pr-dialog-foot"><span class="spacer"></span><button class="btn btn--quiet" type="button" data-action="close-preview">Close</button></footer>`;
+    return;
+  }
+  if (body.querySelector("#merge-message")) { const box = body.querySelector("#merge-ticket-slot"); if (box) box.innerHTML = mergeTicketHtml(); return; }
+  const o = m.opts;
+  const cards = o.strategies.map((s) => {
+    const [label, hint] = STRATEGY[s] || [s.replace(/_/g, " "), ""];
+    return `<label class="strategy-card"><input type="radio" name="merge-strategy" value="${esc(s)}"${s === o.default ? " checked" : ""}>
+      <span class="strategy-name">${esc(label)}${s === o.default ? ' <small>default</small>' : ""}</span><span class="strategy-hint">${esc(hint)}</span></label>`;
+  }).join("");
+  body.innerHTML = `<header class="pr-dialog-head"><h2 id="pr-dialog-title">Merge pull request #${esc(o.id)}</h2>
+      <p><span class="id">${esc(o.repo)}</span> <span class="branch">${esc(o.source)}</span> into <b>${esc(o.dest)}</b></p><p>${esc(o.title || "")}</p></header>
+    <fieldset class="strategies"><legend>Merge strategy</legend>${cards}</fieldset>
+    <div class="pr-fields">
+      <label class="field-block field-wide"><span>Commit message</span><textarea id="merge-message" rows="5">${esc(o.message)}</textarea></label>
+      <label class="check"><input id="merge-close" type="checkbox"${o.close_source_branch ? " checked" : ""}> Close ${esc(o.source)} after the merge</label></div>
+    <div id="merge-ticket-slot">${mergeTicketHtml()}</div>
+    <p class="set-error" id="merge-error" hidden></p>
+    <footer class="pr-dialog-foot"><span class="spacer"></span>
+      <button class="btn btn--quiet" type="button" data-action="close-preview">Cancel</button>
+      <button class="btn btn--primary" type="button" data-merge-go>${svg("merge")} Merge</button></footer>`;
+}
+async function openMerge(pr) {
+  mergeBox = { pr, opts: null, ticket: null, ticketState: "loading" };
+  paintMerge();
+  if (!$("#pr-dialog").open) $("#pr-dialog").showModal();
+  try { mergeBox.opts = await api(`merge-options?repo=${encodeURIComponent(pr.repo)}&id=${pr.id}`); } catch (err) { mergeBox.error = err.message; }
+  const box = mergeBox;
+  paintMerge();
+  const key = box.opts?.ticket?.key;
+  if (!key || !(state.features || []).includes("jira")) return;
+  try { box.ticket = await api(`ticket?key=${encodeURIComponent(key)}`); box.ticketState = "ok"; } catch (err) { box.ticketState = "error"; box.ticketError = err.message; }
+  if (mergeBox === box) paintMerge();
+}
+async function mergeGo(button) {
+  const m = mergeBox;
+  if (!m?.opts) return;
+  const strategy = $('input[name="merge-strategy"]:checked')?.value;
+  const transition = $("#merge-transition")?.value || "";
+  const body = { repo: m.pr.repo, id: m.pr.id, strategy, message: $("#merge-message").value, close_source_branch: $("#merge-close").checked };
+  const err = $("#merge-error");
+  err.hidden = true;
+  const ok = await doMerge(m.pr, body, button, (message) => { err.textContent = message; err.hidden = false; });
+  if (!ok) return;
+  $("#pr-dialog").close();
+  mergeBox = null;
+  if (!transition || !m.ticket) return;
+  const step = m.ticket.transitions.find((x) => x.id === transition);
+  try { localStorage.setItem(TRANSITION_KEY, step?.to || ""); } catch { /* storage blocked */ }
+  try {
+    const moved = await api("ticket-move", { method: "POST", body: { key: m.ticket.key, transition } });
+    toast(`${moved.key} is ${moved.status.name} now.`, moved.summary);
+  } catch (e) { toast(`Merged, but ${m.ticket.key} did not move.`, e.message, true); }
+}
+
 async function mergePr(button) {
   const pr = state.pr?.detail?.pr || state.pr?.pr;
-  if (!pr || !armed(button, `Confirm: merge #${pr.id} into ${pr.dest}`)) return;
+  if (!pr) return;
+  if ((state.features || []).includes("merge-options")) return openMerge(pr);
+  if (!armed(button, `Confirm: merge #${pr.id} into ${pr.dest}`)) return;
+  await doMerge(pr, { repo: pr.repo, id: pr.id }, button);
+}
+async function doMerge(pr, body, button, inline = null) {
   try {
-    const res = await busy(button, () => api("merge", { method: "POST", body: { repo: pr.repo, id: pr.id } }));
+    const res = await busy(button, () => api("merge", { method: "POST", body }));
     const how = res.strategy ? `Strategy: ${res.strategy.replace(/_/g, " ")}.` : "";
     if (res.state === "MERGED") {
       forgetOpen(pr); // the merge moment plays now, not a second time on the next refresh
@@ -1524,14 +1706,18 @@ async function mergePr(button) {
     }
     await reloadMine();
     if (state.pr && prKey(state.pr.pr) === prKey(pr)) openPr(findPr(prKey(pr)) || state.pr.pr, { force: true });
+    return true;
   } catch (err) {
     const behind = state.pr?.sync?.behind;
-    if (/no route/.test(err.message)) toast("Merge needs the newer PixelDeck server.", NEEDS_RESTART, true);
+    let message = `Could not merge: ${err.message}`;
+    if (/no route/.test(err.message)) message = "Merge needs the newer PixelDeck server.";
     else if (behind) {
-      toast(`Could not merge: the branch is ${behind} ${behind === 1 ? "commit" : "commits"} behind ${state.pr.sync.dest}.`, `${err.message} Sync it first with the bar above.`, true);
+      message = `Could not merge: the branch is ${behind} ${behind === 1 ? "commit" : "commits"} behind ${state.pr.sync.dest}. ${err.message} Sync it first with the bar above.`;
       const bar = $(".sync-bar");
       if (bar) { bar.classList.remove("is-nudge"); void bar.offsetWidth; bar.classList.add("is-nudge"); }
-    } else toast("Could not merge the pull request.", err.message, true);
+    }
+    if (inline) inline(message); else toast(message, /no route/.test(err.message) ? NEEDS_RESTART : "", true);
+    return false;
   }
 }
 
@@ -1584,13 +1770,10 @@ async function saveTeam() {
 function renderBar() {
   const sel = $("#person");
   const value = state.route.who;
-  const opts = [];
-  if (state.me) opts.push(`<option value="me">${esc(state.me.name)} (you)</option>`);
-  if (state.team.length) opts.push(`<optgroup label="Team">${state.team.map((m) => `<option value="${esc(m.uuid)}">${esc(m.name)}</option>`).join("")}</optgroup>`);
-  opts.push(`<option value="team">Whole team</option>`, `<option value="edit-team">Edit team…</option>`);
-  const html = opts.join("");
+  const html = whoOptions("", { edit: true });
   if (sel.dataset.html !== html) { sel.innerHTML = html; sel.dataset.html = html; }
   sel.value = value;
+  RetroSelect.sync(sel);
   const proj = $("#project");
   const key = state.project?.key || "";
   const popts = [`<option value="">Every project</option>`, ...(state.projects || []).map((p) => `<option value="${esc(p.key)}">${esc(p.name)}</option>`)];
@@ -1598,17 +1781,29 @@ function renderBar() {
   const phtml = popts.join("");
   if (proj.dataset.html !== phtml) { proj.innerHTML = phtml; proj.dataset.html = phtml; }
   proj.value = key;
+  RetroSelect.sync(proj);
   const { used, limit } = state.budget;
-  const left = Math.max(0, Math.ceil((1 - used / limit) * 10));
-  const energy = $("#energy");
-  energy.innerHTML = Array.from({ length: 10 }, (_, i) => `<i class="${i < left ? "on" : ""}"></i>`).join("");
-  energy.classList.toggle("is-low", left <= 3);
-  energy.title = `${limit - used} of ${limit} Bitbucket API calls left this hour`;
-  const data = currentData();
-  const synced = data?.synced_at;
-  $("#sync-text").textContent = synced ? `synced ${clock(synced)}` : "not synced";
+  StatusBar.paint();
   $("#refresh").title = `Refresh from Bitbucket (r). ${used} of ${limit} API calls used this hour.`;
-  $("#panels-menu-list").innerHTML = Layout.visibility().map((p) => `<label class="check"><input type="checkbox" data-panel-toggle="${p.id}"${p.hidden ? "" : " checked"}> ${esc(p.title)}</label>`).join("");
+  paintLayoutMenu();
+}
+
+// The Layout menu: which panels show, their copies, and the arcade switches.
+function paintLayoutMenu() {
+  const list = Layout.visibility();
+  const rows = list.filter((p) => !p.copy).map((p) => {
+    const copies = list.filter((c) => c.copy && c.base === p.id).map((c) => `<div class="panel-row is-copy"><span class="panel-row-name">${esc(c.title)}</span>
+      <button class="mini-btn" type="button" data-panel-show="${esc(c.id)}">Show</button><button class="mini-btn" type="button" data-panel-remove="${esc(c.id)}" aria-label="Close ${esc(c.title)}">×</button></div>`).join("");
+    return `<div class="panel-row"><label class="switch"><input type="checkbox" data-panel-toggle="${p.id}"${p.hidden ? "" : " checked"}><span class="switch-knob" aria-hidden="true"></span>${esc(p.title)}</label>
+      ${p.copyable ? `<button class="mini-btn" type="button" data-panel-copy="${p.id}" title="A copy keeps its own person, section and range">+ Copy</button>` : ""}</div>${copies}`;
+  }).join("");
+  const box = $("#panels-menu-list");
+  if (box.dataset.html !== rows) { box.innerHTML = rows; box.dataset.html = rows; }
+  const p = Prefs.get();
+  const arcade = `<label class="switch"><input type="checkbox" data-pref-toggle="games"${p.games ? " checked" : ""}><span class="switch-knob" aria-hidden="true"></span>Games beside the terminal</label>
+    <label class="switch"><input type="checkbox" data-pref-toggle="bubbles"${p.bubbles ? " checked" : ""}><span class="switch-knob" aria-hidden="true"></span>The bot suggests a game while you wait</label>`;
+  const a = $("#arcade-menu-list");
+  if (a.dataset.html !== arcade) { a.innerHTML = arcade; a.dataset.html = arcade; }
 }
 
 function renderAll() {
@@ -1669,6 +1864,7 @@ function showMerged(pr, merged) {
 const REVIEWS_KEY = "prdesk.mine.reviews.v1";
 const BANNER_WORD = { approved: "APPROVED", changes_requested: "ASKED FOR CHANGES", commented: "COMMENTED" };
 function watchReviews(data) {
+  if ((state.features || []).includes("events")) return;  // the notification centre has them
   let before = null;
   try { before = JSON.parse(localStorage.getItem(REVIEWS_KEY)); } catch { /* none yet */ }
   const now = {};
@@ -1790,6 +1986,35 @@ async function loadTeam() {
   state.loadedAt.team = Date.now();
   return changed;
 }
+// A copy may show someone the address bar does not: their data loads alongside.
+async function loadCopies() {
+  let changed = false;
+  const whos = new Set();
+  for (const base of ["queue", "insights"]) for (const id of Layout.instances(base)) if (Layout.isCopy(id)) whos.add(viewOf(id).who);
+  whos.delete(state.route.who);
+  for (const who of whos) {
+    const key = who === "team" ? "team" : whoUuid({ who });
+    if (!key || Date.now() - (state.loadedAt[key] || 0) < 25000) continue;
+    try { changed = (who === "team" ? await loadTeam() : await loadPerson(key)) || changed; } catch { /* the next poll tries again */ }
+  }
+  return changed;
+}
+function renderPanel(id) {
+  const base = Layout.baseOf(id);
+  if (base === "queue") renderQueueIn(id);
+  else if (base === "insights") renderInsightsIn(id);
+}
+function setCopyWho(id, who) {
+  if (who === "edit-team") return openTeamDialog();
+  if (who !== "me" && who !== "team" && isMeUuid(who)) who = "me";
+  const ids = sectionsFor(viewKind({ who })).map((x) => x.id);
+  const section = ids.includes(viewOf(id).section) ? viewOf(id).section : ids[0];
+  Layout.setParams(id, { who, section });
+  state.animate[id] = true;
+  renderPanel(id);
+  loadView({ silent: true });
+}
+
 async function loadView({ silent = false } = {}) {
   if (!silent) setSyncing(true);
   let changed = !silent;
@@ -1798,6 +2023,7 @@ async function loadView({ silent = false } = {}) {
     if (state.route.who === "team") changed = (await loadTeam()) || changed;
     else if (whoUuid()) changed = (await loadPerson(whoUuid())) || changed;
     if (state.me && !state.people[state.me.uuid]) changed = (await loadPerson(state.me.uuid)) || changed;
+    changed = (await loadCopies()) || changed;
   } catch (err) {
     if (err.message !== "reloading") toast("Could not load.", err.message, true);
   } finally {
@@ -1926,6 +2152,8 @@ function bind() {
     if (t.closest("[data-create-pr]")) return createPr(t.closest("[data-create-pr]"));
     if (t.closest("[data-decline]")) return declinePr(t.closest("[data-decline]"));
     if (t.closest("[data-merge]")) return mergePr(t.closest("[data-merge]"));
+    if (t.closest("[data-merge-go]")) return mergeGo(t.closest("[data-merge-go]"));
+    if (t.closest("[data-merge-settings]")) { $("#pr-dialog").close(); return Settings.open("connections"); }
     if (t.closest("[data-sync]")) return syncPr(t.closest("[data-sync]"));
     const preset = t.closest("[data-date-preset]");
     if (preset) return setDates({ preset: preset.dataset.datePreset });
@@ -1937,6 +2165,8 @@ function bind() {
     if (refuse) return decideProposal(refuse, refuse.dataset.proposalDecline, "decline", !!refuse.closest("#pr-dialog"));
     const review = t.closest("[data-proposal-review]");
     if (review) { const p = review.closest(".proposal-banner")?._proposal; if (p) openPreview(p.repo, p.branch, p); return; }
+    const linkBtn = t.closest("[data-copy-link]");
+    if (linkBtn) return copyLink(linkBtn);
     const copyBtn = t.closest("[data-copy-threads]");
     if (copyBtn) return copyThreads(copyBtn);
     const launchBtn = t.closest("[data-launch]");
@@ -1945,8 +2175,23 @@ function bind() {
     if (opener && !t.closest("tr[data-pr]")) { e.preventDefault(); const pr = findPr(opener.dataset.open); if (pr) openPr(pr); return; }
     const row = t.closest("tr[data-pr]");
     if (row) { e.preventDefault(); const pr = findPr(row.dataset.pr); if (pr) openPr(pr); return; }
+    const rangeBtn = t.closest("[data-range]");
+    if (rangeBtn) return setRange(rangeBtn.dataset.rangePanel, rangeBtn.dataset.range);
     const person = t.closest("tr[data-person]");
-    if (person) return go({ who: person.dataset.person, section: person.dataset.person === "me" ? "needs" : "open" });
+    if (person) {
+      const id = panelOf(person);
+      if (id && Layout.isCopy(id)) return setCopyWho(id, person.dataset.person);
+      return go({ who: person.dataset.person, section: person.dataset.person === "me" ? "needs" : "open" });
+    }
+    const copySec = t.closest("[data-copy-section]");
+    if (copySec) {
+      e.preventDefault();
+      const id = panelOf(copySec);
+      Layout.setParams(id, { section: copySec.dataset.copySection });
+      state.animate[id] = true;
+      renderQueueIn(id);
+      return;
+    }
     const chip = t.closest(".sec-chip");
     if (chip) { e.preventDefault(); const r = parseHashFrom(chip.getAttribute("href")); go({ ...state.route, section: r.section }); return; }
     const tab = t.closest(".pr-view [data-tab]");
@@ -1964,9 +2209,16 @@ function bind() {
     if (action === "edit-team") return openTeamDialog();
     if (action === "show-all") { state.showAll = true; return renderQueue(); }
     if (action === "reload-pr" && state.pr) return openPr(state.pr.pr, { force: true });
+    const copyPanel = t.closest("[data-panel-copy]");
+    if (copyPanel) { Layout.duplicate(copyPanel.dataset.panelCopy); return; }
+    const removePanel = t.closest("[data-panel-remove]");
+    if (removePanel) { Layout.remove(removePanel.dataset.panelRemove); return; }
+    const showPanel = t.closest("[data-panel-show]");
+    if (showPanel) { Layout.activate(showPanel.dataset.panelShow); return; }
     if (action === "preset-split") { Layout.preset("split"); return; }
     if (action === "preset-compact") { Layout.preset("compact"); return; }
     if (action === "close-help") return $("#help-dialog").close();
+    if (action === "open-keys") { $("#settings-dialog").close(); return $("#help-dialog").showModal(); }
     if (action === "pr-fold") return applyFold(!state.prFolded);
     if (["fx-merge", "fx-die", "fx-run", "fx-review"].includes(action)) return replay(action, t.closest("[data-action]"));
   });
@@ -1975,6 +2227,7 @@ function bind() {
     if (t.matches("[data-viewed]")) return markViewed(Number(t.dataset.viewed), t.checked);
     if (t.matches("[data-date-from]")) return setDates({ from: t.value });
     if (t.matches("[data-date-to]")) return setDates({ to: t.value });
+    if (t.matches("[data-copy-who]")) return setCopyWho(t.dataset.copyWho, t.value);
     if (t.matches("[data-panel-toggle]")) { if (t.checked) Layout.show(t.dataset.panelToggle); else Layout.hide(t.dataset.panelToggle); renderBar(); return; }
     if (t.id === "person") {
       const v = t.value;
@@ -1985,7 +2238,7 @@ function bind() {
       try {
         const res = await api("project", { method: "POST", body: { key: t.value } });
         state.project = res.project; state.people = {}; state.teamData = null; state.loadedAt = {};
-        state.animate = { queue: true, insights: true };
+        state.animate = {};
         renderAll();
         await loadView();
         toast(res.project ? `Showing ${res.project.name} only.` : "Showing every project.");
@@ -1993,6 +2246,8 @@ function bind() {
     }
   });
   $("#refresh").addEventListener("click", refreshNow);
+  // A late answer from Jira must never paint over another popup opened since.
+  $("#pr-dialog").addEventListener("close", () => { mergeBox = null; });
   $("#team-search").addEventListener("input", paintCandidates);
   $("#team-list").addEventListener("change", (e) => {
     const box = e.target.closest("input[data-uuid]");
@@ -2033,7 +2288,9 @@ function parseHashFrom(href) {
 
 /* The title screen. Each step is a real stage of the first load; the screen stays up at
    least MIN ms from page start so it reads as a title screen, and any key or click skips
-   what is left of that. A load slower than GIVE_UP opens the app anyway, still syncing. */
+   what is left of that. A load slower than GIVE_UP opens the app anyway, still syncing.
+   The slime and the bot race along the bar: friends, but the lead changes at every step,
+   one of them wins at the end and the other says GG. */
 const BootScreen = (() => {
   const el = document.getElementById("boot");
   const MIN = new URLSearchParams(location.search).has("panel") ? 0 : 1300;
@@ -2044,8 +2301,14 @@ const BootScreen = (() => {
   const onSkip = () => { skip = true; };
   addEventListener("keydown", onSkip);
   el?.addEventListener("pointerdown", onSkip);
-  const runner = el?.querySelector(".boot-runner");
-  if (runner) { runner.innerHTML = Sprites.svg("bot", { scale: 3 }); Sprites.play(runner.firstElementChild, [[0, 2], 140]); }
+  const RACERS = { bot: { run: [[0, 2], 140], happy: 4, ko: 3, name: "BOT" }, buddy: { run: [[0, 1], 170], happy: 2, ko: 3, name: "SLIME" } };
+  const racers = [["bot", el?.querySelector(".boot-runner.is-bot")], ["buddy", el?.querySelector(".boot-runner.is-blob")]].filter(([, r]) => r);
+  for (const [who, r] of racers) { r.innerHTML = Sprites.svg(who, { scale: 3 }); Sprites.play(r.firstElementChild, RACERS[who].run); }
+  let leader = Math.random() < 0.5 ? 0 : 1;
+  function jostle() {
+    leader = 1 - leader;
+    racers.forEach(([, r], i) => r.style.setProperty("--lead", i === leader ? "12px" : "-12px"));
+  }
   // A warm load is done in a few ms, so each step holds a moment and the bar visibly fills.
   const HOLD = MIN ? 260 : 0;
   let shown = 0, queue = Promise.resolve();
@@ -2056,6 +2319,7 @@ const BootScreen = (() => {
       if (gone) return;
       const [p, label] = STEPS[name];
       el.style.setProperty("--p", p);
+      if (name !== "ready") jostle();
       el.querySelector("#boot-step").textContent = text || label;
       shown = performance.now();
     });
@@ -2063,11 +2327,18 @@ const BootScreen = (() => {
   }
   async function finish(error = "") {
     if (gone || el.classList.contains("is-ready") || el.classList.contains("is-error")) return;
-    await step("ready", error);
+    const winner = Math.random() < 0.5 ? 0 : 1;
+    const [winWho] = racers[winner] || ["bot"];
+    await step("ready", error || `READY! ${RACERS[winWho].name} WINS`);
     if (gone) return;
     el.classList.add(error ? "is-error" : "is-ready");
-    if (runner?.firstElementChild) Sprites.stop(runner.firstElementChild, error ? 3 : 4);
-    const until = Math.max(performance.now() + (error ? 1500 : 350), MIN);
+    racers.forEach(([who, r], i) => {
+      Sprites.stop(r.firstElementChild, error ? RACERS[who].ko : RACERS[who].happy);
+      r.style.setProperty("--lead", error ? "0px" : i === winner ? "16px" : "-16px");
+      r.classList.toggle("is-winner", !error && i === winner);
+      r.classList.toggle("is-gg", !error && i !== winner);
+    });
+    const until = Math.max(performance.now() + (error ? 1500 : 1000), MIN);  // long enough to see who won
     while (performance.now() < until && !skip) await new Promise((r) => setTimeout(r, 40));
     gone = true;
     removeEventListener("keydown", onSkip);
@@ -2082,12 +2353,18 @@ const BootScreen = (() => {
 async function boot() {
   Layout.init({
     panels: [
-      { id: "queue", title: "Queue" }, { id: "pr", title: "Pull request" },
-      { id: "insights", title: "Insights" }, { id: "terminal", title: "Terminal" },
+      { id: "queue", title: "Queue", copyable: true }, { id: "pr", title: "Pull request" },
+      { id: "insights", title: "Insights", copyable: true }, { id: "terminal", title: "Terminal" },
     ],
     onChange: () => { for (const b of $$(".chart-box")) b.dataset.drawn = ""; paintCharts(); Term.fit(); },
+    paramsFor: (id) => { const v = viewOf(id); return { who: v.who, section: v.section, range: v.range }; },
+    onCreate: (id) => { state.animate[id] = true; renderPanel(id); renderBar(); loadView({ silent: true }); },
+    onRemove: (id) => { delete state.animate[id]; renderBar(); },
   });
   Term.mount(Layout.body("terminal"));
+  Arcade.attach(Layout.body("terminal"));
+  RetroSelect.enhanceAll();
+  Prefs.onChange(() => paintLayoutMenu());
   bind();
   state.route = parseHash();
   renderAll();
@@ -2099,12 +2376,24 @@ async function boot() {
   api("projects").then((r) => { state.projects = r.projects; state.project = r.project; renderBar(); }).catch(() => {});
   BootScreen.step("data");
   await loadView();
-  BootScreen.finish(state.me ? "" : "NO CONNECTION");
+  BootScreen.finish(state.me ? "" : "NO CONNECTION").then(() => Guide.firstRun());
   if (state.route.pr) { const pr = findPr(state.route.pr); if (pr) openPr(pr); }
   // The server re-reads your open pull requests every minute; the page asks it twice as often.
   setInterval(() => { if (!document.hidden) loadView({ silent: true }); }, 30000);
   pollProposals();
   setInterval(pollProposals, 3000);
+  StatusBar.start();
+  if (!Layout.isSolo() && (state.features || []).includes("events")) {
+    Notify.start({
+      api, me: () => state.me, ready: () => !!state.me,
+      onSettings: (tab) => Settings.open(tab),
+      onOpen: (ev) => {
+        const pr = findPr(`${ev.repo}#${ev.pr_id}`);
+        if (pr) openPr(pr);
+        else if (ev.url) openExternal(ev.url);
+      },
+    });
+  }
 }
 
 boot();

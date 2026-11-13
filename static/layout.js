@@ -2,7 +2,9 @@
 
 /* The workspace: four areas (left, main, right, bottom), each holding panels as tabs.
    Drag a tab to move it, drag a divider to resize, collapse an area to a strip,
-   hide a panel, split it out, or open it in its own window. Remembered per browser. */
+   hide a panel, split it out, or open it in its own window. Remembered per browser.
+   Some panels can be copied: a copy is a panel of its own (id "queue~2") with its own
+   view settings, so the same panel can show two people or two ranges side by side. */
 
 const Layout = (() => {
   const KEY = "prdesk.layout.v2";
@@ -27,6 +29,7 @@ const Layout = (() => {
     collapse: '<path d="M6 12h12"/>',
     expand: '<path d="M6 12h12M12 6v12"/>',
     hide: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
+    copy: '<rect x="8.5" y="8.5" width="11" height="11" rx="1"/><path d="M15.5 8.5v-4h-11v11h4"/>',
   };
   const icon = (n) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[n]}</svg>`;
   const clone = (o) => JSON.parse(JSON.stringify(o));
@@ -47,8 +50,25 @@ const Layout = (() => {
     try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { /* storage blocked */ }
   }
 
+  // A copy keeps its base panel's look and its own settings (params), saved with the layout.
+  function register(id, title, base = id) {
+    if (panels[id]) return panels[id];
+    const el = document.createElement("div");
+    el.className = "panel-body";
+    el.dataset.panel = id;
+    el.dataset.base = base;
+    panels[id] = { ...(panels[base] || {}), id, title, base, el };
+    return panels[id];
+  }
+  const copyTitle = (base, n) => `${panels[base].title} ${n}`;
+
   function normalize() {
-    const ids = Object.keys(panels);
+    state.copies = state.copies || {};
+    for (const [id, c] of Object.entries(state.copies)) {
+      if (!panels[c.base] || panels[c.base].base !== c.base) { delete state.copies[id]; continue; }
+      register(id, copyTitle(c.base, c.n), c.base);
+    }
+    const ids = Object.keys(panels).filter((id) => panels[id].base === id || state.copies[id]);
     const seen = new Set();
     for (const slot of SLOTS) {
       state.slots[slot] = (state.slots[slot] || []).filter((id) => ids.includes(id) && !seen.has(id) && seen.add(id));
@@ -71,22 +91,22 @@ const Layout = (() => {
   function init(options) {
     opts = options;
     root = document.getElementById("workspace");
-    for (const p of options.panels) {
-      const el = document.createElement("div");
-      el.className = "panel-body";
-      el.dataset.panel = p.id;
-      panels[p.id] = { ...p, el };
-    }
+    for (const p of options.panels) panels[p.id] = { ...register(p.id, p.title), ...p, base: p.id };
     solo = new URLSearchParams(location.search).get("panel");
+    const saved = load();
+    // A copy opened in its own window is only known to the saved layout of the main one.
+    const soloCopy = solo && saved.copies?.[solo];
+    if (soloCopy && panels[soloCopy.base]) register(solo, copyTitle(soloCopy.base, soloCopy.n), soloCopy.base);
     if (solo && panels[solo]) {
       state = clone(PRESETS.compact);
+      state.copies = soloCopy ? { [solo]: soloCopy } : {};
       state.slots.main = [solo];
-      state.hidden = Object.keys(panels).filter((id) => id !== solo);
+      state.hidden = Object.keys(panels).filter((id) => id !== solo && panels[id].base === id);
       state.active.main = solo;
       document.body.classList.add("is-solo");
     } else {
       solo = null;
-      state = load();
+      state = saved;
     }
     normalize();
     build();
@@ -132,8 +152,8 @@ const Layout = (() => {
       el.hidden = !ids.length;
       el.classList.toggle("is-collapsed", !!state.collapsed[slot] && slot !== "main");
       el.querySelector(".slot-tabs").innerHTML = ids.map((id) => `
-        <button class="slot-tab" type="button" role="tab" draggable="true" data-tab="${id}" aria-selected="${state.active[slot] === id}">
-          <span>${esc(panels[id].title)}</span>${badges[id] ? `<span class="slot-badge">${esc(badges[id])}</span>` : ""}
+        <button class="slot-tab${isCopy(id) ? " is-copy" : ""}" type="button" role="tab" draggable="true" data-tab="${id}" aria-selected="${state.active[slot] === id}">
+          <span class="slot-tab-title">${esc(panels[id].label || panels[id].title)}</span>${badges[id] ? `<span class="slot-badge">${esc(badges[id])}</span>` : ""}
         </button>`).join("");
       const tool = (act, ic, label) => `<button class="slot-tool" type="button" data-act="${act}" data-area="${slot}" title="${label}" aria-label="${label}">${icon(ic)}</button>`;
       const active = state.active[slot];
@@ -141,9 +161,10 @@ const Layout = (() => {
       if (!solo && active) {
         if (slot === "main") { tools.push(tool("split-right", "right", "Split this panel to the right"), tool("split-down", "down", "Split this panel to the bottom")); }
         else { tools.push(tool("to-tabs", "tabs", "Put this panel back in the main tabs")); }
+        if (canCopy(active)) tools.push(tool("duplicate", "copy", "Copy this panel: the copy keeps its own person and view"));
         tools.push(tool("window", "window", "Open this panel in its own window"));
         if (slot !== "main") tools.push(tool("collapse", state.collapsed[slot] ? "expand" : "collapse", state.collapsed[slot] ? "Expand this area" : "Collapse this area"));
-        tools.push(tool("hide", "hide", "Hide this panel"));
+        tools.push(tool("hide", "hide", isCopy(active) ? "Close this copy" : "Hide this panel"));
       }
       el.querySelector(".slot-tools").innerHTML = tools.join("");
       const body = el.querySelector(".slot-body");
@@ -181,7 +202,8 @@ const Layout = (() => {
     else if (act === "split-down") move(id, "bottom");
     else if (act === "to-tabs") move(id, "main");
     else if (act === "window") popout(id);
-    else if (act === "hide") hide(id);
+    else if (act === "duplicate") duplicate(id);
+    else if (act === "hide") { if (isCopy(id)) remove(id); else hide(id); }
     else if (act === "collapse") { state.collapsed[slot] = !state.collapsed[slot]; save(); paint(); }
   }
 
@@ -286,8 +308,53 @@ const Layout = (() => {
     paint();
   }
   function show(id) { if (state.hidden.includes(id)) move(id, "main"); }
+
+  const isCopy = (id) => !!panels[id] && panels[id].base !== id;
+  const canCopy = (id) => !!panels[id] && !!panels[panels[id].base].copyable && !solo;
+  // The copy opens beside its source: a panel in the main area gets its copy on the right.
+  function duplicate(id, params = null) {
+    if (!canCopy(id)) return null;
+    const base = panels[id].base;
+    const taken = new Set(Object.values(state.copies).filter((c) => c.base === base).map((c) => c.n));
+    let n = 2;
+    while (taken.has(n)) n++;
+    const copyId = `${base}~${n}`;
+    state.copies[copyId] = { base, n, params: clone(params || (opts.paramsFor ? opts.paramsFor(id) : {}) || {}) };
+    register(copyId, copyTitle(base, n), base);
+    const from = slotOf(id);
+    move(copyId, from === "main" ? "right" : "main");
+    if (opts.onCreate) opts.onCreate(copyId);
+    return copyId;
+  }
+  function remove(id) {
+    if (!isCopy(id)) return;
+    const slot = slotOf(id);
+    if (slot) state.slots[slot] = state.slots[slot].filter((x) => x !== id);
+    state.hidden = state.hidden.filter((x) => x !== id);
+    delete state.copies[id];
+    delete panels[id];
+    normalize();
+    save();
+    paint();
+    if (opts.onRemove) opts.onRemove(id);
+  }
+  const params = (id) => (isCopy(id) ? state.copies[id]?.params || {} : null);
+  function setParams(id, patch) {
+    if (!isCopy(id)) return;
+    state.copies[id].params = { ...state.copies[id].params, ...patch };
+    save();
+  }
+  // A short tab label the page can set (a copy says whose pull requests it shows).
+  function setLabel(id, label) {
+    if (!panels[id] || panels[id].label === label) return;
+    panels[id].label = label;
+    for (const t of root?.querySelectorAll(`.slot-tab[data-tab="${id}"] .slot-tab-title`) || []) t.textContent = label || panels[id].title;
+  }
+  const instances = (base) => Object.keys(panels).filter((id) => panels[id].base === base);
   function preset(name) {
+    const copies = state.copies;  // a preset arranges the copies too, it does not close them
     state = clone(PRESETS[name] || PRESETS.split);
+    state.copies = copies;
     normalize();
     save();
     paint();
@@ -308,7 +375,8 @@ const Layout = (() => {
   }
   const body = (id) => panels[id]?.el;
   const isShown = (id) => { const s = slotOf(id); return !!s && state.active[s] === id && !state.collapsed[s]; };
-  const visibility = () => Object.keys(panels).map((id) => ({ id, title: panels[id].title, hidden: state.hidden.includes(id) }));
+  const visibility = () => Object.keys(panels).map((id) => ({ id, title: panels[id].label || panels[id].title, hidden: state.hidden.includes(id), copy: isCopy(id), copyable: canCopy(id), base: panels[id].base }));
 
-  return { init, body, activate, hide, show, preset, popout, setBadge, isShown, visibility, isSolo: () => !!solo };
+  return { init, body, activate, hide, show, preset, popout, setBadge, isShown, visibility, isSolo: () => !!solo,
+    duplicate, remove, params, setParams, setLabel, isCopy, instances, baseOf: (id) => panels[id]?.base };
 })();

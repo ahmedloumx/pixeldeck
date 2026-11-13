@@ -408,5 +408,22 @@ const Sprites = (() => {
 
   hoverables();
   idle();
-  return { svg, play, stop, flash, die, celebrate, builder, construct, goHome, worker, agent, dismiss, spawn };
+  /** A sprite as rows of palette letters plus resolved colours, for drawing on a canvas
+      (the games). frame picks the animation frame; "." is transparent. */
+  const TOKEN = {
+    o: "--sprite-orange", O: "--sprite-orange-deep", k: "--sprite-dark", b: "--sprite-blue", B: "--sprite-blue-deep",
+    y: "--sprite-yellow", r: "--sprite-red", w: "--sprite-white", s: "--sprite-stone", S: "--sprite-stone-deep",
+    g: "--sprite-grass", a: "--sprite-amber", c: "--color-ink", t: "--color-cool",
+  };
+  function grid(name, frame = 0) {
+    const def = DEFS[name];
+    if (!def) return null;
+    const rows = def.frames[Math.min(frame, def.frames.length - 1)];
+    const css = getComputedStyle(document.documentElement);
+    const colors = {};
+    for (const ch of new Set(rows.join(""))) if (TOKEN[ch]) colors[ch] = css.getPropertyValue(TOKEN[ch]).trim();
+    return { rows, colors, width: Math.max(...rows.map((r) => r.length)), height: rows.length, frames: def.frames.length };
+  }
+
+  return { svg, grid, play, stop, flash, die, celebrate, builder, construct, goHome, worker, agent, dismiss, spawn };
 })();
