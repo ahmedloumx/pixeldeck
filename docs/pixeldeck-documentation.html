@@ -162,7 +162,7 @@ footer { margin-top: 72px; padding-top: 18px; border-top: 3px dashed var(--rule-
   <div class="score"><b>0</b><span>third-party packages for the server: the Python standard library only (Windows adds pywinpty for the terminal)</span></div>
   <div class="score"><b class="cool">0</b><span>build steps: no bundler, no framework, no npm install</span></div>
   <div class="score"><b class="amber">~8,100</b><span>lines: 3,400 Python, 3,450 JavaScript, 1,250 CSS</span></div>
-  <div class="score"><b>43</b><span>unit tests, run on Python 3.12 and 3.14, plus a WebKit self-test and browser scripts</span></div>
+  <div class="score"><b>49</b><span>unit tests, run on Python 3.12 and 3.14, plus a WebKit self-test and browser scripts</span></div>
 </div>
 <div class="grid cols-4" style="margin-top:18px">
   <div class="score"><b class="cool">95 MB</b><span>server memory, 0% CPU when idle (measured on Linux)</span></div>
@@ -177,6 +177,8 @@ footer { margin-top: 72px; padding-top: 18px; border-top: 3px dashed var(--rule-
     <h3>Pull requests</h3>
     <ul class="list">
       <li><strong>Queue</strong> by state: needs you, changes requested, open, waiting, approved, your review, pushed without a pull request, merged, declined. The sections sit in a rail beside the list and wrap above it in a narrow panel.</li>
+      <li><strong>Date filter</strong> over every list: today, 7 days, 30 days, or a range of dates. Open pull requests go by when they were opened, merged and declined ones by when that happened, pushed branches by the push. The bar says how many of the list it shows.</li>
+      <li><strong>Reviews</strong>: on a teammate's open pull request, approve or request changes from the toolbar; a pressed button is the verdict you gave, and clicking it again takes it back. Each asks for a second click, since Bitbucket tells the author.</li>
       <li><strong>Merge tree</strong>, colour coded: merged lanes, open pull requests (a bot stands on them), branches pushed without a pull request (a flag), declined ones (a tombstone).</li>
       <li><strong>Pull request view</strong>: overview with the description rendered from Markdown, diff with per-file viewed marks, threads, commits, tasks. The header folds under the tab row (<code>f</code>) so the diff gets the room.</li>
       <li><strong>Copy review comments</strong>: every thread, the open ones, or one thread, copied as plain Markdown for a Claude prompt, with file, line and status.</li>
@@ -294,7 +296,7 @@ cp .env.example .env        # Windows: copy .env.example .env</code></pre>
       <tr><td>Storage</td><td>One JSON cache (mode 600, atomic writes), a settings file, a state folder, and the window profile, in each system's own folders.</td><td>One person's data fits in one file; no database to run.</td></tr>
       <tr><td>Page</td><td>Plain HTML, CSS and JavaScript: <code>app.js</code>, <code>layout.js</code>, <code>term.js</code>, <code>visuals.js</code>, <code>sprites.js</code>.</td><td>No build step: edit a file, reload.</td></tr>
       <tr><td>Look</td><td>Press Start 2P, Pixelify Sans and Host Grotesk (local woff2, 44 KB); pixel sprites drawn as SVG from small letter grids.</td><td>Everything is local: it works offline and loads no CDN.</td></tr>
-      <tr><td>Tests</td><td><code>unittest</code> (43 tests, including sync against real git repositories and the propose command against the real server, including import tests that pretend to be Windows and macOS), a WebKit self-test mode, browser scripts.</td><td>The self-test runs headless, so checks never pop a window.</td></tr>
+      <tr><td>Tests</td><td><code>unittest</code> (49 tests, including sync against real git repositories and the propose command against the real server, including import tests that pretend to be Windows and macOS), a WebKit self-test mode, browser scripts.</td><td>The self-test runs headless, so checks never pop a window.</td></tr>
     </tbody>
   </table>
 </div>

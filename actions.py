@@ -234,6 +234,36 @@ def merge(engine, body):
     return {"repo": repo, "id": pr_id, "state": result.get("state") or "PENDING", "strategy": strategy, "pr": merged}
 
 
+# Your review of someone else's pull request: the Bitbucket route and the method for each choice.
+REVIEW_ROUTES = {
+    "approve": ("POST", "approve"), "unapprove": ("DELETE", "approve"),
+    "request_changes": ("POST", "request-changes"), "unrequest_changes": ("DELETE", "request-changes"),
+}
+
+
+def review(engine, body):
+    """Approve or request changes on a teammate's open pull request, or take that back.
+
+    Bitbucket refuses a review of your own pull request; this refuses it first, with a
+    clearer message. The pull request is read again afterwards so every view shows the
+    new state at once.
+    """
+    repo, pr_id, action = body.get("repo"), body.get("id"), body.get("action")
+    if not isinstance(repo, str) or not isinstance(pr_id, int) or action not in REVIEW_ROUTES:
+        raise ValueError("repo, id and an action (approve, unapprove, request_changes, unrequest_changes) are required")
+    base = f"/repositories/{engine.client.workspace}/{repo}/pullrequests/{pr_id}"
+    pr = engine.find_pr(repo, pr_id) or model.slim_pr(engine.client.get(base))
+    if pr["author"]["uuid"] == (engine.me() or {}).get("uuid"):
+        raise PermissionError("you cannot review your own pull request")
+    if pr["state"] != "OPEN":
+        raise ValueError(f"#{pr_id} is {pr['state'].lower()}, not open")
+    method, route = REVIEW_ROUTES[action]
+    engine.client.send(method, f"{base}/{route}")
+    fresh = model.slim_pr(engine.client.get(base))
+    engine.update_pr(fresh)
+    return {"pr": fresh, "action": action}
+
+
 class SyncConflict(Exception):
     """The destination does not merge cleanly into the branch; nothing was pushed."""
 

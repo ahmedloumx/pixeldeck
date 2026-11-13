@@ -18,13 +18,17 @@ for old in "${OLD_IDS[@]}"; do rm -f "$APPS/$old.desktop" "$DESKTOP_DIR/$old.des
 for old in "${OLD_ICONS[@]}"; do rm -f "$ICONS/$old.svg"; done
 
 cp "$DIR/static/app-icon.svg" "$ICONS/$ICON.svg"
+# The icon is named by its full path in the launcher: GNOME Shell scans icon names once at login,
+# so a name installed later would show a generic icon until the next login. The folder is also
+# touched, which makes running shells that do watch it look again.
+touch "${ICONS%/scalable/apps}"
 cat >"$APPS/$ID.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
 Name=PixelDeck
 Comment=Bitbucket pull requests, review threads and Claude Code fixes
 Exec="$DIR/run.sh"
-Icon=$ICON
+Icon=$ICONS/$ICON.svg
 Terminal=false
 Categories=Development;
 Keywords=PixelDeck;PR;pull request;Bitbucket;review;dashboard;
