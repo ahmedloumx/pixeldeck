@@ -84,8 +84,8 @@ class SpotifyBase(unittest.TestCase):
         url = self.route("POST", "spotify-login", body={})["url"]
         return parse_qs(urlsplit(url).query)["state"][0], url
 
-    def connect(self, access=ACCESS, refresh=REFRESH, name="Pixel Pat", product="premium"):
-        self.fake.on("POST", TOKEN_URL, answer(payload={"access_token": access, "refresh_token": refresh, "expires_in": 3600, "scope": spotify.SCOPES}))
+    def connect(self, access=ACCESS, refresh=REFRESH, name="Pixel Pat", product="premium", scope=spotify.SCOPES):
+        self.fake.on("POST", TOKEN_URL, answer(payload={"access_token": access, "refresh_token": refresh, "expires_in": 3600, "scope": scope}))
         self.fake.on("GET", API + "/me", answer(payload={"display_name": name, "product": product, "id": "pat"}))
         state, _url = self.login()
         status, html = spotify.callback({"state": [state], "code": ["the-code"]})
@@ -281,7 +281,9 @@ class ApiTest(SpotifyBase):
             "device_secret": "nope",
         }))
         now = self.route("GET", "spotify-now")
-        self.assertEqual(now["item"], {"id": "t1", "kind": "track", "name": "Song", "artists": ["A", "B"], "album": "Album", "duration_ms": 200000, "art": ART})
+        self.assertEqual(now["item"], {"id": "t1", "uri": None, "kind": "track", "name": "Song", "artists": ["A", "B"], "artist_ids": [None, None],
+                                       "album": "Album", "album_id": None, "number": None, "duration_ms": 200000, "playable": True,
+                                       "art": ART.replace("4851", "b273"), "thumb": ART})
         self.assertEqual((now["is_playing"], now["progress_ms"], now["shuffle"], now["repeat"]), (True, 61000, True, "context"))
         self.assertEqual((now["device"]["volume"], now["playlist"], now["disallows"]), (55, "37i9dQZF1DXcBWIGoYBM5M", ["resuming"]))
         self.assertNotIn("device_secret", json.dumps(now))
@@ -331,6 +333,173 @@ class ApiTest(SpotifyBase):
         self.fake.on("GET", big, (200, {"content-type": "image/png"}, b"x" * (spotify.ART_MAX + 1)))
         with self.assertRaises(spotify.SpotifyError):
             self.route("GET", "spotify-art", {"url": [big]})
+
+
+OLD_SCOPES = "user-read-playback-state user-modify-playback-state user-read-currently-playing playlist-read-private user-read-private"
+T1 = {"type": "track", "id": "t1", "uri": "spotify:track:t1", "name": "One", "duration_ms": 1000, "track_number": 1,
+      "artists": [{"id": "a1", "name": "Ann"}], "album": {"id": "al1", "name": "Al", "images": [{"url": ART, "width": 64}]}}
+
+
+def page(items, nxt=False, total=None):
+    return answer(payload={"items": items, "next": "https://api.spotify.com/next" if nxt else None, "total": total if total is not None else len(items)})
+
+
+class LibraryTest(SpotifyBase):
+    def test_an_old_sign_in_gets_reconnect_answers_not_errors(self):
+        self.connect(scope=OLD_SCOPES)
+        status = self.route("GET", "spotify-status")
+        self.assertEqual(status["scopes_missing"], sorted(["user-library-read", "user-library-modify", "user-read-recently-played", "playlist-read-collaborative"]))
+        sent = len(self.fake.calls)
+        for method, name, query, body, scope in (("GET", "spotify-liked", {}, None, "user-library-read"),
+                                                 ("GET", "spotify-albums", {}, None, "user-library-read"),
+                                                 ("GET", "spotify-liked-check", {"ids": ["t1"]}, None, "user-library-read"),
+                                                 ("GET", "spotify-recent", {}, None, "user-read-recently-played"),
+                                                 ("POST", "spotify-like", {}, {"ids": ["t1"], "liked": True}, "user-library-modify")):
+            with self.subTest(name=name):
+                out = self.route(method, name, query, body)
+                self.assertEqual((out["locked"], out["scope"], out["items"]), (True, scope, []))
+                self.assertIn("Reconnect", out["message"])
+        self.assertEqual(len(self.fake.calls), sent, "a locked list never reaches Spotify")
+        self.assertEqual(set(parse_qs(urlsplit(self.login()[1]).query)["scope"][0].split()), set(spotify.SCOPES.split()))
+
+    def test_a_renewal_without_a_scope_keeps_the_granted_one(self):
+        self.connect(scope=OLD_SCOPES)
+        self.now[0] += 3600
+        self.fake.on("POST", TOKEN_URL, answer(payload={"access_token": "AT-2", "expires_in": 3600}))
+        self.fake.on("GET", API + "/me/player", answer(204))
+        self.route("GET", "spotify-now")
+        self.assertEqual(self.client.granted(), set(OLD_SCOPES.split()))
+
+    def test_liked_songs_page_and_retry_a_refused_page_size(self):
+        self.connect()
+        self.fake.on("GET", API + "/me/tracks?limit=50", answer(400, {"error": {"status": 400, "message": "Invalid limit"}}))
+        self.fake.on("GET", API + "/me/tracks?limit=10", page([{"added_at": "x", "track": T1}, {"track": None}], nxt=True, total=12))
+        out = self.route("GET", "spotify-liked")
+        self.assertEqual([t["name"] for t in out["items"]], ["One"])
+        self.assertEqual((out["next"], out["total"]), (2, 12))
+        self.assertEqual(out["items"][0]["thumb"], ART)
+        self.assertEqual(out["items"][0]["artist_ids"], ["a1"])
+        with self.assertRaises(ValueError):
+            self.route("GET", "spotify-liked", {"offset": ["-1"]})
+
+    def test_playlist_songs_learn_which_path_answers(self):
+        self.connect()
+        self.fake.on("GET", API + "/playlists/p1?fields", answer(payload={"id": "p1", "name": "Mix", "owner": {"id": "spotify", "display_name": "Spotify"}, "images": []}))
+        self.fake.on("GET", API + "/playlists/p1/items", answer(404, {"error": {"status": 404, "message": "Not found"}}))
+        self.fake.on("GET", API + "/playlists/p1/tracks", page([{"track": T1}], nxt=True, total=60))
+        out = self.route("GET", "spotify-playlist", {"id": ["p1"]})
+        self.assertEqual((out["playlist"]["name"], out["playlist"]["by_spotify"], out["next"]), ("Mix", True, 1))
+        self.assertEqual(self.client.items_path, "tracks")
+        sent = len(self.fake.to(API + "/playlists/p1/items"))
+        self.route("GET", "spotify-playlist", {"id": ["p1"], "offset": ["50"]})
+        self.assertEqual(len(self.fake.to(API + "/playlists/p1/items")), sent, "the path that worked is used straight away")
+        self.assertIn("offset=50", self.fake.to(API + "/playlists/p1/tracks")[-1].url)
+        self.fake.on("GET", API + "/playlists/ed1?fields", answer(404, {"error": {"status": 404, "message": "Resource not found"}}))
+        with self.assertRaises(spotify.SpotifyError) as caught:
+            self.route("GET", "spotify-playlist", {"id": ["ed1"]})
+        self.assertEqual((caught.exception.status, caught.exception.message), (404, spotify.NOT_SHARED))
+        with self.assertRaises(ValueError):
+            self.route("GET", "spotify-playlist", {"id": ["../me"]})
+
+    def test_album_songs_carry_the_album_pictures(self):
+        self.connect()
+        song = {k: v for k, v in T1.items() if k != "album"}
+        self.fake.on("GET", API + "/albums/al1", answer(payload={"id": "al1", "name": "Al", "release_date": "2021-04-01", "total_tracks": 51,
+                                                                 "artists": [{"id": "a1", "name": "Ann"}], "images": [{"url": ART, "width": 64}],
+                                                                 "tracks": {"items": [song], "next": "x", "total": 51}}))
+        out = self.route("GET", "spotify-album", {"id": ["al1"]})
+        self.assertEqual((out["album"]["year"], out["items"][0]["thumb"], out["items"][0]["album"], out["next"]), ("2021", ART, "Al", 1))
+        self.fake.on("GET", API + "/albums/al1/tracks", page([song]))
+        self.route("GET", "spotify-album", {"id": ["al1"], "offset": ["50"]})
+        self.assertIn("offset=50", self.fake.to(API + "/albums/al1/tracks")[-1].url)
+
+    def test_search_asks_once_for_every_kind_and_skips_holes(self):
+        self.connect()
+        self.fake.on("GET", API + "/search", answer(payload={
+            "tracks": {"items": [T1], "next": "x", "total": 40}, "albums": {"items": [None], "next": None, "total": 0},
+            "artists": {"items": [{"id": "a1", "name": "Ann", "images": []}], "next": None, "total": 1},
+            "playlists": {"items": [None, {"id": "p1", "name": "Mix", "owner": {"display_name": "Pat"}}], "next": None, "total": 2}}))
+        out = self.route("GET", "spotify-search", {"q": ["neon <b>"]})
+        q = parse_qs(urlsplit(self.fake.to(API + "/search")[-1].url).query)
+        self.assertEqual((q["type"][0], q["limit"][0], q["q"][0]), ("track,album,artist,playlist", "10", "neon <b>"))
+        self.assertEqual((len(out["tracks"]["items"]), out["tracks"]["next"], out["albums"]["items"], out["playlists"]["items"][0]["name"]), (1, 1, [], "Mix"))
+        self.route("GET", "spotify-search", {"q": ["neon"], "type": ["track"], "offset": ["10"]})
+        q = parse_qs(urlsplit(self.fake.to(API + "/search")[-1].url).query)
+        self.assertEqual((q["type"][0], q["offset"][0]), ("track", "10"))
+        for bad in ({"q": [""]}, {"q": ["x" * 201]}, {"q": ["x"], "type": ["show"]}):
+            with self.subTest(query=bad), self.assertRaises(ValueError):
+                self.route("GET", "spotify-search", bad)
+
+    def test_recent_pages_back_with_the_cursor(self):
+        self.connect()
+        self.fake.on("GET", API + "/me/player/recently-played", answer(payload={"items": [{"track": T1, "played_at": "x"}], "cursors": {"before": "1700000000000"}}))
+        out = self.route("GET", "spotify-recent")
+        self.assertEqual((out["items"][0]["id"], out["before"]), ("t1", "1700000000000"))
+        self.route("GET", "spotify-recent", {"before": ["1700000000000"]})
+        self.assertIn("before=1700000000000", self.fake.to(API + "/me/player/recently-played")[-1].url)
+        with self.assertRaises(ValueError):
+            self.route("GET", "spotify-recent", {"before": ["soon"]})
+
+    def test_artist_and_queue(self):
+        self.connect()
+        self.fake.on("GET", API + "/artists/a1", answer(payload={"id": "a1", "name": "Ann", "genres": ["synth", "pop", "x", "y"], "images": []}))
+        self.fake.on("GET", API + "/artists/a1/albums", page([{"id": "al1", "name": "Al"}]))
+        out = self.route("GET", "spotify-artist", {"id": ["a1"]})
+        self.assertEqual((out["artist"]["genres"], out["items"][0]["uri"]), (["synth", "pop", "x"], "spotify:album:al1"))
+        self.assertIn("limit=10", self.fake.to(API + "/artists/a1/albums")[-1].url)
+        self.fake.on("GET", API + "/me/player/queue", answer(payload={"currently_playing": T1, "queue": [T1, None]}))
+        out = self.route("GET", "spotify-queue")
+        self.assertEqual((out["current"]["id"], len(out["items"])), ("t1", 1))
+        self.fake.on("POST", API + "/me/player/queue", answer(204))
+        self.route("POST", "spotify-queue-add", body={"uri": "spotify:track:t1"})
+        self.assertTrue(self.fake.to(API + "/me/player/queue")[-1].url.endswith("uri=spotify%3Atrack%3At1"))
+        for bad in ("spotify:album:x", "https://open.spotify.com/track/x", "", None):
+            with self.subTest(uri=bad), self.assertRaises(ValueError):
+                self.route("POST", "spotify-queue-add", body={"uri": bad})
+
+    def test_like_check_and_unlike(self):
+        self.connect()
+        self.fake.on("GET", API + "/me/tracks/contains", answer(payload=[True, False]))
+        self.assertEqual(self.route("GET", "spotify-liked-check", {"ids": ["t1,t2"]})["liked"], {"t1": True, "t2": False})
+        self.fake.on("PUT", API + "/me/tracks", answer(200))
+        self.fake.on("DELETE", API + "/me/tracks", answer(200))
+        self.route("POST", "spotify-like", body={"ids": ["t1"], "liked": True})
+        self.route("POST", "spotify-like", body={"ids": ["t1", "t2"], "liked": False})
+        self.assertEqual([(c.method, c.url) for c in self.fake.to(API + "/me/tracks?")][-2:],
+                         [("PUT", API + "/me/tracks?ids=t1"), ("DELETE", API + "/me/tracks?ids=t1%2Ct2")])
+        for body in ({"ids": [], "liked": True}, {"ids": ["t1"] * 51, "liked": True}, {"ids": ["a/b"], "liked": True}, {"ids": ["t1"], "liked": "yes"}):
+            with self.subTest(body=body), self.assertRaises(ValueError):
+                self.route("POST", "spotify-like", body=body)
+
+    def test_play_from_a_song_in_a_list(self):
+        self.connect()
+        self.fake.on("PUT", API + "/me/player/play", answer(204))
+        self.route("POST", "spotify-play", body={"context": "spotify:playlist:p1", "offset_uri": "spotify:track:t1", "device_id": "dev1"})
+        self.route("POST", "spotify-play", body={"uris": ["spotify:track:t1", "spotify:track:t2"], "offset_uri": "spotify:track:t2"})
+        self.route("POST", "spotify-play", body={"context": "spotify:artist:a1", "offset_uri": "spotify:track:t1"})
+        calls = self.fake.to(API + "/me/player/play")[-3:]
+        self.assertTrue(calls[0].url.endswith("?device_id=dev1"))
+        self.assertEqual([json.loads(c.body) for c in calls], [
+            {"context_uri": "spotify:playlist:p1", "offset": {"uri": "spotify:track:t1"}},
+            {"uris": ["spotify:track:t1", "spotify:track:t2"], "offset": {"uri": "spotify:track:t2"}},
+            {"context_uri": "spotify:artist:a1"}])
+        for body in ({}, {"context": "spotify:user:me:collection"}, {"uris": []}, {"uris": ["spotify:album:x"]},
+                     {"uris": ["spotify:track:t1"], "offset_uri": "spotify:track:t9"}, {"context": "spotify:album:a", "offset_uri": "x"}):
+            with self.subTest(body=body), self.assertRaises(ValueError):
+                self.route("POST", "spotify-play", body=body)
+
+    def test_the_art_cache_is_capped_by_bytes(self):
+        self.client.art_bytes = 0
+        saved = spotify.ART_BYTES
+        spotify.ART_BYTES = 25
+        try:
+            for n in range(4):
+                url = ART[:-1] + str(n)
+                self.fake.on("GET", url, (200, {"content-type": "image/png"}, b"x" * 10))
+                self.route("GET", "spotify-art", {"url": [url]})
+            self.assertEqual((len(self.client.art), self.client.art_bytes), (2, 20))
+        finally:
+            spotify.ART_BYTES = saved
 
 
 class CallbackTest(SpotifyBase):

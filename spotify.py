@@ -30,7 +30,11 @@ FEATURES = ["spotify"]
 AUTHORIZE_URL = "https://accounts.spotify.com/authorize"
 TOKEN_URL = "https://accounts.spotify.com/api/token"
 API = "https://api.spotify.com/v1"
-SCOPES = "user-read-playback-state user-modify-playback-state user-read-currently-playing playlist-read-private user-read-private"
+SCOPES = ("user-read-playback-state user-modify-playback-state user-read-currently-playing playlist-read-private user-read-private "
+          "user-library-read user-library-modify user-read-recently-played playlist-read-collaborative")
+# What the library asks for beyond the first sign-in. Someone who connected before these were
+# asked for gets a "reconnect" answer from the route that needs one, never a failure.
+LIBRARY_READ, LIBRARY_WRITE, RECENT = "user-library-read", "user-library-modify", "user-read-recently-played"
 SETTING = "SPOTIFY_CLIENT_ID"
 
 STATE_TTL = 600        # a sign-in link is good for ten minutes, once
@@ -40,7 +44,10 @@ EARLY_REFRESH = 60     # renew a little before Spotify's hour is up
 TIMEOUT = 10
 READ_MAX = 2 * 1024 * 1024
 ART_MAX = 512 * 1024
-ART_KEEP = 48
+ART_KEEP = 400                  # list thumbnails repeat a lot: keep many, but no more than
+ART_BYTES = 16 * 1024 * 1024    # this much in memory
+PAGE = 50                       # Spotify's largest page for library lists
+SMALL_PAGE = 10                 # search and artist albums: smaller pages, also the retry on a refused limit
 WAIT_MAX = 3600        # a Retry-After beyond this is treated as an hour
 
 # Album art lives on Spotify's image host under a hex id. Anything else is refused, so this
@@ -49,6 +56,10 @@ ART_RE = re.compile(r"https://i\.scdn\.co/image/[0-9a-f]{16,64}")
 ART_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 CLIENT_ID_RE = re.compile(r"[0-9A-Za-z]{16,64}")
 PLAYLIST_ID_RE = re.compile(r"[0-9A-Za-z]{1,64}")
+ID_RE = PLAYLIST_ID_RE  # Spotify ids are base62
+TRACK_URI_RE = re.compile(r"spotify:(?:track|episode):[0-9A-Za-z]{1,64}")
+CONTEXT_URI_RE = re.compile(r"spotify:(playlist|album|artist):[0-9A-Za-z]{1,64}")
+SEARCH_TYPES = ("track", "album", "artist", "playlist")
 DEVICE_ID_RE = re.compile(r"[0-9A-Za-z_-]{1,128}")
 REPEAT_MODES = ("off", "context", "track")
 DISALLOWS = ("pausing", "resuming", "seeking", "skipping_next", "skipping_prev", "toggling_repeat_context",
@@ -58,6 +69,8 @@ TEXT_MAX = 300
 PREMIUM = "Playback control needs Spotify Premium: play, pause, skip, seek, volume and devices are Premium only."
 NOT_CONNECTED = "Spotify is not connected. Press Connect in the Music panel."
 NO_DEVICE = "No active Spotify device. Open Spotify on a phone or computer, or pick a device in the list."
+NOT_SHARED = "Spotify does not share this playlist with apps. Its own editorial playlists stay inside the Spotify app."
+RECONNECT = "Spotify was connected before PixelDeck asked to read your library. Reconnect to unlock it."
 
 
 class SpotifyError(Exception):
@@ -148,13 +161,31 @@ def art_url(value):
 
 # ---------------------------------------------------------------- trimming
 
-def pick_art(images):
-    """The smallest picture at least 64 px wide: the page draws it 32 pixels across."""
+def pick_art(images, at_least=300):
+    """The smallest picture at least this wide. The player's sharpest look draws 128 pixels
+    across, so 300 covers it; a list thumbnail asks for 64."""
     good = [i for i in images or [] if isinstance(i, dict) and isinstance(i.get("url"), str) and ART_RE.fullmatch(i["url"])]
     if not good:
         return None
     good.sort(key=lambda i: _int(i.get("width")))
-    return next((i["url"] for i in good if _int(i.get("width")) >= 64), good[-1]["url"])
+    return next((i["url"] for i in good if _int(i.get("width")) >= at_least), good[-1]["url"])
+
+
+def _pictures(images):
+    return {"art": pick_art(images, 300), "thumb": pick_art(images, 64)}
+
+
+def _uri(value, pattern):
+    return value if isinstance(value, str) and pattern.fullmatch(value) else None
+
+
+def _ident(value):
+    return value if isinstance(value, str) and ID_RE.fullmatch(value) else None
+
+
+def _artists(raw):
+    people = [a for a in raw or [] if isinstance(a, dict)]
+    return [_text(a.get("name")) or "Unknown artist" for a in people][:6], [_ident(a.get("id")) for a in people][:6]
 
 
 def trim_device(raw):
@@ -170,21 +201,26 @@ def trim_device(raw):
     }
 
 
-def trim_item(raw):
+def trim_item(raw, album=None):
+    """A track or an episode. album stands in when the list is that album's own tracks, which
+    Spotify sends without the album (and so without its pictures)."""
     if not isinstance(raw, dict):
         return None
     if raw.get("type") == "episode":
         show = raw.get("show") if isinstance(raw.get("show"), dict) else {}
-        artists = [_text(show.get("publisher")) or _text(show.get("name"))]
-        album, images = _text(show.get("name")), raw.get("images") or show.get("images")
+        artists, artist_ids = [_text(show.get("publisher")) or _text(show.get("name")) or "Podcast"], [None]
+        album_raw, images = {"name": show.get("name"), "id": show.get("id")}, raw.get("images") or show.get("images")
     else:
-        artists = [_text(a.get("name")) for a in raw.get("artists") or [] if isinstance(a, dict)]
-        album_raw = raw.get("album") if isinstance(raw.get("album"), dict) else {}
-        album, images = _text(album_raw.get("name")), album_raw.get("images")
+        artists, artist_ids = _artists(raw.get("artists"))
+        album_raw = raw.get("album") if isinstance(raw.get("album"), dict) else album if isinstance(album, dict) else {}
+        images = album_raw.get("images")
     return {
-        "id": _text(raw.get("id")), "kind": "episode" if raw.get("type") == "episode" else "track",
-        "name": _text(raw.get("name")) or "Untitled", "artists": [a for a in artists if a][:6],
-        "album": album, "duration_ms": max(0, _int(raw.get("duration_ms"))), "art": pick_art(images),
+        "id": _ident(raw.get("id")), "uri": _uri(raw.get("uri"), TRACK_URI_RE),
+        "kind": "episode" if raw.get("type") == "episode" else "track",
+        "name": _text(raw.get("name")) or "Untitled", "artists": artists, "artist_ids": artist_ids,
+        "album": _text(album_raw.get("name")), "album_id": _ident(album_raw.get("id")),
+        "number": _int(raw.get("track_number"), None), "duration_ms": max(0, _int(raw.get("duration_ms"))),
+        "playable": raw.get("is_playable") is not False and not raw.get("is_local"), **_pictures(images),
     }
 
 
@@ -208,12 +244,31 @@ def trim_player(raw):
 
 
 def trim_playlist(raw):
-    if not isinstance(raw, dict) or not isinstance(raw.get("id"), str) or not PLAYLIST_ID_RE.fullmatch(raw["id"]):
+    if not isinstance(raw, dict) or not _ident(raw.get("id")):
         return None
     owner = raw.get("owner") if isinstance(raw.get("owner"), dict) else {}
     tracks = raw.get("tracks") if isinstance(raw.get("tracks"), dict) else raw.get("items") if isinstance(raw.get("items"), dict) else {}
-    return {"id": raw["id"], "name": _text(raw.get("name")) or "Untitled", "owner": _text(owner.get("display_name")),
-            "tracks": _int(tracks.get("total"), None)}
+    return {"id": raw["id"], "uri": f"spotify:playlist:{raw['id']}", "name": _text(raw.get("name")) or "Untitled",
+            "owner": _text(owner.get("display_name")), "by_spotify": owner.get("id") == "spotify",
+            "tracks": _int(tracks.get("total"), None), **_pictures(raw.get("images"))}
+
+
+def trim_album(raw):
+    if not isinstance(raw, dict) or not _ident(raw.get("id")):
+        return None
+    artists, artist_ids = _artists(raw.get("artists"))
+    tracks = raw.get("tracks") if isinstance(raw.get("tracks"), dict) else {}
+    return {"id": raw["id"], "uri": f"spotify:album:{raw['id']}", "name": _text(raw.get("name")) or "Untitled",
+            "artists": artists, "artist_ids": artist_ids, "year": (_text(raw.get("release_date")) or "")[:4] or None,
+            "tracks": _int(raw.get("total_tracks"), _int(tracks.get("total"), None)), **_pictures(raw.get("images"))}
+
+
+def trim_artist(raw):
+    if not isinstance(raw, dict) or not _ident(raw.get("id")):
+        return None
+    genres = [_text(g) for g in raw.get("genres") or [] if _text(g)][:3]
+    return {"id": raw["id"], "uri": f"spotify:artist:{raw['id']}", "name": _text(raw.get("name")) or "Unknown artist",
+            "genres": genres, **_pictures(raw.get("images"))}
 
 
 # ---------------------------------------------------------------- the client
@@ -233,7 +288,9 @@ class Client:
         self.profile_at = 0
         self.not_before = 0            # Spotify asked for a pause (429) until then
         self.art = OrderedDict()
+        self.art_bytes = 0
         self.art_lock = threading.Lock()
+        self.items_path = None         # "items" or "tracks": which name this account's API answers for a playlist's songs
 
     # ---- settings and the token file ---------------------------------
 
@@ -256,6 +313,11 @@ class Client:
 
     def connected(self):
         return self._load() is not None
+
+    def granted(self):
+        """The scopes Spotify granted at sign-in (or the last renewal that named them)."""
+        tok = self._load() or {}
+        return set(tok.get("scope", "").split()) if isinstance(tok.get("scope"), str) else set()
 
     def forget(self):
         with self.lock:
@@ -370,7 +432,13 @@ class Client:
 
     def _answer(self, method, path, status, headers, raw):
         if 200 <= status < 300:
-            return None if status == 204 or not (raw or b"").strip() else (_json(raw) or None)
+            if status == 204 or not (raw or b"").strip():
+                return None
+            try:
+                value = json.loads(raw)
+            except ValueError:
+                return None
+            return value if isinstance(value, (dict, list)) else None  # /contains answers with a list
         error = _json(raw).get("error")
         error = error if isinstance(error, dict) else {"message": error} if isinstance(error, str) else {}
         message, reason = _text(error.get("message")) or "", error.get("reason")
@@ -420,9 +488,11 @@ class Client:
         if ctype not in ART_TYPES or not raw or len(raw) > ART_MAX:
             raise SpotifyError(502, "Spotify's image server sent something that is not a small picture.")
         with self.art_lock:
-            self.art[url] = (raw, ctype)
-            while len(self.art) > ART_KEEP:
-                self.art.popitem(last=False)
+            if url not in self.art:
+                self.art[url] = (raw, ctype)
+                self.art_bytes += len(raw)
+            while self.art and (len(self.art) > ART_KEEP or self.art_bytes > ART_BYTES):
+                self.art_bytes -= len(self.art.popitem(last=False)[1][0])
         return raw, ctype
 
 
@@ -442,6 +512,7 @@ def _status(port):
     if not client.connected():
         return out
     out["connected"] = True
+    out["scopes_missing"] = sorted(set(SCOPES.split()) - client.granted())
     try:
         out["user"] = client.me()
     except NotConnected:
@@ -527,10 +598,231 @@ def _transfer(body):
     return {"ok": True}
 
 
-def _playlists():
-    raw = CLIENT.call("GET", "/me/playlists", {"limit": 30}) or {}
-    lists = [trim_playlist(p) for p in raw.get("items") or []]
-    return {"playlists": [p for p in lists if p]}
+def _arg(source, key):
+    value = source.get(key)
+    return value[0] if isinstance(value, list) and value else value
+
+
+def _need_id(source, key="id"):
+    ident = _ident(_arg(source, key))
+    if not ident:
+        raise ValueError(f"{key} is not a Spotify id")
+    return ident
+
+
+def _offset(query):
+    raw = _arg(query, "offset") or "0"
+    if not isinstance(raw, str) or not raw.isdigit() or int(raw) > 100000:
+        raise ValueError("offset must be a whole number")
+    return int(raw)
+
+
+def _locked(scope):
+    """The answer for a list this sign-in may not read: the page offers Reconnect instead of an error."""
+    return {"locked": True, "scope": scope, "message": RECONNECT, "items": [], "next": None, "total": 0}
+
+
+def _gate(scope):
+    if not CLIENT.connected():
+        raise NotConnected(NOT_CONNECTED)
+    return None if scope in CLIENT.granted() else _locked(scope)
+
+
+def _page(path, params, offset, limit=PAGE):
+    """One page of a Spotify list, and where the next one starts (None at the end)."""
+    try:
+        raw = CLIENT.call("GET", path, {**params, "limit": limit, "offset": offset}) or {}
+    except SpotifyError as exc:
+        if exc.status == 400 and limit > SMALL_PAGE:  # a page size this app may not ask for: ask for less
+            return _page(path, params, offset, SMALL_PAGE)
+        raise
+    items = raw.get("items") if isinstance(raw.get("items"), list) else []
+    return items, (offset + len(items) if raw.get("next") and items else None), _int(raw.get("total"), None)
+
+
+def _listing(items, trim, nxt, total, **more):
+    trimmed = [trim(i) for i in items]
+    return {"items": [t for t in trimmed if t], "next": nxt, "total": total, **more}
+
+
+def _entry(raw):
+    """A saved or playlist entry wraps its song as "track" (or "item" in newer answers)."""
+    return trim_item(raw.get("item") or raw.get("track")) if isinstance(raw, dict) else None
+
+
+def _not_shared(call):
+    try:
+        return call()
+    except SpotifyError as exc:
+        if exc.status == 404:
+            raise SpotifyError(404, NOT_SHARED) from None
+        raise
+
+
+def _playlists(query):
+    items, nxt, total = _page("/me/playlists", {}, _offset(query))
+    return _listing(items, trim_playlist, nxt, total)
+
+
+def _playlist_tracks(query):
+    ident, offset = _need_id(query), _offset(query)
+    head = None
+    if offset == 0:
+        meta = _not_shared(lambda: CLIENT.call("GET", f"/playlists/{ident}", {"fields": "id,name,owner(id,display_name),images"}))
+        head = trim_playlist(meta)
+    # A playlist's songs answer as /items on newer API versions and /tracks on older ones:
+    # try the one that worked last, and remember the other if it was the right one.
+    paths = [CLIENT.items_path] if CLIENT.items_path else ["items", "tracks"]
+    for i, name in enumerate(paths):
+        try:
+            items, nxt, total = _page(f"/playlists/{ident}/{name}", {}, offset)
+            CLIENT.items_path = name
+            break
+        except SpotifyError as exc:
+            if exc.status != 404 or i == len(paths) - 1:
+                raise SpotifyError(404, NOT_SHARED) if exc.status == 404 else exc from None
+    return _listing(items, _entry, nxt, total, playlist=head)
+
+
+def _liked(query):
+    locked = _gate(LIBRARY_READ)
+    if locked:
+        return locked
+    items, nxt, total = _page("/me/tracks", {}, _offset(query))
+    return _listing(items, _entry, nxt, total)
+
+
+def _albums(query):
+    locked = _gate(LIBRARY_READ)
+    if locked:
+        return locked
+    items, nxt, total = _page("/me/albums", {}, _offset(query))
+    return _listing(items, lambda i: trim_album(i.get("album")) if isinstance(i, dict) else None, nxt, total)
+
+
+def _album(query):
+    ident, offset = _need_id(query), _offset(query)
+    raw = CLIENT.call("GET", f"/albums/{ident}") or {}
+    head = trim_album(raw)
+    album = {"id": raw.get("id"), "name": raw.get("name"), "images": raw.get("images")}
+    if offset == 0 and isinstance(raw.get("tracks"), dict):
+        page = raw["tracks"]
+        items = page.get("items") if isinstance(page.get("items"), list) else []
+        nxt, total = (len(items) if page.get("next") and items else None), _int(page.get("total"), None)
+    else:
+        items, nxt, total = _page(f"/albums/{ident}/tracks", {}, offset)
+    return _listing(items, lambda t: trim_item(t, album), nxt, total, album=head)
+
+
+def _recent(query):
+    locked = _gate(RECENT)
+    if locked:
+        return locked
+    before = _arg(query, "before")
+    params = {"limit": PAGE}
+    if before:
+        if not isinstance(before, str) or not before.isdigit():
+            raise ValueError("before must be a time in milliseconds")
+        params["before"] = before
+    raw = CLIENT.call("GET", "/me/player/recently-played", params) or {}
+    items = raw.get("items") if isinstance(raw.get("items"), list) else []
+    cursor = (raw.get("cursors") or {}).get("before") if isinstance(raw.get("cursors"), dict) else None
+    out = _listing(items, _entry, None, None)
+    out["before"] = str(cursor) if cursor and items and str(cursor).isdigit() else None
+    return out
+
+
+def _search(query):
+    q = (_arg(query, "q") or "").strip()
+    if not q or len(q) > 200:
+        raise ValueError("search for 1 to 200 characters")
+    kind = _arg(query, "type") or "all"
+    if kind not in ("all", *SEARCH_TYPES):
+        raise ValueError("type takes all, track, album, artist or playlist")
+    offset = _offset(query) if kind != "all" else 0
+    params = {"q": q, "type": ",".join(SEARCH_TYPES) if kind == "all" else kind, "limit": SMALL_PAGE, "offset": offset}
+    raw = CLIENT.call("GET", "/search", params) or {}
+    trims = {"track": trim_item, "album": trim_album, "artist": trim_artist, "playlist": trim_playlist}
+    out = {}
+    for name in SEARCH_TYPES if kind == "all" else (kind,):
+        page = raw.get(f"{name}s") if isinstance(raw.get(f"{name}s"), dict) else {}
+        items = [i for i in page.get("items") or [] if i]  # Spotify leaves holes (null) in some result pages
+        nxt = offset + len(page.get("items") or []) if page.get("next") and items else None
+        out[f"{name}s"] = _listing(items, trims[name], nxt, _int(page.get("total"), None))
+    return out
+
+
+def _artist(query):
+    ident, offset = _need_id(query), _offset(query)
+    head = trim_artist(CLIENT.call("GET", f"/artists/{ident}")) if offset == 0 else None
+    items, nxt, total = _page(f"/artists/{ident}/albums", {"include_groups": "album,single"}, offset, SMALL_PAGE)
+    return _listing(items, trim_album, nxt, total, artist=head)
+
+
+def _queue():
+    raw = CLIENT.call("GET", "/me/player/queue") or {}
+    items = [trim_item(i) for i in raw.get("queue") or []]
+    return {"current": trim_item(raw.get("currently_playing")), "items": [i for i in items if i][:50]}
+
+
+def _queue_add(body):
+    uri = _uri(body.get("uri"), TRACK_URI_RE)
+    if not uri:
+        raise ValueError("uri is not a Spotify song or episode")
+    CLIENT.call("POST", "/me/player/queue", {**_device_params(body), "uri": uri})
+    return {"ok": True}
+
+
+def _ids(value, most=50):
+    ids = value.split(",") if isinstance(value, str) else value
+    if not isinstance(ids, list) or not 1 <= len(ids) <= most or not all(_ident(i) for i in ids):
+        raise ValueError(f"ids takes 1 to {most} Spotify ids")
+    return ids
+
+
+def _liked_check(query):
+    locked = _gate(LIBRARY_READ)
+    if locked:
+        return locked
+    ids = _ids(_arg(query, "ids"))
+    raw = CLIENT.call("GET", "/me/tracks/contains", {"ids": ",".join(ids)})
+    answers = raw if isinstance(raw, list) else []
+    return {"liked": {i: answers[n] is True for n, i in enumerate(ids) if n < len(answers)}}
+
+
+def _like(body):
+    locked = _gate(LIBRARY_WRITE)
+    if locked:
+        return locked
+    ids, liked = _ids(body.get("ids")), body.get("liked")
+    if not isinstance(liked, bool):
+        raise ValueError("liked takes true or false")
+    CLIENT.call("PUT" if liked else "DELETE", "/me/tracks", {"ids": ",".join(ids)})
+    return {"ok": True, "liked": liked, "ids": ids}
+
+
+def _play(body):
+    """Play a playlist, album or artist (from a song in it), or a list of songs from one of them."""
+    payload = {}
+    context, uris, start = body.get("context"), body.get("uris"), body.get("offset_uri")
+    if context is not None:
+        match = CONTEXT_URI_RE.fullmatch(context) if isinstance(context, str) else None
+        if not match:
+            raise ValueError("context is not a Spotify playlist, album or artist")
+        payload["context_uri"] = context
+    elif uris is not None:
+        if not isinstance(uris, list) or not 1 <= len(uris) <= 100 or not all(_uri(u, TRACK_URI_RE) for u in uris):
+            raise ValueError("uris takes 1 to 100 Spotify songs")
+        payload["uris"] = uris
+    else:
+        raise ValueError("play needs a context or uris")
+    if start is not None:
+        if not _uri(start, TRACK_URI_RE) or (uris is not None and start not in uris):
+            raise ValueError("offset_uri is not a song in what plays")
+        if not (context and match.group(1) == "artist"):  # an artist plays from its top: Spotify takes no offset there
+            payload["offset"] = {"uri": start}
+    CLIENT.call("PUT", "/me/player/play", _device_params(body), body=payload)
+    return {"ok": True}
 
 
 def _play_playlist(body):
@@ -539,6 +831,19 @@ def _play_playlist(body):
         raise ValueError("id is not a Spotify playlist id")
     CLIENT.call("PUT", "/me/player/play", _device_params(body), body={"context_uri": f"spotify:playlist:{ident}"})
     return {"ok": True}
+
+
+GETS = {
+    "spotify-now": lambda q: _now(), "spotify-devices": lambda q: _devices(), "spotify-playlists": _playlists,
+    "spotify-playlist": _playlist_tracks, "spotify-liked": _liked, "spotify-liked-check": _liked_check,
+    "spotify-albums": _albums, "spotify-album": _album, "spotify-recent": _recent, "spotify-search": _search,
+    "spotify-artist": _artist, "spotify-queue": lambda q: _queue(),
+    "spotify-art": lambda q: CLIENT.picture(_arg(q, "url") or ""),
+}
+POSTS = {
+    "spotify-control": _control, "spotify-transfer": _transfer, "spotify-playlist-play": _play_playlist,
+    "spotify-play": _play, "spotify-queue-add": _queue_add, "spotify-like": _like,
+}
 
 
 def route(handler, engine, method, name, query, body):
@@ -556,20 +861,10 @@ def route(handler, engine, method, name, query, body):
             CLIENT.pending.clear()
         CLIENT.forget()
         return _status(handler.port)
-    if method == "GET" and name == "spotify-now":
-        return _now()
-    if method == "POST" and name == "spotify-control":
-        return _control(body)
-    if method == "GET" and name == "spotify-devices":
-        return _devices()
-    if method == "POST" and name == "spotify-transfer":
-        return _transfer(body)
-    if method == "GET" and name == "spotify-playlists":
-        return _playlists()
-    if method == "POST" and name == "spotify-playlist-play":
-        return _play_playlist(body)
-    if method == "GET" and name == "spotify-art":
-        return CLIENT.picture((query.get("url") or [""])[0])
+    if method == "GET" and name in GETS:
+        return GETS[name](query)
+    if method == "POST" and name in POSTS:
+        return POSTS[name](body)
     return None
 
 
