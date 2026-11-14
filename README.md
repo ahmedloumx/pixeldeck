@@ -40,6 +40,8 @@ Full documentation, with the architecture, security model and measured performan
   never notify you.
 - **Status bar.** Bitbucket API calls used this hour, when your pull requests were read and the
   next read, the connection, the bell, settings and the guide.
+- **Themes.** Night (the default) or an optional Retro grey, which brings its own mascots: the same
+  bot in orange and the slime in purple. Terminals stay dark in both.
 - **Settings.** What PixelDeck is connected to (Bitbucket, Jira, the Claude Code CLI, git and
   terminals), what notifies you, and your look: accent colour, number font, motion, mascots.
 - **Team and insights.** Your teammates' queues, review load and merge history. Insights pick a
