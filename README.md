@@ -31,6 +31,13 @@ Full documentation, with the architecture, security model and measured performan
   prepares a worktree on the branch, briefs Claude with the open threads (quoted as data, never as
   instructions) and starts it in the built-in terminal. The brief comes from templates you can
   replace with your own.
+- **The pull request list.** The pull request panel has its own list on the left: what needs you,
+  what waits for your review, yours and the ones you opened lately, with a search. Pick and
+  switch there without the queue; the list folds to a strip when the panel needs the room.
+- **Pick up where you left off.** PixelDeck keeps the open terminals every few seconds and when it
+  stops. At the next start a popup offers them back: shells in their folders with their last
+  screen, Claude Code resumed by its session id. The layout, theme and terminal names are kept
+  on the server too, so they come back even when the window was closed abruptly.
 - **Terminal panel.** Real shells in tabs, drawn with WebGL for smooth scrolling. Tabs are named
   after what runs in them, can be renamed and dragged into any order, and show a small loader
   while something is working in them. Drop files on a terminal to paste their paths. The shells
