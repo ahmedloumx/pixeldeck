@@ -14,6 +14,9 @@ import json
 import os
 import re
 import secrets
+import shutil
+import subprocess
+import sys
 import threading
 import time
 import urllib.error
@@ -519,7 +522,7 @@ def _status(port):
     out = {
         "configured": bool(client_id), "client_id_ok": bool(CLIENT_ID_RE.fullmatch(client_id)),
         "connected": False, "redirect_uri": redirect_uri(port), "setting": SETTING,
-        "env_file": str(config.env_path()), "user": None, "error": None,
+        "env_file": str(config.env_path()), "user": None, "error": None, "can_launch": _launcher() is not None,
     }
     if not client.connected():
         return out
@@ -829,7 +832,7 @@ def _queue_add(body):
     uri = _uri(body.get("uri"), TRACK_URI_RE)
     if not uri:
         raise ValueError("uri is not a Spotify song or episode")
-    CLIENT.call("POST", "/me/player/queue", {**_device_params(body), "uri": uri})
+    _on_a_device(lambda p: CLIENT.call("POST", "/me/player/queue", {**p, "uri": uri}), _device_params(body))
     return {"ok": True}
 
 
@@ -893,6 +896,35 @@ def _play_playlist(body):
     return {"ok": True}
 
 
+def _launcher():
+    """How to start the Spotify app on this computer: the Web API only drives a running Spotify
+    (desktop or phone), so with none open there is nothing to play on. None when not installed."""
+    if sys.platform == "darwin":
+        return ["open", "-a", "Spotify"] if Path("/Applications/Spotify.app").exists() else None
+    if sys.platform == "win32":
+        exe = Path(os.environ.get("APPDATA", "")) / "Spotify" / "Spotify.exe"
+        return [str(exe)] if exe.exists() else None
+    found = shutil.which("spotify")
+    if found:
+        return [found]
+    if shutil.which("flatpak"):
+        try:
+            if subprocess.run(["flatpak", "info", "com.spotify.Client"], capture_output=True, timeout=5).returncode == 0:
+                return ["flatpak", "run", "com.spotify.Client"]
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return None
+
+
+def _launch(_body):
+    argv = _launcher()
+    if not argv:
+        raise ValueError("The Spotify app is not installed on this computer. Open Spotify on your phone, or install it here.")
+    flags = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if sys.platform == "win32" else {"start_new_session": True}
+    subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **flags)
+    return {"launched": True}
+
+
 GETS = {
     "spotify-now": lambda q: _now(), "spotify-devices": lambda q: _devices(), "spotify-playlists": _playlists,
     "spotify-playlist": _playlist_tracks, "spotify-liked": _liked, "spotify-liked-check": _liked_check,
@@ -903,6 +935,7 @@ GETS = {
 POSTS = {
     "spotify-control": _control, "spotify-transfer": _transfer, "spotify-playlist-play": _play_playlist,
     "spotify-play": _play, "spotify-queue-add": _queue_add, "spotify-like": _like, "spotify-refresh": lambda b: _refresh(),
+    "spotify-launch": _launch,
 }
 
 

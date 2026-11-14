@@ -547,6 +547,15 @@ class DeviceTest(SpotifyBase):
         self.route("POST", "spotify-control", body={"action": "previous"})
         self.assertTrue(self.fake.to(API + "/me/player/previous")[-1].url.endswith("device_id=phone1"))
 
+    def test_queueing_wakes_a_device_too(self):
+        self.fake.on("GET", API + "/me/player/devices", answer(payload={"devices": [DESK]}))
+        self.fake.on("POST", API + "/me/player/queue", NO_ACTIVE, answer(204))
+        self.assertEqual(self.route("POST", "spotify-queue-add", body={"uri": "spotify:track:t1"}), {"ok": True})
+        retry = self.fake.to(API + "/me/player/queue")[-1]
+        self.assertIn("device_id=desk1", retry.url)
+        self.assertIn("uri=spotify%3Atrack%3At1", retry.url)
+        self.assertEqual(self.transfers(), [{"device_ids": ["desk1"], "play": False}])
+
     def test_no_device_at_all_says_how_to_get_one(self):
         self.fake.on("GET", API + "/me/player/devices", answer(payload={"devices": [LOCKED_TV]}))
         self.fake.on("PUT", API + "/me/player/play", NO_ACTIVE)
