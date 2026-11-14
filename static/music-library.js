@@ -133,8 +133,8 @@ const MusicLibrary = (() => {
       <p>${btn(`data-lib="play-context" data-uri="${esc(h.uri || `spotify:${kind}:${h.id}`)}"`, `${core.glyph("play", 2)}<span>Play</span>`, "btn btn--primary ml-play-all")}</p></div></div>`;
   }
   function lockHtml(locked) {
-    return `<div class="ml-lock" role="note">${core.glyph("lock", 4)}<div><h4>Reconnect to unlock the library</h4><p>${esc(locked.message)}</p>
-      <p><button class="btn btn--primary" type="button" data-music="connect">Reconnect Spotify</button></p></div></div>`;
+    return `<div class="ml-lock" role="note">${core.glyph("lock", 4)}<div><h4>One more sign-in unlocks the library</h4><p>${esc(locked.message)}</p>
+      <p><button class="btn btn--primary" type="button" data-music="connect">Reconnect once</button></p></div></div>`;
   }
   const empty = (text) => `<p class="ml-empty">${esc(text)}</p>`;
 
@@ -294,6 +294,7 @@ const MusicLibrary = (() => {
         paint() { const id = core.player?.item?.id ?? null; if (id !== seen) { seen = id; markCurrent(); if (top().kind === "queue") load(top()); } else if (body) body.classList.toggle("is-playing", core.playing()); },
         likes: paintLikes,
         queued() { cache.delete("queue"); if (top().kind === "queue") render(); },
+        refreshed() { cache.delete(keyOf(top())); if (root?.isConnected) render(); },
         mode(m, was) { if (m !== was) { cache.clear(); stack = [{ kind: "playlists" }]; if (input) input.value = ""; if (root?.isConnected) render(); } },
         relook() { if (body) for (const cv of body.querySelectorAll("canvas[data-thumb]")) { cv.dataset.art = ""; draw(cv); } },
       });

@@ -67,6 +67,7 @@ const Music = (() => {
     close: ["##....##", "###..###", ".######.", "..####..", "..####..", ".######.", "###..###", "##....##"],
     lock: ["..####..", ".##..##.", ".#....#.", ".#....#.", "########", "###..###", "###..###", "########"],
     back: ["...##", "..##.", ".##..", "##...", ".##..", "..##.", "...##"],
+    refresh: ["..####.#.", ".#....##.", "#....###.", "#........", "#.......#", "........#", ".###....#", ".##....#.", ".#.####.."],
   };
   GLYPH.prev = GLYPH.next.map((r) => [...r].reverse().join(""));
   const glyph = (name, px = 3) => {
@@ -324,6 +325,10 @@ const Music = (() => {
       <button class="btn btn--quiet mu-copy-btn" type="button" data-music="copy" data-copy="${esc(signIn.url)}">Copy the sign-in link</button></div>`;
   }
 
+  // The crew squashes and stretches by changing size, not by a transform, so the browser draws
+  // the pixels again at each step instead of blurring a scaled picture.
+  const crew = (name) => Sprites.svg(name, { scale: 4 }).replace("<svg ", '<svg preserveAspectRatio="none" ');
+
   function deckHtml() {
     const eqLevels = [37.5, 25, 50, 12.5, 37.5, 62.5, 25, 50, 37.5, 62.5, 50, 75, 62.5, 75];
     const eq = Array.from({ length: EQ_BARS }, (_, i) =>
@@ -334,10 +339,11 @@ const Music = (() => {
     const mq = (ref, cls) => `<div class="mu-mq ${cls}" data-ref="${ref}"><span class="mu-mq-track"><span class="mu-mq-text"></span><span class="mu-mq-text" aria-hidden="true"></span></span></div>`;
     return `<div class="mu" data-view="deck">
       <div class="mu-top"><span class="mu-kicker num8">MUSIC</span><span class="mu-from" data-ref="from"></span>
-        <span class="mu-top-tools"><button class="btn btn--quiet mu-tool" type="button" data-music="popout" data-tip="Float a mini player over the layout">${glyph("pop", 2)}<span>Pop out</span></button></span></div>
+        <span class="mu-top-tools"><button class="btn btn--quiet mu-tool" type="button" data-music="refresh" data-tip="Ask Spotify again now: what plays, the devices, the sign-in">${glyph("refresh", 2)}<span>Refresh</span></button>
+          <button class="btn btn--quiet mu-tool" type="button" data-music="popout" data-tip="Float a mini player over the layout">${glyph("pop", 2)}<span>Pop out</span></button></span></div>
       <div class="mu-ribbon" data-ref="ribbon" hidden></div>
       <div class="mu-stage">
-        <div class="mu-crew" aria-hidden="true"><span class="mu-slime">${Sprites.svg("buddy", { scale: 4 })}</span><span class="mu-bot">${Sprites.svg("bot", { scale: 4 })}</span></div>
+        <div class="mu-crew" aria-hidden="true"><span class="mu-slime">${crew("buddy")}</span><span class="mu-bot">${crew("bot")}</span></div>
         <div class="mu-box">
           <div class="mu-handle" aria-hidden="true"></div>
           <div class="mu-brand" aria-hidden="true"><span class="mu-power" data-ref="power"></span><b>PIXELDECK</b><small>PD-808 STEREO CASSETTE</small></div>
@@ -433,8 +439,9 @@ const Music = (() => {
         <span class="mu-ribbon-tools">${status?.connected ? "" : status?.configured && status?.client_id_ok ? '<button class="btn btn--primary" type="button" data-music="connect">Connect Spotify</button>' : '<button class="btn" type="button" data-music="leave">Set up Spotify</button>'}
         <button class="btn btn--quiet" type="button" data-music="leave">${status?.connected ? "Back to my Spotify" : "Leave the preview"}</button></span>`;
     } else if (libraryLocked()) {
-      html = `<span class="mu-ribbon-tag num8">LIBRARY</span><span>Reconnect Spotify to unlock Liked Songs, saved albums and Recently played: they need permissions PixelDeck did not ask for when you first connected.</span>
-        <span class="mu-ribbon-tools"><button class="btn btn--primary" type="button" data-music="connect">Reconnect Spotify</button></span>`;
+      html = `<span class="mu-ribbon-tag num8">ONE TIME</span><span>Spotify asks once more because PixelDeck now reads your library; after this it stays signed in.
+        Liked Songs, saved albums and Recently played open after it.</span>
+        <span class="mu-ribbon-tools"><button class="btn btn--primary" type="button" data-music="connect">Reconnect once</button></span>`;
     } else if (status?.user && !status.user.premium) {
       html = `<span class="mu-ribbon-tag num8">FREE</span><span>Spotify Free: the deck shows what plays. Play, pause, skip, seek and volume need Premium.</span>`;
     }
@@ -457,6 +464,7 @@ const Music = (() => {
 
   function paint() {
     paintMini();
+    document.body.classList.toggle("is-music-playing", (mode === "live" || mode === "demo") && playing());
     const item = player?.item;
     const key = item?.id ?? item?.name ?? null;
     if (key !== trackSeen) { trackSeen = key; for (const fn of trackListeners) fn(item); if (item?.id) checkLikes([item.id]); }
@@ -578,7 +586,7 @@ const Music = (() => {
       player = null; devices = []; devicesAt = 0; pollError = ""; likes.clear(); trackSeen = undefined;
       if (mode === "demo") MusicDemo.source.reset();
     }
-    if (!deck) { clearTimeout(pollTimer); player = null; }
+    if (!deck) { clearTimeout(pollTimer); player = null; document.body.classList.remove("is-music-playing"); }
     if (mode !== was || !deck) build(); else paintAll();
     paintMini();
     for (const v of views) v.mode?.(mode, was);
@@ -655,6 +663,34 @@ const Music = (() => {
     player = next;
     readAt = performance.now();
     endAsked = false;
+  }
+
+  /** Ask again at once: what plays, the devices, a sign-in near its end (the server renews it). */
+  async function refreshNow(button) {
+    if (mode !== "live" && mode !== "demo") return refreshStatus();
+    const keys = [...document.querySelectorAll("[data-music='refresh']")];
+    keys.forEach((k) => k.classList.add("is-busy"));
+    try {
+      if (mode === "demo") { holdUntil = 0; await poll(); loadDevices(true); }
+      else {
+        const out = await api("spotify-refresh", { method: "POST", body: {} });
+        if (out.now?.connected === false) { await refreshStatus(); return; }
+        holdUntil = 0;
+        accept(out.now);
+        devices = out.devices || [];
+        devicesAt = Date.now();
+        pollError = "";
+        paint();
+        paintDevices();
+        refreshStatus();
+        schedule(cadence());
+      }
+      for (const v of views) v.refreshed?.();
+    } catch (err) {
+      if (err.message !== "reloading") toast("Could not refresh the music.", err.message, true);
+    } finally {
+      setTimeout(() => keys.forEach((k) => k.classList.remove("is-busy")), 400);
+    }
   }
 
   function loadDevices(force = false) {
@@ -916,6 +952,7 @@ const Music = (() => {
       return openPanel();
     }
     if (what === "popout") { if (typeof MusicFloat !== "undefined") MusicFloat.popOut(); return; }
+    if (what === "refresh") return refreshNow(t);
     if (what === "connect") return connect(t);
     if (what === "disconnect") return disconnect(t);
     if (what === "preview") return startDemo();
