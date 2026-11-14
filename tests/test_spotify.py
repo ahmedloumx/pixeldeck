@@ -349,7 +349,7 @@ class LibraryTest(SpotifyBase):
     def test_an_old_sign_in_gets_reconnect_answers_not_errors(self):
         self.connect(scope=OLD_SCOPES)
         status = self.route("GET", "spotify-status")
-        self.assertEqual(status["scopes_missing"], sorted(["user-library-read", "user-library-modify", "user-read-recently-played", "playlist-read-collaborative"]))
+        self.assertEqual(status["scopes_missing"], sorted(set(spotify.SCOPES.split()) - set(OLD_SCOPES.split())))
         sent = len(self.fake.calls)
         for method, name, query, body, scope in (("GET", "spotify-liked", {}, None, "user-library-read"),
                                                  ("GET", "spotify-albums", {}, None, "user-library-read"),
@@ -359,7 +359,7 @@ class LibraryTest(SpotifyBase):
             with self.subTest(name=name):
                 out = self.route(method, name, query, body)
                 self.assertEqual((out["locked"], out["scope"], out["items"]), (True, scope, []))
-                self.assertIn("Reconnect", out["message"])
+                self.assertEqual(out["message"], spotify.RECONNECT)
         self.assertEqual(len(self.fake.calls), sent, "a locked list never reaches Spotify")
         self.assertEqual(set(parse_qs(urlsplit(self.login()[1]).query)["scope"][0].split()), set(spotify.SCOPES.split()))
 
@@ -501,6 +501,104 @@ class LibraryTest(SpotifyBase):
             self.assertEqual((len(self.client.art), self.client.art_bytes), (2, 20))
         finally:
             spotify.ART_BYTES = saved
+
+
+NO_ACTIVE = answer(404, {"error": {"status": 404, "message": "Player command failed: No active device found", "reason": "NO_ACTIVE_DEVICE"}})
+PHONE = {"id": "phone1", "name": "Phone", "type": "Smartphone", "is_active": False, "is_restricted": False}
+DESK = {"id": "desk1", "name": "Desk", "type": "Computer", "is_active": False, "is_restricted": False}
+LOCKED_TV = {"id": "tv1", "name": "TV", "type": "TV", "is_active": True, "is_restricted": True}
+
+
+class DeviceTest(SpotifyBase):
+    def setUp(self):
+        super().setUp()
+        self.connect()
+        self.fake.on("PUT", API + "/me/player", answer(204))
+
+    def plays(self):
+        return [c.url for c in self.fake.to(API + "/me/player/play")]
+
+    def transfers(self):
+        return [json.loads(c.body) for c in self.fake.calls if c.method == "PUT" and c.url == API + "/me/player"]
+
+    def test_no_active_device_wakes_a_computer_and_plays_once_more(self):
+        self.fake.on("GET", API + "/me/player/devices", answer(payload={"devices": [LOCKED_TV, PHONE, DESK]}))
+        self.fake.on("PUT", API + "/me/player/play", NO_ACTIVE, answer(204))
+        self.assertEqual(self.route("POST", "spotify-control", body={"action": "play"}), {"ok": True})
+        self.assertEqual(self.plays(), [API + "/me/player/play", API + "/me/player/play?device_id=desk1"])
+        self.assertEqual(self.transfers(), [{"device_ids": ["desk1"], "play": False}], "a restricted device is never picked")
+
+    def test_the_device_last_seen_playing_comes_first(self):
+        self.fake.on("GET", API + "/me/player?", answer(payload={"is_playing": False, "device": PHONE, "item": T1}))
+        self.route("GET", "spotify-now")
+        self.fake.on("GET", API + "/me/player/devices", answer(payload={"devices": [DESK, PHONE]}))
+        self.fake.on("POST", API + "/me/player/next", NO_ACTIVE, answer(204))
+        self.route("POST", "spotify-control", body={"action": "next"})
+        self.assertEqual(self.transfers()[-1]["device_ids"], ["phone1"])
+        self.assertTrue(self.fake.to(API + "/me/player/next")[-1].url.endswith("device_id=phone1"))
+
+    def test_playing_a_list_and_previous_fall_back_too(self):
+        self.fake.on("GET", API + "/me/player/devices", answer(payload={"devices": [PHONE]}))
+        self.fake.on("PUT", API + "/me/player/play", NO_ACTIVE, answer(204))
+        self.route("POST", "spotify-play", body={"context": "spotify:album:al1", "offset_uri": "spotify:track:t1"})
+        retry = self.fake.to(API + "/me/player/play")[-1]
+        self.assertEqual((retry.url, json.loads(retry.body)), (API + "/me/player/play?device_id=phone1", {"context_uri": "spotify:album:al1", "offset": {"uri": "spotify:track:t1"}}))
+        self.fake.on("POST", API + "/me/player/previous", NO_ACTIVE, answer(204))
+        self.route("POST", "spotify-control", body={"action": "previous"})
+        self.assertTrue(self.fake.to(API + "/me/player/previous")[-1].url.endswith("device_id=phone1"))
+
+    def test_no_device_at_all_says_how_to_get_one(self):
+        self.fake.on("GET", API + "/me/player/devices", answer(payload={"devices": [LOCKED_TV]}))
+        self.fake.on("PUT", API + "/me/player/play", NO_ACTIVE)
+        with self.assertRaises(spotify.NoDevice) as caught:
+            self.route("POST", "spotify-control", body={"action": "play"})
+        self.assertIn("open spotify on your phone or computer", caught.exception.message.lower())
+        self.assertEqual((len(self.plays()), self.transfers()), (1, []))
+
+    def test_the_retry_happens_once(self):
+        self.fake.on("GET", API + "/me/player/devices", answer(payload={"devices": [DESK]}))
+        self.fake.on("PUT", API + "/me/player/play", NO_ACTIVE)
+        with self.assertRaises(spotify.NoDevice):
+            self.route("POST", "spotify-control", body={"action": "play"})
+        self.assertEqual(len(self.plays()), 2)
+
+
+class OneSignInTest(SpotifyBase):
+    def test_one_sign_in_asks_for_everything_the_player_may_use(self):
+        wanted = {"user-library-read", "user-library-modify", "user-read-recently-played", "playlist-read-collaborative", "user-top-read",
+                  "user-follow-read", "playlist-modify-private", "playlist-modify-public", "user-read-playback-position"}
+        self.assertLessEqual(wanted, set(spotify.SCOPES.split()))
+        self.assertNotIn("user-read-email", spotify.SCOPES)
+        _state, url = self.login()
+        self.assertEqual(set(parse_qs(urlsplit(url).query)["scope"][0].split()), set(spotify.SCOPES.split()))
+
+    def test_renewals_and_restarts_keep_the_sign_in_and_its_scopes(self):
+        self.connect()
+        for scope in (None, "", "  "):
+            self.now[0] += 3600
+            payload = {"access_token": f"AT-{self.now[0]}", "expires_in": 3600}
+            if scope is not None:
+                payload["scope"] = scope
+            self.fake.on("POST", TOKEN_URL, answer(payload=payload))
+            self.fake.on("GET", API + "/me/player", answer(204))
+            self.route("GET", "spotify-now")
+            self.assertEqual(self.client.granted(), set(spotify.SCOPES.split()), repr(scope))
+        again = spotify.Client(transport=self.fake, store=self.tmp / "spotify.json", client_id=CID, clock=lambda: self.now[0])
+        self.assertTrue(again.connected())
+        self.assertEqual((again.granted(), again._load()["refresh_token"]), (set(spotify.SCOPES.split()), REFRESH))
+
+    def test_refresh_renews_an_ending_sign_in_and_reads_everything_again(self):
+        self.connect()
+        self.now[0] += 3600 - 300  # five minutes left: a refresh renews now, not mid-poll later
+        self.fake.on("POST", TOKEN_URL, answer(payload={"access_token": "AT-2", "expires_in": 3600}))
+        self.fake.on("GET", API + "/me/player/devices", answer(payload={"devices": [DESK]}))
+        self.fake.on("GET", API + "/me/player?", answer(payload={"is_playing": True, "device": DESK, "item": T1, "progress_ms": 5}))
+        out = self.route("POST", "spotify-refresh", body={})
+        self.assertEqual((out["now"]["item"]["id"], [d["id"] for d in out["devices"]]), ("t1", ["desk1"]))
+        self.assertEqual(self.stored()["access_token"], "AT-2")
+        self.assertIsNone(self.client.profile)
+        self.client.forget()
+        self.assertEqual(self.route("POST", "spotify-refresh", body={}), {"now": {"connected": False}, "devices": []})
 
 
 class CallbackTest(SpotifyBase):
