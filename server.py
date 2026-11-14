@@ -139,9 +139,9 @@ class Desk(BaseHTTPRequestHandler):
             return True
         return (method, route) in AGENT_ROUTES and secrets.compare_digest(self.headers.get("X-Agent-Key", ""), AGENT_KEY)
 
-    def _body(self):
+    def _body(self, limit=MAX_BODY):
         length = int(self.headers.get("Content-Length") or 0)
-        if length > MAX_BODY:
+        if length > limit:
             raise ValueError("body too large")
         if "application/json" not in (self.headers.get("Content-Type") or ""):
             raise ValueError("JSON body required")
@@ -198,7 +198,9 @@ class Desk(BaseHTTPRequestHandler):
                 return self._error(HTTPStatus.BAD_REQUEST, str(exc))
             return self._send(200, {"path": str(path)})
         try:
-            body = self._body()
+            # A route module may take a larger body on one of its routes (a file's new text).
+            route = url.path[5:]
+            body = self._body(max([MAX_BODY, *(getattr(m, "BODY_MAX", {}).get(route, 0) for m in ROUTE_MODULES)]))
         except (ValueError, json.JSONDecodeError) as exc:
             return self._error(HTTPStatus.BAD_REQUEST, str(exc))
         return self._api("POST", url.path[5:], {}, body)

@@ -16,11 +16,13 @@ os.environ["PIXELDECK_ENV"] = str(_ENV)
 for _key in ("BITBUCKET_TOKEN", "BITBUCKET_EMAIL", "BITBUCKET_WORKSPACE", "TICKET_PREFIXES", "JIRA_SITE", "PIXELDECK_BRIEFS_DIR"):
     os.environ.pop(_key, None)
 
+import bitbucket  # noqa: E402
 import repos  # noqa: E402
 from bitbucket import BitbucketError  # noqa: E402
 
 HASH = "6297b36c80f500799e4f753fb45b6d13e46bd275"
 OTHER = "b2ff6016b15df18ba490049a98b096ce723d66a5"
+NEW = "c0ffee" + "0" * 34
 
 
 def repo(slug, updated, **over):
@@ -60,9 +62,13 @@ class FakeClient:
     def get(self, path, params=None):
         self.calls.append(("GET", path, dict(params or {})))
         if (params or {}).get("format") == "meta":
-            if path not in self.metas:
-                raise BitbucketError(404, "No such file or directory")
-            return self.metas[path]
+            if path in self.metas:
+                return self.metas[path]
+            folder, _, name = path.rpartition("/")
+            for value in self.pages.get(folder + "/") or []:  # the entry its folder lists
+                if isinstance(value, dict) and value.get("path", "").rsplit("/", 1)[-1] == name:
+                    return value
+            raise BitbucketError(404, "No such file or directory")
         if path not in self.pages:
             raise BitbucketError(404, "not found")
         hit = self.pages[path]
@@ -82,6 +88,17 @@ class FakeClient:
         raw = self.texts[path]
         return raw[:limit], len(raw) > limit
 
+    def post_form(self, path, fields, files):
+        """The one write. Records what would go out; a test may make Bitbucket refuse it."""
+        self.calls.append(("POST", path, {"fields": list(fields), "files": list(files)}))
+        if getattr(self, "refuse", None):
+            raise BitbucketError(self.refuse, "refused")
+        target = dict(fields).get("branch")
+        branches = self.pages.get("/repositories/acme/shop-api/refs/branches")
+        if isinstance(branches, list) and target and not any(b["name"] == target for b in branches):
+            branches.append(branch(target, NEW, "2026-11-13T00:00:00+00:00"))
+        return {"status": 201, "location": None}
+
 
 class Clock:
     def __init__(self):
@@ -95,6 +112,8 @@ def engine(client, project="SHOP"):
     e = type("E", (), {})()
     e.client = client
     e.project = lambda: {"key": project, "name": "Shop"} if project else None
+    e.root = tempfile.mkdtemp(prefix="pixeldeck-clones-")  # no clones: a pull request goes through Bitbucket's page
+    e.pushed = lambda force=False: []
     return e
 
 
@@ -315,17 +334,196 @@ class RouteTest(unittest.TestCase):
         self.assertIsNone(call(self.e, "repos", method="POST"))
         self.assertEqual(self.client.calls, [])
 
-    def test_nothing_but_get_is_ever_sent(self):
+    def test_reading_never_writes(self):
         call(self.e, "repos")
         call(self.e, "repo-branches", repo="shop-api")
         call(self.e, "repo-tree", repo="shop-api", hash=HASH, path="")
         call(self.e, "repo-file", repo="shop-api", hash=HASH, path="README.md")
         call(self.e, "repo-commits", repo="shop-api", hash=HASH)
+        call(self.e, "repo-ref", repo="shop-api", branch="develop")
         self.assertTrue(self.client.calls)
         self.assertEqual({c[0] for c in self.client.calls}, {"GET"})
+        # The module's one way to write is post_form, called once, by the commit, to /src.
         source = (Path(__file__).resolve().parent.parent / "repos.py").read_text(encoding="utf-8")
-        for write in (".send(", "POST", "PUT", "DELETE", "urlopen"):
+        for write in (".send(", "PUT", "DELETE", "urlopen"):
             self.assertNotIn(write, source)
+        self.assertEqual(source.count(".post_form("), 1)
+        self.assertIn('engine.client.post_form(f"/repositories/{_ws(engine)}/{slug}/src"', source)
+        self.assertEqual(set(repos.WRITES), {"repo-commit"})
+
+
+class PairingTest(unittest.TestCase):
+    def test_a_chart_is_its_service_plus_the_suffix(self):
+        pairs = repos.pair_charts(["shop-api", "shop-api-helm-chart", "hub", "hub-service-helm-chart",
+                                   "car-service", "car-service-helm-chart", "postgres-helm-chart", "tools"])
+        self.assertEqual(pairs, {"shop-api-helm-chart": "shop-api", "hub-service-helm-chart": "hub",
+                                 "car-service-helm-chart": "car-service"})
+
+    def test_only_the_two_rules_pair(self):
+        # Adding "-service" is not a rule: car-helm-chart does not deploy car-service.
+        self.assertEqual(repos.pair_charts(["car-service", "car-helm-chart", "x-helm-chart-helm-chart"]), {})
+        self.assertEqual(repos.pair_charts(["helm-chart", "-helm-chart"]), {})
+
+    def test_two_charts_for_one_service_exact_first(self):
+        repos.reset(Clock())
+        client = shop_client(pages={LIST: [repo("hub", "2026-11-01T00:00:00+00:00"),
+                                           repo("hub-service-helm-chart", "2026-11-02T00:00:00+00:00"),
+                                           repo("hub-helm-chart", "2026-11-01T00:00:00+00:00"),
+                                           repo("infra-helm-chart", "2026-11-01T00:00:00+00:00"),
+                                           repo("e2e-tests", "2026-11-01T00:00:00+00:00")]})
+        out = {r["slug"]: r for r in call(engine(client), "repos")["repos"]}
+        self.assertEqual(out["hub"]["charts"], ["hub-helm-chart", "hub-service-helm-chart"])
+        self.assertEqual(out["hub"]["kind"], "service")
+        self.assertEqual((out["hub-service-helm-chart"]["kind"], out["hub-service-helm-chart"]["service"]), ("helm", "hub"))
+        self.assertEqual((out["infra-helm-chart"]["kind"], out["infra-helm-chart"]["service"]), ("helm", ""))
+        self.assertEqual((out["e2e-tests"]["kind"], out["e2e-tests"]["charts"]), ("other", []))
+
+
+class MultipartTest(unittest.TestCase):
+    def parse(self, boundary, body):
+        from email.parser import BytesParser
+        from email.policy import HTTP
+        head = f"Content-Type: multipart/form-data; boundary={boundary}\r\n\r\n".encode()
+        return BytesParser(policy=HTTP).parsebytes(head + body).iter_parts()
+
+    def test_fields_and_file_bytes_come_back_exactly(self):
+        data = "line one\r\nligne deux é\r\n\r\n--not a boundary\r\n".encode("utf-8")
+        boundary, body = bitbucket.multipart([("message", "fix: é"), ("branch", "feat/x")], [("/docs/a b.md", "a b.md", data)])
+        parts = list(self.parse(boundary, body))
+        self.assertEqual([p.get_param("name", header="content-disposition") for p in parts], ["message", "branch", "/docs/a b.md"])
+        self.assertEqual(parts[0].get_payload(decode=True).decode("utf-8"), "fix: é")
+        self.assertEqual(parts[2].get_param("filename", header="content-disposition"), "a b.md")
+        self.assertEqual(parts[2].get_payload(decode=True), data, "a file's bytes, CRLF included, go out untouched")
+
+    def test_the_boundary_never_occurs_in_a_value(self):
+        boundary, body = bitbucket.multipart([("message", "x--abc--y")], [], boundary="abc")
+        self.assertNotEqual(boundary, "abc")
+        self.assertEqual(body.count(f"--{boundary}".encode()), 2)
+
+    def test_names_cannot_break_the_header(self):
+        for bad in ('a"b', "a\r\nX-Evil: 1", "a\nb"):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                bitbucket.multipart([], [(bad, "f", b"x")])
+            with self.assertRaises(ValueError):
+                bitbucket.multipart([], [("/f", bad, b"x")])
+
+
+class CommitTest(unittest.TestCase):
+    FEAT = f"/repositories/acme/shop-api/src/{OTHER}/"
+
+    def setUp(self):
+        repos.reset(Clock())
+        self.client = shop_client()
+        self.client.texts.update({
+            SRC + "crlf.txt": "one\r\ntwo\r\n", SRC + "mixed.txt": "one\r\ntwo\n", SRC + "bad.txt": "caf\ufffd\n",
+            SRC + "run.sh": "#!/bin/sh\n", self.FEAT + "Makefile": "all:\n\techo hi\n",
+        })
+        self.client.pages[SRC][2:2] = [entry("crlf.txt"), entry("mixed.txt"), entry("bad.txt"), entry("run.sh", attributes=["executable"])]
+        self.client.pages[self.FEAT] = [entry("Makefile")]
+        self.e = engine(self.client)
+
+    def body(self, **over):
+        b = {"repo": "shop-api", "branch": "develop", "parent": HASH, "path": "Makefile",
+             "content": "all:\n\techo hello\n", "message": "fix: say hello", "new_branch": "fix/say-hello"}
+        b.update(over)
+        return b
+
+    def commit(self, **over):
+        return repos.route(None, self.e, "POST", "repo-commit", {}, self.body(**over))
+
+    def posts(self):
+        return [c for c in self.client.calls if c[0] == "POST"]
+
+    def refused(self, error, **over):
+        with self.assertRaises(error) as ctx:
+            self.commit(**over)
+        self.assertEqual(self.posts(), [], "refused before anything was sent")
+        return str(ctx.exception)
+
+    def test_a_new_branch_from_the_commit_you_edited(self):
+        out = self.commit()
+        [(method, path, sent)] = self.posts()
+        self.assertEqual(path, "/repositories/acme/shop-api/src")
+        fields = dict(sent["fields"])
+        self.assertEqual(fields, {"message": "fix: say hello", "branch": "fix/say-hello", "parents": HASH},
+                         "branch and parents always go: without branch Bitbucket would commit on the main branch")
+        self.assertEqual(sent["files"], [("/Makefile", "Makefile", b"all:\n\techo hello\n")])
+        self.assertEqual((out["branch"], out["from"], out["new_branch"], out["hash"]), ("fix/say-hello", "develop", True, NEW))
+        self.assertEqual(out["pr"]["flow"], "web")
+        self.assertIn("pull-requests/new?source=fix%2Fsay-hello&dest=develop", out["pr"]["url"])
+
+    def test_straight_to_a_feature_branch_when_its_tip_is_the_parent(self):
+        out = self.commit(branch="feat/a-b", parent=OTHER, new_branch="")
+        [(_, _, sent)] = self.posts()
+        self.assertEqual(dict(sent["fields"])["branch"], "feat/a-b")
+        self.assertEqual(dict(sent["fields"])["parents"], OTHER)
+        self.assertFalse(out["new_branch"])
+        self.assertNotIn("pr", out)
+
+    def test_never_straight_to_the_main_branches(self):
+        self.assertIn("does not commit straight to develop", self.refused(ValueError, new_branch=""))
+        for name in ("main", "master", "develop"):
+            with self.subTest(name=name):
+                self.refused(ValueError, new_branch=name)
+
+    def test_a_branch_that_moved_is_refused(self):
+        msg = self.refused(ValueError, branch="feat/a-b", parent=HASH, new_branch="")
+        self.assertIn("moved since you opened the file", msg)
+
+    def test_an_existing_branch_is_not_a_new_one(self):
+        self.assertIn("exists already", self.refused(ValueError, new_branch="feat/a-b"))
+
+    def test_the_request_is_checked_first(self):
+        for over in ({"parent": HASH[:7]}, {"parent": "z" * 40}, {"path": "../x"}, {"path": ""}, {"path": 'a"b'},
+                     {"message": ""}, {"message": "a\x00b"}, {"message": "x" * (repos.MESSAGE_MAX + 1)},
+                     {"content": None}, {"content": "x" * (repos.FILE_MAX + 1)}, {"new_branch": "bad name"},
+                     {"branch": 'a"b'}):
+            with self.subTest(over=over):
+                self.refused(ValueError, **over)
+        self.refused(KeyError, repo="not-ours")
+
+    def test_only_what_was_shown_whole_can_be_saved(self):
+        self.assertIn("nothing changed", self.refused(ValueError, content="all:\n\techo hi\n"))
+        self.assertIn("line endings", self.refused(ValueError, path="crlf.txt", content="one\ntwo\nthree\n"))
+        self.commit(path="crlf.txt", content="one\r\ntwo\r\nthree\r\n", new_branch="fix/crlf")
+        self.client.calls.clear()
+        self.assertIn("mixes line endings", self.refused(ValueError, path="mixed.txt", content="x\n"))
+        self.assertIn("UTF-8", self.refused(ValueError, path="bad.txt", content="cafe\n"))
+        self.assertIn("Executable", self.refused(ValueError, path="run.sh", content="#!/bin/sh\necho\n"))
+        self.assertIn("Binary", self.refused(ValueError, path="logo.png", content="x"))
+
+    def test_a_token_without_write_is_named(self):
+        self.client.refuse = 403
+        with self.assertRaises(PermissionError) as ctx:
+            self.commit()
+        self.assertIn("lack repository write", str(ctx.exception))
+        self.client.refuse = 409
+        with self.assertRaises(ValueError):
+            self.commit(new_branch="fix/again")
+
+    def test_after_the_commit_nothing_can_fail_the_answer(self):
+        real = self.client.get
+        def flaky(path, params=None):
+            if any(c[0] == "POST" for c in self.client.calls):
+                raise BitbucketError(500, "down")
+            return real(path, params)
+        self.client.get = flaky
+        out = self.commit()
+        self.assertIsNone(out["hash"])
+        self.assertEqual(out["pr"]["flow"], "web")
+
+    def test_a_branch_in_your_clone_opens_pixeldecks_own_dialog(self):
+        saved = (repos.gitscan.repo_dirs, repos.gitscan.git)
+        ran = []
+        repos.gitscan.repo_dirs = lambda root: {"shop-api": Path(root)}
+        repos.gitscan.git = lambda repo_dir, *args, timeout=20: ran.append(args) or ""
+        self.e.pushed = lambda force=False: [{"repo": "shop-api", "branch": "fix/say-hello"}]
+        try:
+            out = self.commit()
+        finally:
+            repos.gitscan.repo_dirs, repos.gitscan.git = saved
+        self.assertEqual(out["pr"], {"flow": "preview"})
+        self.assertEqual(ran, [("fetch", "--quiet", "origin", "fix/say-hello")])
 
 
 class CacheTest(unittest.TestCase):
@@ -390,6 +588,27 @@ class ServerRouteTest(unittest.TestCase):
                 return res.status, json.loads(res.read())
         except urllib.error.HTTPError as exc:
             return exc.code, json.loads(exc.read() or b"{}")
+
+    def post(self, route, payload):
+        import urllib.error
+        import urllib.request
+        req = urllib.request.Request(f"http://127.0.0.1:{self.port}/api/{route}", method="POST", data=payload,
+                                     headers={"X-Desk-Token": self.server_mod.SECRET, "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=10) as res:
+                return res.status, json.loads(res.read())
+        except urllib.error.HTTPError as exc:
+            return exc.code, json.loads(exc.read() or b"{}")
+
+    def test_a_commit_may_carry_a_big_file_other_routes_may_not(self):
+        big = json.dumps({"repo": "shop-api", "branch": "develop", "parent": HASH, "path": "Makefile",
+                          "message": "m", "content": "x" * 200_000}).encode()
+        code, out = self.post("repo-commit", big)
+        self.assertEqual(code, 400)
+        self.assertIn("does not commit straight to develop", out["error"], "the body was read, the route refused")
+        code, out = self.post("term-input", json.dumps({"id": "x", "data": "x" * 200_000}).encode())
+        self.assertEqual((code, out["error"]), (400, "body too large"))
+        self.assertEqual([c for c in self.client.calls if c[0] == "POST"], [])
 
     def test_answers_and_refusals(self):
         code, out = self.get("repos")
