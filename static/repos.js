@@ -82,7 +82,12 @@ const Repos = (() => {
     if (st.repo) {
       const slug = st.repo.slug;
       delete mem.repos[slug];
-      mem.repos[slug] = { branch: st.branch, path: st.path, file: st.file, tab: st.tab, dirs: [...st.dirs].slice(-60) };
+      // The folders on the way to where you are, and the last few opened: each open folder is
+      // one listing to read when the repository opens again at a new tip.
+      const way = [];
+      for (const part of st.path ? st.path.split("/") : []) way.push(way.length ? `${way[way.length - 1]}/${part}` : part);
+      const dirs = [...new Set([...way, ...[...st.dirs].slice(-8)])];
+      mem.repos[slug] = { branch: st.branch, path: st.path, file: st.file, tab: st.tab, dirs };
       mem.last = slug;
     } else mem.last = "";
     mem.side = st.side;
@@ -92,7 +97,7 @@ const Repos = (() => {
   }
   function touch(slug) {
     const u = use[slug] || {};
-    use[slug] = { n: (u.n || 0) + 1, at: Date.now() };
+    use[slug] = { n: (Number(u.n) || 0) + 1, at: Date.now() };
     const keys = Object.keys(use);
     if (keys.length > 300) for (const k of keys.sort((a, b) => (use[a].at || 0) - (use[b].at || 0)).slice(0, keys.length - 300)) delete use[k];
     write(USE_KEY, use);
@@ -102,7 +107,7 @@ const Repos = (() => {
   function usage(r, withCharts) {
     const slugs = withCharts ? [r.slug, ...(r.charts || [])] : [r.slug];
     let n = 0, at = 0;
-    for (const s of slugs) { n = Math.max(n, use[s]?.n || 0); at = Math.max(at, use[s]?.at || 0); }
+    for (const s of slugs) { n = Math.max(n, Number(use[s]?.n) || 0); at = Math.max(at, Number(use[s]?.at) || 0); }
     return { n, at, updated: r.updated_on || "" };
   }
   const byUse = (stacked) => (a, b) => {
@@ -223,7 +228,8 @@ const Repos = (() => {
     const all = st.list.repos;
     const count = (k) => (k === "all" ? all.length : all.filter((r) => r.kind === k).length);
     kinds.innerHTML = KINDS.map(([k, label]) => `<button class="date-chip rp-kind" type="button" data-rp-kind="${k}" aria-pressed="${ui.kind === k}">${label}<span class="rp-kind-n">${count(k)}</span></button>`).join("");
-    root.querySelector(".rp-kind-note").textContent = KIND_NOTE[ui.kind] || "";
+    // The notes are constants; the chart suffix stays on one line instead of breaking at its hyphen.
+    root.querySelector(".rp-kind-note").innerHTML = (KIND_NOTE[ui.kind] || "").replace("-helm-chart", '<span class="rp-nowrap">-helm-chart</span>');
     const where = st.list.project ? st.list.project.name || st.list.project.key : "every project";
     note.textContent = where;
     const needle = st.filter.trim().toLowerCase();
@@ -236,7 +242,7 @@ const Repos = (() => {
       html = hits.length ? `<ul class="rp-repos">${hits.map((r) => `<li class="rp-item">${row(r, { kindTag: true })}</li>`).join("")}</ul>` : nothing("No repository matches the search.");
     } else {
       const pins = ui.pins.map(repoOf).filter((r) => r && fits(r));
-      html = section("pinned", "Pinned", pins.map((r) => `<li class="rp-item">${row(r)}</li>`));
+      html = section("pinned", "Pinned", pins.map((r) => (r.charts?.length ? stack(r) : `<li class="rp-item">${row(r)}</li>`)));
       if (ui.kind === "helm") {
         const charts = all.filter((r) => r.kind === "helm" && !pinned.has(r.slug)).sort(byUse(false));
         html += section("charts-of-services", "Charts of a service", charts.filter((r) => r.service).map((r) => `<li class="rp-item">${row(r)}</li>`));
@@ -261,7 +267,7 @@ const Repos = (() => {
   }
   function row(r, { child = false, kindTag = false, badge = "" } = {}) {
     const pinned = ui.pins.includes(r.slug);
-    const n = use[r.slug]?.n || 0;
+    const n = Number(use[r.slug]?.n) || 0;
     const tag = kindTag ? `<span class="rp-lang">${r.kind === "helm" ? "chart" : r.kind === "service" ? "service" : "other"}</span>` : "";
     return `<button class="rp-repo${st.repo?.slug === r.slug ? " is-open" : ""}" type="button" data-rp-open="${esc(r.slug)}">
         <span class="rp-repo-top">${r.kind === "helm" ? glyph("helm") : ""}<span class="rp-repo-name">${esc(r.name)}</span>${tag}${when(r.updated_on)}</span>
@@ -441,12 +447,13 @@ const Repos = (() => {
     paintPane();
   }
   function welcome() {
-    const top = st.list ? st.list.repos.filter((r) => use[r.slug]?.n).sort(byUse(false)).slice(0, 8) : [];
+    const times = (slug) => Number(use[slug]?.n) || 0;
+    const top = st.list ? st.list.repos.filter((r) => times(r.slug)).sort(byUse(false)).slice(0, 8) : [];
     return `<div class="rp-welcome">${Sprites.svg("buddy", { scale: 3 })}
       <h2 class="panel-title">Pick a repository</h2>
       <p class="rp-sub">The side menu stacks each service with its helm chart and puts the ones you open most first. The star pins a favourite to the top.</p>
       ${top.length ? `<h3 class="rp-welcome-h">Opened most here</h3><ul class="rp-quick">${top.map((r) => `<li><button class="rp-quick-btn" type="button" data-rp-open="${esc(r.slug)}">
-        ${glyph(r.kind === "helm" ? "helm" : "folder")}<span>${esc(r.name)}</span><span class="rp-uses">${use[r.slug].n}x</span></button></li>`).join("")}</ul>` : ""}</div>`;
+        ${glyph(r.kind === "helm" ? "helm" : "folder")}<span>${esc(r.name)}</span><span class="rp-uses">${times(r.slug)}x</span></button></li>`).join("")}</ul>` : ""}</div>`;
   }
   function paintTabs() {
     const box = root.querySelector(".rp-tabs");

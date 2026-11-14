@@ -610,6 +610,17 @@ class ServerRouteTest(unittest.TestCase):
         self.assertEqual((code, out["error"]), (400, "body too large"))
         self.assertEqual([c for c in self.client.calls if c[0] == "POST"], [])
 
+    def test_a_token_without_write_answers_403_not_502(self):
+        body = json.dumps({"repo": "shop-api", "branch": "develop", "parent": HASH, "path": "Makefile", "message": "m",
+                           "content": "all:\n\techo hello\n", "new_branch": "fix/no-write"}).encode()
+        self.client.refuse = 403
+        try:
+            code, out = self.post("repo-commit", body)
+        finally:
+            self.client.refuse = None
+        self.assertEqual(code, 403, "a 502 would read as Bitbucket being down; a 401 would reload the page")
+        self.assertIn("lack repository write", out["error"])
+
     def test_answers_and_refusals(self):
         code, out = self.get("repos")
         self.assertEqual(code, 200)
