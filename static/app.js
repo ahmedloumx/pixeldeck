@@ -1831,6 +1831,7 @@ function applyBoot(b) {
   state.root = b.root || "";
   state.platform = b.platform || "";
   state.features = b.features || []; // an older server has none: the page skips what it lacks
+  if (b.restore !== undefined && state.restore === undefined) state.restore = b.restore;
 }
 const signature = (d) => JSON.stringify([d.open, d.merged, d.declined, d.review_requests, d.pushed, d.synced_at, d.members, d.project]);
 async function loadPerson(uuid) {
@@ -2320,6 +2321,59 @@ function parseHashFrom(href) {
   return { section: decodeURIComponent(parts[1] || "") , saved };
 }
 
+/* ------------------------------------------------------- where you left off */
+
+/* The terminals open when PixelDeck last stopped come back on a yes: shells in their folders
+   with their last screen, Claude Code resumed by its session. The layout and settings are
+   already back by then (keep.js). */
+function offerRestore() {
+  const r = state.restore;
+  if (!r || !r.terminals?.length || Layout.isSolo()) return false;
+  const read = (k) => { try { return JSON.parse(localStorage.getItem(k)) || {}; } catch { return {}; } };
+  const names = read("prdesk.termnames.v1"), titles = read("prdesk.termtitles.v1");
+  const when = r.saved_at ? new Date(r.saved_at * 1000).toLocaleString("en-GB", { weekday: "long", hour: "2-digit", minute: "2-digit" }) : "";
+  const rows = r.terminals.map((t, i) => `<label class="restore-row" style="--k:${Math.min(i, 10)}"><input type="checkbox" data-restore-id="${esc(t.id)}" checked>
+      <span class="restore-box" aria-hidden="true"></span>
+      <span class="restore-what"><b>${esc(names[t.id] || titles[t.id] || t.title || "Shell")}</b><small>${esc(shortPath(t.cwd || ""))}</small></span>
+      <span class="restore-kind is-${t.kind === "claude" ? "claude" : "shell"}">${t.kind === "claude" ? (t.resumes ? "Claude Code: resumes its session" : "Claude Code: newest session there") : "Shell: old screen kept"}</span></label>`).join("");
+  let d = $("#restore-dialog");
+  if (!d) { d = document.createElement("dialog"); d.id = "restore-dialog"; d.className = "restore-dialog"; d.setAttribute("aria-labelledby", "restore-title"); document.body.append(d); }
+  d.innerHTML = `<header class="restore-head"><span class="restore-mascots" aria-hidden="true">${Sprites.svg("buddy", { scale: 3 })}${Sprites.svg("bot", { scale: 3 })}</span>
+      <div><h2 id="restore-title">Pick up where you left off?</h2>
+      <p>${esc(`PixelDeck stopped${when ? ` on ${when}` : ""} with ${plural(r.terminals.length, "terminal")} open. Your layout and settings are already back.`)}</p></div></header>
+    <div class="restore-list">${rows}</div>
+    <footer class="restore-foot"><button class="btn btn--quiet" type="button" data-restore="skip">Start fresh</button>
+      <button class="btn btn--primary" type="button" data-restore="go">Bring them back</button></footer>`;
+  const count = () => { const n = $$("[data-restore-id]:checked", d).length; d.querySelector('[data-restore="go"]').textContent = n ? `Bring ${n === r.terminals.length ? "them" : plural(n, "terminal")} back` : "Bring them back"; d.querySelector('[data-restore="go"]').disabled = !n; };
+  d.addEventListener("change", count);
+  d.addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-restore]");
+    if (!b) return;
+    if (b.dataset.restore === "skip") {
+      state.restore = null;
+      d.close();
+      api("term-restore-skip", { method: "POST", body: {} }).catch(() => {});
+      return;
+    }
+    const ids = $$("[data-restore-id]:checked", d).map((x) => x.dataset.restoreId);
+    try {
+      const res = await busy(b, () => api("term-restore", { method: "POST", body: { ids } }));
+      Keep.carryTerminals(res.moved);
+      Term.reload();
+      setTimeout(() => Term.reload(), 1500);  // a terminal the stream brings in late
+      state.restore = null;
+      d.close();
+      Layout.activate("terminal");
+      const failed = res.moved.filter((m) => !m.new);
+      toast(`${plural(res.moved.length - failed.length, "terminal")} back where you left them.`, failed.length ? `${plural(failed.length, "terminal")} could not start: ${failed[0].error}` : "", !!failed.length);
+    } catch (err) { toast("Could not bring the terminals back.", err.message, true); }
+  });
+  d.addEventListener("cancel", () => { state.restore = null; });
+  d.showModal();
+  count();
+  return true;
+}
+
 /* ---------------------------------------------------------------- boot */
 
 /* The title screen. Each step is a real stage of the first load; the screen stays up at
@@ -2415,7 +2469,7 @@ async function boot() {
   api("projects").then((r) => { state.projects = r.projects; state.project = r.project; renderBar(); }).catch(() => {});
   BootScreen.step("data");
   await loadView();
-  BootScreen.finish(state.me ? "" : "NO CONNECTION").then(() => Guide.firstRun());
+  BootScreen.finish(state.me ? "" : "NO CONNECTION").then(() => { if (!offerRestore()) Guide.firstRun(); });
   if (state.route.pr) { const pr = findPr(state.route.pr); if (pr) openPr(pr); }
   // The server re-reads your open pull requests every minute; the page asks it twice as often.
   setInterval(() => { if (!document.hidden) loadView({ silent: true }); }, 30000);

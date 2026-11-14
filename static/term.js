@@ -605,10 +605,22 @@ const Term = (() => {
   document.addEventListener("visibilitychange", () => { if (document.hidden) saveSnapshots(); });
   addEventListener("pagehide", () => saveSnapshots(true));
 
+  // Names, titles and order can move under open terminals (a restore gives them new ids), so
+  // they can be read again from storage.
+  function reload() {
+    const n = names(), t = stored(TITLES_KEY);
+    for (const [id, s] of sessions) { if (n[id]) s.custom = n[id]; if (t[id] && !s.auto) s.auto = t[id]; }
+    let order = [];
+    try { order = JSON.parse(localStorage.getItem(ORDER_KEY)) || []; } catch { order = []; }
+    const known = Array.isArray(order) ? order.filter((id) => sessions.has(id)) : [];
+    if (known.length) setOrder([...known, ...[...sessions.keys()].filter((id) => !known.includes(id))]);
+    else paintTabs();
+  }
+
   // A theme switch repaints the open terminals with the new colours.
   function retheme() { for (const s of sessions.values()) if (s.term) s.term.options.theme = theme(); }
 
-  return { mount, attach, select, newShell, retheme, showBuild, buildWith, fit: fitCurrent, saveSnapshots, count: () => sessions.size,
+  return { mount, attach, select, newShell, retheme, reload, showBuild, buildWith, fit: fitCurrent, saveSnapshots, count: () => sessions.size,
     renderers: () => [...sessions.values()].map((s) => s.renderer), order: () => [...sessions.keys()], dropPaths,
     // The last lines of the current terminal as text: with WebGL the screen is not in the DOM.
     lines: (n = 5) => {

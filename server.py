@@ -11,6 +11,8 @@ Security model, because this server can open a terminal that pushes code:
 """
 
 import argparse
+import atexit
+import signal
 import re
 import base64
 import os
@@ -32,6 +34,7 @@ sys.path.insert(0, str(HERE))
 import actions  # noqa: E402
 import connections  # noqa: E402
 import repos  # noqa: E402
+import sessions  # noqa: E402
 import spotify  # noqa: E402
 import jira  # noqa: E402
 import launcher  # noqa: E402
@@ -52,7 +55,7 @@ AGENT_KEY = secrets.token_urlsafe(32)
 AGENT_ROUTES = {("POST", "propose"), ("GET", "proposal")}
 PROPOSALS = proposals.Proposals()
 FEATURES = ["merge", "sync", "drop", "proposals", "snapshots", "reviews", "events", "status", "settings", "merge-options", "jira",
-            *repos.FEATURES, *spotify.FEATURES]
+            "restore", "ui-state", *repos.FEATURES, *spotify.FEATURES]
 ROUTE_MODULES = (repos, spotify)  # each answers its own routes, or None
 JIRA = jira.Jira()
 SNAPSHOT_MAX = 4 * 1024 * 1024
@@ -103,6 +106,7 @@ class Desk(BaseHTTPRequestHandler):
     server_version = "PixelDeck/1.0"
     engine: Engine = None
     port = 0
+    keeper = None
 
     # ---- helpers --------------------------------------------------------
 
@@ -205,6 +209,11 @@ class Desk(BaseHTTPRequestHandler):
 
     def _index(self):
         html = (STATIC / "index.html").read_text(encoding="utf-8").replace("__DESK_TOKEN__", SECRET)
+        # The kept page settings ride in the page itself, so they are in place before any script
+        # reads its storage. A JSON island is data, never run, and its text is escaped for it.
+        if self.keeper:
+            island = f'<script type="application/json" id="ui-state">{sessions.page_state(self.keeper.ui())}</script>'
+            html = html.replace("</head>", f"{island}\n</head>", 1)
         self._send(200, html.encode(), "text/html; charset=utf-8", {
             "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; "
                                        "style-src 'self' 'unsafe-inline'; "
@@ -251,6 +260,13 @@ class Desk(BaseHTTPRequestHandler):
                     raise ValueError("only a shell can be opened directly")
                 session = TERMS.spawn("Shell", shell_argv(), WORKSPACE_ROOT)
                 return self._send(200, session.info())
+            if method == "POST" and route == "term-restore":
+                return self._send(200, {"moved": self.keeper.take(body.get("ids"), self._restore_one), "terms": TERMS.list()})
+            if method == "POST" and route == "term-restore-skip":
+                self.keeper.decline()
+                return self._send(200, {"ok": True})
+            if method == "POST" and route == "ui-state":
+                return self._send(200, self.keeper.set_ui(body))
             if method == "POST" and route == "term-input":
                 data = body.get("data")
                 if not isinstance(data, str) or len(data) > 65536:
@@ -392,6 +408,7 @@ class Desk(BaseHTTPRequestHandler):
             "platform": sys.platform,
             "terminal": terminals.UNAVAILABLE or "",
             "features": FEATURES,
+            "restore": self.keeper.public_offer() if self.keeper else None,
             "now": time.time(),
         }
 
@@ -405,6 +422,20 @@ class Desk(BaseHTTPRequestHandler):
             "budget": engine.budget(), "auth": engine.auth, "schedule": engine.schedule(),
             "events_last": engine.events.last(), "now": time.time(),
         }
+
+    def _restore_one(self, entry):
+        """One terminal back: a shell in its folder with its last screen above the new prompt,
+        or Claude Code resumed (it shows its own history, so no old screen there)."""
+        cwd = entry.get("cwd") if isinstance(entry.get("cwd"), str) and os.path.isdir(entry.get("cwd")) else str(WORKSPACE_ROOT)
+        argv = sessions.restore_argv(entry, shell_argv, launcher.claude_binary)
+        title = entry.get("title") if isinstance(entry.get("title"), str) and entry.get("title") else "Shell"
+        session = TERMS.spawn(title[:80], argv, cwd)
+        screen = entry.get("screen") if entry.get("kind") != "claude" else ""
+        if isinstance(screen, str) and screen.strip():
+            stamp = time.strftime("%H:%M", time.localtime(self.keeper.offer_saved_at or time.time()))
+            session.snapshot = {"text": f"{screen}\r\n\x1b[2m[ restored from {stamp}: a new shell below ]\x1b[0m\r\n",
+                                "pos": 0, "cols": entry.get("cols") or 120, "rows": entry.get("rows") or 32}
+        return session
 
     def _with_history(self, prs):
         out = []
@@ -599,6 +630,13 @@ def main():
 
     Desk.engine = Engine(WORKSPACE_ROOT)
     Desk.port = args.port
+    # Keep the terminals as they are every few seconds, and once more on the way out: atexit
+    # runs the keeper before the terminals close (last registered runs first), and a stop
+    # (SIGTERM) becomes a normal exit so that happens.
+    Desk.keeper = sessions.Keeper(TERMS)
+    Desk.keeper.run()
+    atexit.register(Desk.keeper.save)
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     write_agent_key(args.port)
     if not args.no_refresh:
         Desk.engine.run_forever()
