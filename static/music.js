@@ -791,6 +791,7 @@ const Music = (() => {
       readAt = performance.now();
       holdUntil = 0;
       paint();
+      if (noDevice(err, () => control(action, value))) return;
       toast("Spotify did not do that.", err.message, true);
       if (err.status === 403 && !err.data?.upstream) refreshStatus();
     }
@@ -805,7 +806,7 @@ const Music = (() => {
       setTimeout(poll, mode === "demo" ? 0 : 700);
       return true;
     } catch (err) {
-      if (err.message !== "reloading") toast("Spotify did not play that.", err.message, true);
+      if (err.message !== "reloading" && !noDevice(err, () => playFrom(opts))) toast("Spotify did not play that.", err.message, true);
       return false;
     }
   }
@@ -816,9 +817,46 @@ const Music = (() => {
       for (const v of views) v.queued?.();
       return true;
     } catch (err) {
-      if (err.message !== "reloading") toast("Spotify did not queue that.", err.message, true);
+      if (err.message === "reloading") return false;
+      if (noDevice(err, () => queueAdd(uri, name))) return false;
+      toast("Spotify did not queue that.", err.message, true);
       return false;
     }
+  }
+
+  /* Spotify plays only where a Spotify app runs. With none open, the error offers to start the
+     app on this computer and does what you asked once it shows up as a device. */
+  const isNoDevice = (err) => /no (active )?spotify device/i.test(err?.message || "");
+  function noDevice(err, retry) {
+    if (!isNoDevice(err) || mode === "demo") return false;
+    const box = document.createElement("div");
+    box.className = "toast is-bad mu-wake";
+    box.setAttribute("role", "alert");
+    const canLaunch = status?.can_launch !== false;
+    box.innerHTML = `<div>Spotify is not open anywhere.<small>${canLaunch ? "PixelDeck can start the Spotify app here, then play it." : "Open Spotify on your phone or computer, then try again."}</small>
+      ${canLaunch ? '<button class="btn btn--primary mu-wake-go" type="button">Open Spotify here</button>' : ""}</div>
+      <button class="btn btn--quiet" type="button" data-dismiss>Dismiss</button>`;
+    document.getElementById("toasts").append(box);
+    const kill = () => box.remove();
+    box.querySelector("[data-dismiss]").addEventListener("click", kill);
+    const timer = setTimeout(kill, 20000);
+    box.querySelector(".mu-wake-go")?.addEventListener("click", async (e) => {
+      const b = e.currentTarget;
+      clearTimeout(timer);
+      b.disabled = true;
+      b.textContent = "Starting Spotify…";
+      try {
+        await api("spotify-launch", { method: "POST", body: {} });
+        for (let i = 0; i < 20; i++) {
+          await new Promise((r) => setTimeout(r, 1500));
+          const found = await source().devices().catch(() => []);
+          if (found.length) { devices = found; paintDevices(); kill(); await retry(); return; }
+        }
+        b.textContent = "Spotify is still starting";
+        setTimeout(kill, 6000);
+      } catch (x) { kill(); toast("Could not start Spotify.", x.message, true); }
+    });
+    return true;
   }
 
   async function transfer(id) {

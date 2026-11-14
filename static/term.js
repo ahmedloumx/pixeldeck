@@ -128,9 +128,11 @@ const Term = (() => {
       // The wheel glides instead of jumping; output that arrives still scrolls at once.
       smoothScrollDuration: 90, fastScrollSensitivity: 5,
       allowProposedApi: true, // the Unicode 11 width tables go through the proposed unicode API
+      linkHandler: { activate: (_e, uri) => askLink(uri), allowNonHttpProtocols: false },  // links a program marks (OSC 8)
     });
     const fit = new FitAddon.FitAddon();
     term.loadAddon(fit);
+    term.registerLinkProvider(webLinks(term));
     const s = { id, title, term, fit, pane, alive: true, pos: 0, size: "", auto: stored(TITLES_KEY)[id] || "", custom: names()[id] || "", stage: "" };
     term.onData((data) => { s.lastKey = Date.now(); send(id, data); });
     term.onTitleChange((raw) => {
@@ -185,6 +187,66 @@ const Term = (() => {
       s.term.loadAddon(gl);
       return "webgl";
     } catch { return "dom"; }
+  }
+
+  /* ------------------------------------------------------------ links */
+  /* Web addresses in a terminal are links: underlined on hover, and a click asks first in a small
+     popup (open in the browser, copy, or not). A long address wraps over rows, so a row is read
+     with the rows it continues and that continue it. */
+  const URL_RE = /https?:\/\/[^\s"'<>`\\]+/g;
+  function webLinks(term) {
+    return {
+      provideLinks(y, callback) {
+        const buf = term.buffer.active, cols = term.cols;
+        let top = y - 1;
+        while (top > 0 && buf.getLine(top)?.isWrapped) top--;
+        let end = y - 1;
+        while (buf.getLine(end + 1)?.isWrapped) end++;
+        let text = "";
+        for (let r = top; r <= end; r++) text += buf.getLine(r)?.translateToString(r === end) || "";
+        const links = [];
+        for (const m of text.matchAll(URL_RE)) {
+          const url = m[0].replace(/[.,;:!?)\]}'"]+$/, "");
+          const a = m.index, b = m.index + url.length - 1;
+          const at = (o) => ({ x: (o % cols) + 1, y: top + Math.floor(o / cols) + 1 });
+          const start = at(a), stop = at(b);
+          if (stop.y < y || start.y > y) continue;
+          links.push({ range: { start, end: stop }, text: url, decorations: { underline: true, pointerCursor: true }, activate: () => askLink(url) });
+        }
+        callback(links.length ? links : undefined);
+      },
+    };
+  }
+  let linkBox = null;
+  function askLink(url) {
+    if (typeof url !== "string" || !/^https?:\/\//i.test(url)) return;
+    let host = url;
+    try { host = new URL(url).host; } catch { return; }
+    linkBox?.remove();
+    linkBox = document.createElement("dialog");
+    linkBox.className = "link-ask";
+    linkBox.innerHTML = `<header class="link-ask-head">${Sprites.svg("bot", { scale: 2 })}<h2>Open this link?</h2></header>
+      <p class="link-ask-host">${esc(host)}</p><p class="link-ask-url">${esc(url)}</p>
+      <footer class="link-ask-foot"><button class="btn btn--quiet" type="button" data-link="no">Cancel</button>
+        <button class="btn" type="button" data-link="copy">Copy</button>
+        <button class="btn btn--primary" type="button" data-link="open">Open in the browser</button></footer>`;
+    document.body.append(linkBox);
+    const box = linkBox;
+    const done = () => { box.close(); box.remove(); if (linkBox === box) linkBox = null; sessions.get(current)?.term.focus(); };
+    box.addEventListener("click", async (e) => {
+      const b = e.target.closest("[data-link]");
+      if (!b) { if (e.target === box) done(); return; }
+      if (b.dataset.link === "open") {
+        try { await api("open-link", { method: "POST", body: { url } }); toast("Opened in your browser.", host); }
+        catch (err) { toast("Could not open the link.", err.message, true); }
+      } else if (b.dataset.link === "copy") {
+        try { await navigator.clipboard.writeText(url); toast("Link copied.", host); } catch { toast("Could not copy the link.", url, true); }
+      }
+      done();
+    });
+    box.addEventListener("cancel", (e) => { e.preventDefault(); done(); });
+    box.showModal();
+    box.querySelector('[data-link="open"]').focus();
   }
 
   /* ------------------------------------------------------------ tab order */
@@ -345,6 +407,9 @@ const Term = (() => {
     // Not while its history is being redrawn: it must land at the size it was written for.
     if (!s || s.replaying || !s.pane.isConnected || s.pane.hidden || !s.pane.clientWidth) return;
     try { s.fit.fit(); } catch { /* not laid out yet */ }
+    // The panel leaves the page while another tab shows; the GPU canvas comes back blank and
+    // only repaints what changes, so draw the whole screen again.
+    try { s.term.refresh(0, s.term.rows - 1); } catch { /* not open yet */ }
   }
 
   const isShell = (s) => /^shell\b/i.test(s.title || "");
@@ -545,7 +610,13 @@ const Term = (() => {
       s.replaying = true;
       s.term.reset();
       if (msg.cols >= 20 && msg.rows >= 4) s.term.resize(msg.cols, msg.rows);
-      write(s, msg.snap, msg.sp);
+      // A quiet program sends nothing after its snapshot, so the replay ends here too and the
+      // terminal fits its panel; else it kept the old width until the next output.
+      write(s, msg.snap, msg.sp, () => setTimeout(() => {
+        if (!s.replaying || s.parsed !== msg.sp) return;
+        s.replaying = false;
+        if (s.id === current) fitCurrent();
+      }, 250));
       s.pos = msg.sp; // a reconnect asks for what follows the snapshot, not the whole history
       return;
     }

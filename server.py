@@ -55,7 +55,7 @@ AGENT_KEY = secrets.token_urlsafe(32)
 AGENT_ROUTES = {("POST", "propose"), ("GET", "proposal")}
 PROPOSALS = proposals.Proposals()
 FEATURES = ["merge", "sync", "drop", "proposals", "snapshots", "reviews", "events", "status", "settings", "merge-options", "jira",
-            "restore", "ui-state", *repos.FEATURES, *spotify.FEATURES]
+            "restore", "ui-state", "open-link", *repos.FEATURES, *spotify.FEATURES]
 ROUTE_MODULES = (repos, spotify)  # each answers its own routes, or None
 JIRA = jira.Jira()
 SNAPSHOT_MAX = 4 * 1024 * 1024
@@ -366,6 +366,8 @@ class Desk(BaseHTTPRequestHandler):
                 return self._send(200, {"team": engine.set_team(uuids)})
             if method == "POST" and route == "launch":
                 return self._send(200, self._launch(body))
+            if method == "POST" and route == "open-link":
+                return self._send(200, {"browser": opener.open_link(body.get("url"))})
             if method == "POST" and route == "open":
                 url = body.get("url")
                 if not isinstance(url, str):
