@@ -1,6 +1,12 @@
-# PixelDeck
+<p align="center">
+  <img src="static/app-icon.svg" alt="" width="112" height="112">
+</p>
 
-A retro desk for your Bitbucket Cloud pull requests, with Claude Code running next to the diff.
+<h1 align="center">PixelDeck</h1>
+
+<p align="center">
+  A retro desk for your Bitbucket Cloud pull requests, with Claude Code running next to the diff.
+</p>
 
 PixelDeck is a small local app. It shows the pull requests that need you, the diffs and review
 threads, your team's queue and merge history, and a built-in terminal where Claude Code can fix
@@ -46,10 +52,14 @@ Full documentation, with the architecture, security model and measured performan
   terminals), what notifies you, and your look: accent colour, number font, motion, mascots.
 - **Team and insights.** Your teammates' queues, review load and merge history. Insights pick a
   range, from 7 days to 120; a month or less is charted per day.
-- **Repos.** A tab beside the queue: the project's repositories with a search, and for each one
-  its code at any branch (folders, files with line numbers, the README), its branches, its recent
-  commits and its open pull requests. Read only; code and commits are kept once read, so going
-  back costs no API calls.
+- **Repos.** A tab beside the queue, split into a side menu and a pane: the project's repositories
+  with a search and a filter (services, helm charts, other), each service stacked with its helm
+  chart, the ones you open most and the pinned ones first; the open repository's file tree; and
+  for each one its code at any branch (folders, files with line numbers, the README), its branches,
+  its recent commits and its open pull requests. A helm button jumps between a service and its
+  chart. Code and commits are kept once read, so going back costs no API calls. A text file can
+  be edited and committed to a new branch (never straight to main, master or develop), then
+  opened as a pull request; that needs repository write on the token.
 - **Panel copies.** Copy the Queue or Insights panel: each copy keeps its own person, section
   and range, so two people or two ranges sit side by side. Copies are saved with the layout and
   open in their own window too.
@@ -79,6 +89,24 @@ Full documentation, with the architecture, security model and measured performan
   Spotify app, see below. **Preview** in the player shows it with made-up music.
 - **Guide.** A short tour on the first start, a spotlight on each part with a mascot telling it.
   The **?** in the status bar brings it back.
+
+
+## A look around
+
+The Repos panel, with made-up data: each service stacked with its helm chart, the pinned and
+the most opened first.
+
+![The Repos panel: repositories by kind, each service stacked with its helm chart](docs/img/repos-stacks.png)
+
+A repository open: its file tree on the side, the file on the right, and the helm button that
+jumps to its chart.
+
+![A repository open: the file tree on the side and a file on the right](docs/img/repos-workbench.png)
+
+Edit a file and commit it to a new branch. The second click commits; PixelDeck never writes
+straight to main, master or develop.
+
+![A file being edited, with the commit form asking for its second click](docs/img/repos-editor.png)
 
 ## Requirements
 
@@ -125,7 +153,8 @@ off. `--status` tells you whether it runs; `--server` runs the server in the con
 Create an Atlassian API token with Bitbucket scopes at
 <https://id.atlassian.com/manage-profile/security/api-tokens>. Give it the least it needs:
 read access to your user, the workspace, repositories and pull requests, plus pull request write
-if you want to open, merge and decline pull requests from PixelDeck. Nothing more: PixelDeck never needs
+if you want to open, merge and decline pull requests from PixelDeck, and repository write if you want
+to commit a file edited in the Repos panel. Nothing more: PixelDeck never needs
 admin or delete scopes. Deleting a pushed branch and the Claude fixes go through git with your own
 git credentials, not through the token.
 
@@ -213,8 +242,12 @@ folder. Files you leave out come from `briefs/`. Placeholders such as `{source}`
   token. The Jira site comes from `.env` only, never from the page, and a ticket key must look
   like one before it reaches a URL.
 - The routes the page polls (events, status) answer from memory and never call Bitbucket.
-- The Repos panel only reads (GET) and checks every repository, commit and path before it
-  reaches a URL; file contents are shown as text, never as markup.
+- The Repos panel checks every repository, commit and path before it reaches a URL; file
+  contents are shown as text, never as markup. Its one write commits one edited file: a second
+  click, never straight to main, master, develop or the repository's main branch, and always
+  with its branch and the commit it was opened at, so a branch that moved since is refused.
+  Only text shown whole is saved: UTF-8, its line endings kept, up to 512 KB, not executable
+  and not a link.
 - Spotify tokens stay on the server, in the state folder with mode 600, and never reach the page
   or a log. The sign-in comes back to `/spotify/callback` with a single-use state that expires in
   10 minutes; album art is fetched by the server from Spotify's image host only.
