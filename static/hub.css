@@ -325,12 +325,9 @@
 .tab-glyph { flex: none; color: var(--color-muted); }
 .slot-tab[aria-selected="true"] .tab-glyph { color: var(--color-accent); }
 .slot-tab:hover .tab-glyph { color: var(--color-ink-2); }
-.slot-add, .term-add { flex: none; display: grid; place-items: center; width: 24px; height: 24px; margin: auto 4px; padding: 0; border: var(--rule-hair) dashed var(--color-rule-2); background: none; color: var(--color-muted); font: 400 12px/1 var(--font-num); cursor: pointer; opacity: 0; transition: opacity 120ms steps(2, end); }
-.slot-head:hover .slot-add, .term-bar:hover .term-add, .slot-add:focus-visible, .term-add:focus-visible { opacity: 1; }
-.slot-add:hover, .term-add:hover { color: var(--color-accent-ink); background: var(--color-accent); border-style: solid; border-color: var(--color-accent); }
-.slot-add-pop { min-width: 13rem; }
-.slot-add-pop .rs-item { display: flex; align-items: center; gap: var(--space-xs); width: 100%; border: 0; background: none; font: inherit; text-align: left; }
-.slot-add-pop .rs-item:hover { background: var(--color-paper-2); color: var(--color-ink); }
+.term-add { flex: none; display: grid; place-items: center; width: 24px; height: 24px; margin: auto 4px; padding: 0; border: var(--rule-hair) dashed var(--color-rule-2); background: none; color: var(--color-muted); font: 400 12px/1 var(--font-num); cursor: pointer; opacity: 0; transition: opacity 120ms steps(2, end); }
+.term-bar:hover .term-add, .term-add:focus-visible { opacity: 1; }
+.term-add:hover { color: var(--color-accent-ink); background: var(--color-accent); border-style: solid; border-color: var(--color-accent); }
 
 /* ---------------------------------------------------------------- the retro grey theme
    Light grey like an old desktop, dark ink, and its own mascots: the same bot in orange and the
@@ -429,3 +426,49 @@
 .is-collapsed .pr-rail > :not(.rail-head), .is-collapsed .rail-head h3, .is-collapsed .rail-count { display: none; }
 .is-collapsed .rail-head { flex-direction: column; padding: var(--space-xs) 5px; }
 .pr-empty .spr { display: block; margin: 0 auto var(--space-sm); }
+
+/* ---------------------------------------------------------------- the + beside the terminal tabs */
+.term-bar > .term-tabs { flex: 0 1 auto; }
+.term-bar > .term-add { margin-right: auto; }
+
+/* ---------------------------------------------------------------- a link clicked in a terminal */
+.link-ask { width: min(34rem, calc(100% - var(--space-xl))); padding: var(--space-md) var(--space-lg); border: var(--pixel) solid var(--color-rule-2); border-radius: 0; background: var(--color-paper); color: var(--color-ink);
+  box-shadow: inset 0 0 0 var(--pixel) var(--color-paper-2), inset 0 0 0 4px var(--color-rule), 8px 8px 0 oklch(0% 0 0 / 0.45); }
+.link-ask[open] { animation: px-pop 200ms steps(4, end) both; }
+.link-ask::backdrop { background: var(--color-scrim); }
+.link-ask-head { display: flex; align-items: center; gap: var(--space-sm); margin-bottom: var(--space-xs); }
+.link-ask-head h2 { margin: 0; font: 500 var(--text-lg) var(--font-pixel); letter-spacing: 0; color: var(--color-accent); }
+.link-ask-host { margin: 0 0 var(--space-2xs); font: 400 11px var(--font-num); color: var(--color-ink); }
+.link-ask-url { margin: 0 0 var(--space-md); padding: var(--space-xs) var(--space-sm); max-height: 8rem; overflow: auto; background: var(--color-paper-3); border: var(--rule-hair) solid var(--color-rule); font: 400 var(--text-sm)/1.5 var(--font-outlier); color: var(--color-ink-2); overflow-wrap: anywhere; }
+.link-ask-foot { display: flex; justify-content: flex-end; gap: var(--space-xs); }
+@media (prefers-reduced-motion: reduce) { .link-ask[open] { animation: none; } }
+.rail-top time { flex: none; white-space: nowrap; }
+.rail-top .rail-id { min-width: 0; }
+
+/* ---------------------------------------------------------------- the queue's sections
+   Each section has a pixel glyph and a quiet colour of its own; the chosen one is tinted with it
+   and marked by a bar on its left, like the lists in the other panels. */
+.sec-chip { --sec: var(--color-muted); }
+.sec-chip[data-sec="needs"] { --sec: var(--color-accent); }
+.sec-chip[data-sec="changes"] { --sec: var(--color-bad); }
+.sec-chip[data-sec="open"] { --sec: var(--color-cool); }
+.sec-chip[data-sec="waiting"] { --sec: oklch(76% 0.06 250); }
+.sec-chip[data-sec="approved"] { --sec: var(--color-ok); }
+.sec-chip[data-sec="requests"] { --sec: oklch(74% 0.13 305); }
+.sec-chip[data-sec="pushed"] { --sec: oklch(76% 0.1 190); }
+.sec-chip[data-sec="merged"] { --sec: oklch(72% 0.12 262); }
+.sec-chip[data-sec="declined"] { --sec: var(--color-rule-2); }
+:root[data-theme="grey"] .sec-chip[data-sec="waiting"] { --sec: #4a5a78; }
+:root[data-theme="grey"] .sec-chip[data-sec="requests"] { --sec: #6b2fa0; }
+:root[data-theme="grey"] .sec-chip[data-sec="pushed"] { --sec: #0d6a6a; }
+:root[data-theme="grey"] .sec-chip[data-sec="merged"] { --sec: #1d3fa5; }
+.queue-split .sec-chip { display: grid; grid-template-columns: 11px minmax(0, 1fr) auto; align-items: center; gap: var(--space-xs);
+  border: 0; border-left: 3px solid transparent; border-radius: 0; box-shadow: none; padding: 7px var(--space-xs) 7px var(--space-sm); }
+.queue-split .sec-chip > span:first-child::before, .queue-split .sec-chip .sec-label::before { content: none; display: none; }
+.queue-split .sec-chip .sec-ico { color: color-mix(in oklch, var(--sec) 70%, var(--color-muted)); transition: color 120ms steps(2, end); }
+.queue-split .sec-chip:hover { background: color-mix(in oklch, var(--sec) 8%, var(--color-paper-2)); }
+.queue-split .sec-chip:hover .sec-ico { color: var(--sec); }
+.queue-split .sec-chip.is-current { background: color-mix(in oklch, var(--sec) 14%, var(--color-paper-2)); border-left-color: var(--sec); color: var(--color-ink); box-shadow: none; }
+.queue-split .sec-chip.is-current .sec-ico { color: var(--sec); }
+.queue-split .sec-chip .sec-n { min-width: 22px; padding: 2px 5px; margin: 0; text-align: center; font-size: 9px; line-height: 1.2; }
+.queue-split .sec-chip .sec-n.has-n { color: var(--sec); background: color-mix(in oklch, var(--sec) 16%, transparent); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--sec) 35%, transparent); }

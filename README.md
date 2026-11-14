@@ -42,6 +42,7 @@ Full documentation, with the architecture, security model and measured performan
   after what runs in them, can be renamed and dragged into any order, and show a small loader
   while something is working in them. Drop files on a terminal to paste their paths. The shells
   stay alive after you close the window, and reopening it brings their screens back as they were.
+  Web addresses in a terminal are links: a click asks first, then opens your browser or copies it.
 - **Pull requests an agent asks to open.** Instead of opening a pull request itself, an agent
   such as Claude Code runs `pixeldeck.py --propose` and waits. A notification shows the branch,
   its target and its size: **Proceed** opens it as proposed, **Review** opens the popup (target

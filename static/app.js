@@ -536,6 +536,26 @@ function personName(uuid) {
   return state.team.find((m) => m.uuid === uuid)?.name || "Teammate";
 }
 
+// A pixel glyph per queue section, 9 by 9: # is a lit pixel. Each section has its own colour too.
+const SEC_GLYPH = {
+  needs: ["...###...", "...###...", "...###...", "...###...", "...###...", ".........", "...###...", "...###...", "........."],
+  changes: ["##.....##", "###...###", ".###.###.", "..#####..", "...###...", "..#####..", ".###.###.", "###...###", "##.....##"],
+  open: [".........", "..#####..", ".#.....#.", "#.......#", "#.......#", "#.......#", ".#.....#.", "..#####..", "........."],
+  waiting: ["#########", ".#.....#.", "..#...#..", "...#.#...", "....#....", "...#.#...", "..#...#..", ".#.....#.", "#########"],
+  approved: [".........", "........#", ".......##", "#.....##.", "##...##..", ".##.##...", "..###....", "...#.....", "........."],
+  requests: [".........", "..#####..", ".#.....#.", "#..###..#", "#..###..#", ".#.....#.", "..#####..", ".........", "........."],
+  pushed: ["....#....", "...###...", "..#####..", ".#######.", "...###...", "...###...", "...###...", "...###...", "........."],
+  merged: [".#.....#.", "###...###", ".#.....#.", ".#....#..", ".#...#...", ".#..#....", ".#.#.....", "###......", ".#......."],
+  declined: [".........", ".#######.", "#.......#", "#.......#", "#.#####.#", "#.......#", "#.......#", ".#######.", "........."],
+};
+function secGlyph(id) {
+  const rows = SEC_GLYPH[id];
+  if (!rows) return "";
+  let r = "";
+  rows.forEach((row, y) => [...row].forEach((c, x) => { if (c === "#") r += `<rect x="${x}" y="${y}" width="1" height="1"/>`; }));
+  return `<svg class="sec-ico" viewBox="0 0 9 9" width="11" height="11" fill="currentColor" shape-rendering="crispEdges" aria-hidden="true">${r}</svg>`;
+}
+
 function shortWho(view) {
   const kind = viewKind(view);
   return kind === "team" ? "Team" : kind === "me" ? "You" : firstName(personName(whoUuid(view)));
@@ -569,8 +589,8 @@ function renderQueueIn(id) {
     const n = data ? b[s.id].length : "";
     const tone = n && s.id === "needs" ? " is-due" : n && s.id === "changes" ? " is-bad" : "";
     const link = copy ? `href="#" data-copy-section="${s.id}"` : `href="${hashFor({ ...state.route, section: s.id, pr: null })}"`;
-    return `<a class="sec-chip${s.id === sec.id ? " is-current" : ""}" role="tab" aria-selected="${s.id === sec.id}" ${link}>
-      <span class="sec-label"><span class="sec-long">${esc(s.label)}</span><span class="sec-short">${esc(s.short || s.label)}</span></span><span class="sec-n${tone}">${n}</span></a>`;
+    return `<a class="sec-chip${s.id === sec.id ? " is-current" : ""}" data-sec="${s.id}" role="tab" aria-selected="${s.id === sec.id}" ${link}>
+      ${secGlyph(s.id)}<span class="sec-label"><span class="sec-long">${esc(s.label)}</span><span class="sec-short">${esc(s.short || s.label)}</span></span><span class="sec-n${tone}${n ? " has-n" : ""}">${n}</span></a>`;
   }).join("");
   let visual = "", body;
   if (!data) body = skeleton();
@@ -1248,9 +1268,13 @@ function railRow(pr) {
     <span class="rail-text"><span class="rail-top"><span class="rail-id">${esc(pr.repo)} #${esc(pr.id)}</span><time>${esc(pr.updated_on ? ago(pr.updated_on) : "")}</time></span>
       <b>${esc(pr.title || "")}</b>${pr.author?.name && !isMeUuid(pr.author.uuid) ? `<small>${esc(pr.author.name)}</small>` : ""}</span></button>`;
 }
+// Folded unless you chose otherwise when the queue is on screen too: two lists side by side
+// only take room from the pull request.
+const railFolded = () => (typeof rail.collapsed === "boolean" ? rail.collapsed : Layout.isShown("queue"));
 function paintPrRail() {
   const box = Layout.body("pr")?.querySelector(".pr-rail");
   if (!box) return;
+  box.closest(".pr-shell")?.classList.toggle("is-collapsed", railFolded());
   const lists = railLists();
   const q = rail.q.trim().toLowerCase();
   const pick = (lists[rail.tab] || []).filter((pr) => !q || `${pr.repo} #${pr.id} ${pr.title} ${pr.ticket?.key || ""} ${pr.author?.name || ""}`.toLowerCase().includes(q));
@@ -1264,8 +1288,7 @@ function paintPrRail() {
 function prShell(el) {
   let shell = el.querySelector(":scope > .pr-shell");
   if (shell) return shell.querySelector(".pr-main");
-  if (rail.collapsed === null) rail.collapsed = el.clientWidth > 0 && el.clientWidth < 760;
-  el.innerHTML = `<div class="pr-shell${rail.collapsed ? " is-collapsed" : ""}">
+  el.innerHTML = `<div class="pr-shell${railFolded() ? " is-collapsed" : ""}">
     <aside class="pr-rail" aria-label="Pull requests">
       <header class="rail-head"><button class="rail-fold" type="button" data-rail-fold aria-label="Fold the list" data-tip="Fold or open the list"><span class="rail-fold-glyph" aria-hidden="true"></span></button>
         <h3>Pull requests</h3><span class="rail-count num8"></span></header>
@@ -2266,7 +2289,7 @@ function bind() {
     const railTab = t.closest("[data-rail-tab]");
     if (railTab) { rail.tab = railTab.dataset.railTab; saveRail(); return paintPrRail(); }
     if (t.closest("[data-rail-fold]")) {
-      rail.collapsed = !rail.collapsed; saveRail();
+      rail.collapsed = !railFolded(); saveRail();
       Layout.body("pr")?.querySelector(".pr-shell")?.classList.toggle("is-collapsed", rail.collapsed);
       return;
     }
@@ -2528,7 +2551,7 @@ async function boot() {
       { id: "insights", title: "Insights", copyable: true }, { id: "terminal", title: "Terminal" },
       { id: "repos", title: "Repos", place: "left" }, { id: "music", title: "Music", place: "hidden" },
     ],
-    onChange: () => { for (const b of $$(".chart-box")) b.dataset.drawn = ""; paintCharts(); Term.fit(); },
+    onChange: () => { for (const b of $$(".chart-box")) b.dataset.drawn = ""; paintCharts(); Term.fit(); paintPrRail(); },
     paramsFor: (id) => { const v = viewOf(id); return { who: v.who, section: v.section, range: v.range }; },
     onCreate: (id) => { state.animate[id] = true; renderPanel(id); renderBar(); loadView({ silent: true }); },
     onRemove: (id) => { delete state.animate[id]; renderBar(); },
