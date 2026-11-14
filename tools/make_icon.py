@@ -1,10 +1,10 @@
 """PixelDeck's icon: an IDE window (title bar, line numbers, code) with the desk bot peeking
-over its corner, looking up at the code. Drawn on a 40x40 pixel grid, written as SVG rects.
+over its corner, looking up at the code. Drawn on a 32x32 pixel grid, kept minimal so the bot leads, written as SVG rects.
 
 Run: python3 tools/make_icon.py static/app-icon.svg"""
 import sys
 
-N = 40
+N = 32
 C = {
     "T": "#0f1420",  # tile
     "E": "#1552dc",  # tile ring, the brand blue
@@ -31,7 +31,7 @@ def rect(x0, y0, x1, y1, c):
 
 
 # the tile: stepped corners, a brand blue ring, dark inside
-cut = {0: 3, 1: 2, 2: 1}
+cut = {0: 2, 1: 1}
 for y in range(N):
     inset = cut.get(y, cut.get(N - 1 - y, 0))
     for x in range(inset, N - inset):
@@ -46,38 +46,22 @@ for y in range(N):
             grid[y][x] = "E"
     else:
         grid[y][row[0]] = grid[y][row[-1]] = "E"
-for y, x in ((1, 2), (1, 37), (2, 1), (2, 38), (37, 1), (37, 38), (38, 2), (38, 37)):
+for y, x in ((1, 1), (1, N - 2), (N - 2, 1), (N - 2, N - 2)):
     grid[y][x] = "E"
 
-# the IDE window
-rect(4, 5, 31, 29, "F")
-rect(5, 8, 30, 28, "D")
-for x, c in ((6, "R"), (8, "Y"), (10, "G")):
+# the IDE window, kept plain: a title bar with its dots and three lines of code
+rect(3, 5, 25, 23, "F")
+rect(4, 8, 24, 22, "D")
+for x, c in ((5, "R"), (7, "Y"), (9, "G")):
     rect(x, 6, x, 6, c)
-rect(13, 6, 20, 6, "5")  # a tab label in the title bar
-# gutter: a line number on every code line
-for y in range(10, 27, 2):
-    rect(6, y, 7, y, "g")
-# code, two cells per word so it reads at small sizes
-lines = {
-    10: [(9, 13, "4"), (15, 20, "1")],
-    12: [(11, 14, "1"), (16, 22, "2")],
-    14: [(11, 18, "3")],
-    16: [(13, 17, "2"), (19, 23, "5")],
-    18: [(13, 15, "1"), (17, 21, "3")],
-    20: [(11, 14, "4")],
-    22: [(9, 12, "1"), (14, 17, "5")],
-    24: [(9, 9, "2")],  # the cursor
-}
-for y, words in lines.items():
-    for x0, x1, c in words:
-        rect(x0, y, x1, y, c)
-        rect(x0, y, x1, y, c)
+for y, x0, x1, c in ((11, 6, 13, "1"), (14, 8, 16, "5"), (17, 6, 10, "2")):
+    rect(x0, y, x1, y, c)
+    rect(x0, y + 1, x1, y + 1, c)
 
 # the bot, peeking over the window's bottom right corner, eyes up and to the left
 bot = [".....rr.....", ".....rr.....", "......B.....", "..bbbbbbbb..", ".ybbbbbbbbb.", ".ybkwbbbkwb.", ".ybwwbbbwwb.",
        ".ybbbbbbbbb.", ".ybbwwwwwbb.", ".ybbbbbbbbb.", "..bbbbbbbb..", "...B....B...", "..BB....BB.."]
-BX, BY = 24, 23
+BX, BY = 18, 17
 # a dark outline so the bot stands off the window behind it
 for y, row in enumerate(bot):
     for x, c in enumerate(row):
