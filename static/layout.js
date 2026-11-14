@@ -31,6 +31,22 @@ const Layout = (() => {
     hide: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
     copy: '<rect x="8.5" y="8.5" width="11" height="11" rx="1"/><path d="M15.5 8.5v-4h-11v11h4"/>',
   };
+  // A pixel glyph for each panel's tab, 9 by 9: # is a lit pixel. A copy wears its base's glyph.
+  const GLYPH = {
+    queue: ["##.######", "##.######", ".........", "##.######", "##.######", ".........", "##.####..", "##.####..", "........."],
+    repos: [".........", ".###.....", "#...####.", "#########", "#.......#", "#.......#", "#.......#", "#########", "........."],
+    pr: [".#.....#.", "###...###", ".#.....#.", ".#....#..", ".#...#...", ".#..#....", ".#.#.....", "###......", ".#......."],
+    insights: [".......##", ".......##", "....##.##", "....##.##", ".##.##.##", ".##.##.##", ".##.##.##", ".........", "#########"],
+    terminal: ["#########", "#.......#", "#.#.....#", "#..#....#", "#.#..##.#", "#.......#", "#########", ".........", "........."],
+    music: ["...######", "...######", "...#....#", "...#....#", "...#....#", ".###..###", "####.####", ".##...##.", "........."],
+  };
+  const glyph = (id) => {
+    const rows = GLYPH[panels[id]?.base] || GLYPH[id];
+    if (!rows) return "";
+    let r = "";
+    rows.forEach((row, y) => [...row].forEach((c, x) => { if (c === "#") r += `<rect x="${x}" y="${y}" width="1" height="1"/>`; }));
+    return `<svg class="tab-glyph" viewBox="0 0 9 9" width="11" height="11" fill="currentColor" shape-rendering="crispEdges" aria-hidden="true">${r}</svg>`;
+  };
   const icon = (n) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[n]}</svg>`;
   const clone = (o) => JSON.parse(JSON.stringify(o));
 
@@ -159,8 +175,8 @@ const Layout = (() => {
       el.classList.toggle("is-collapsed", !!state.collapsed[slot] && slot !== "main");
       el.querySelector(".slot-tabs").innerHTML = ids.map((id) => `
         <button class="slot-tab${isCopy(id) ? " is-copy" : ""}" type="button" role="tab" draggable="true" data-tab="${id}" aria-selected="${state.active[slot] === id}">
-          <span class="slot-tab-title">${esc(panels[id].label || panels[id].title)}</span>${badges[id] ? `<span class="slot-badge">${esc(badges[id])}</span>` : ""}
-        </button>`).join("");
+          ${glyph(id)}<span class="slot-tab-title">${esc(panels[id].label || panels[id].title)}</span>${badges[id] ? `<span class="slot-badge">${esc(badges[id])}</span>` : ""}
+        </button>`).join("") + (solo ? "" : `<button class="slot-add" type="button" data-act="add" data-area="${slot}" aria-label="Add a panel here" data-tip="Add a panel here">+</button>`);
       const tool = (act, ic, label) => `<button class="slot-tool" type="button" data-act="${act}" data-area="${slot}" data-tip="${label}" aria-label="${label}">${icon(ic)}</button>`;
       const active = state.active[slot];
       const tools = [];
@@ -197,9 +213,40 @@ const Layout = (() => {
     paint();
   }
 
+  // The + on a tab row: show a hidden panel here, or start a copy here.
+  let addPop = null;
+  function closeAdd() { if (addPop) { addPop.remove(); addPop = null; } }
+  function addMenu(button, slot) {
+    closeAdd();
+    const hidden = state.hidden.filter((id) => panels[id]);
+    const copyable = Object.keys(panels).filter((id) => panels[id].base === id && canCopy(id));
+    const items = [
+      ...hidden.map((id) => `<button class="rs-item" type="button" data-add-show="${id}" style="--k:0">${glyph(id)} Show ${esc(panels[id].title)}</button>`),
+      ...copyable.map((id, i) => `<button class="rs-item" type="button" data-add-copy="${id}" style="--k:${i + 1}">${glyph(id)} New copy of ${esc(panels[id].title)}</button>`),
+    ];
+    addPop = document.createElement("div");
+    addPop.className = "rs-pop slot-add-pop";
+    addPop.setAttribute("role", "menu");
+    addPop.innerHTML = items.length ? items.join("") : '<p class="rs-group">Every panel is out already.</p>';
+    document.body.append(addPop);
+    const r = button.getBoundingClientRect();
+    addPop.style.left = `${Math.round(Math.min(r.left, innerWidth - addPop.offsetWidth - 8))}px`;
+    addPop.style.top = `${Math.round(r.bottom + 4)}px`;
+    addPop.addEventListener("click", (e) => {
+      const show = e.target.closest("[data-add-show]"), copy = e.target.closest("[data-add-copy]");
+      if (show) move(show.dataset.addShow, slot);
+      if (copy) { const id = duplicate(copy.dataset.addCopy); if (id && slotOf(id) !== slot) move(id, slot); }
+      closeAdd();
+    });
+  }
+  document.addEventListener("pointerdown", (e) => { if (addPop && !addPop.contains(e.target) && !e.target.closest(".slot-add")) closeAdd(); }, true);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeAdd(); });
+
   function onClick(e) {
     const tab = e.target.closest(".slot-tab");
     if (tab) { activate(tab.dataset.tab); return; }
+    const add = e.target.closest(".slot-add");
+    if (add) { if (addPop) closeAdd(); else addMenu(add, add.dataset.area); return; }
     const tool = e.target.closest(".slot-tool");
     if (!tool) return;
     const slot = tool.dataset.area, id = state.active[slot];
@@ -209,6 +256,7 @@ const Layout = (() => {
     else if (act === "to-tabs") move(id, "main");
     else if (act === "window") popout(id);
     else if (act === "duplicate") duplicate(id);
+    else if (act === "add") addMenu(tool, slot);
     else if (act === "hide") { if (isCopy(id)) remove(id); else hide(id); }
     else if (act === "collapse") { state.collapsed[slot] = !state.collapsed[slot]; save(); paint(); }
   }

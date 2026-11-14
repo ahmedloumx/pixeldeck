@@ -2403,7 +2403,7 @@ async function boot() {
   Repos.mount(Layout.body("repos"));
   Music.mount(Layout.body("music"));
   RetroSelect.enhanceAll();
-  Prefs.onChange(() => paintLayoutMenu());
+  Prefs.onChange((p, patch) => { paintLayoutMenu(); if ("theme" in patch) { Term.retheme(); for (const b of $$(".chart-box")) b.dataset.drawn = ""; paintCharts(); } });
   bind();
   state.route = parseHash();
   renderAll();
