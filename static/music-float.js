@@ -21,11 +21,12 @@ const MusicFloat = (() => {
   function html(kind) {
     const g = core.glyph;
     const mq = (cls) => `<div class="mu-mq ${cls}"><span class="mu-mq-track"><span class="mu-mq-text"></span><span class="mu-mq-text" aria-hidden="true"></span></span></div>`;
+    const refresh = `<button class="mc-btn" type="button" data-music="refresh" aria-label="Refresh: ask Spotify again now" data-tip="Refresh">${g("refresh", 2)}</button>`;
     const tools = kind === "float"
-      ? `<button class="mc-btn" type="button" data-mc="list" aria-pressed="false" aria-label="Show the list" data-tip="The list">${g("list", 2)}</button>
+      ? `${refresh}<button class="mc-btn" type="button" data-mc="list" aria-pressed="false" aria-label="Show the list" data-tip="The list">${g("list", 2)}</button>
          <button class="mc-btn" type="button" data-mc="dock" aria-label="Attach to the tabs" data-tip="Attach to the tabs">${g("dock", 2)}</button>
          <button class="mc-btn" type="button" data-mc="close" aria-label="Close the mini player" data-tip="Close">${g("close", 2)}</button>`
-      : `<button class="mc-btn" type="button" data-mc="list" aria-pressed="false" aria-label="Show the list" data-tip="The list">${g("list", 2)}</button>
+      : `${refresh}<button class="mc-btn" type="button" data-mc="list" aria-pressed="false" aria-label="Show the list" data-tip="The list">${g("list", 2)}</button>
          <button class="mc-btn" type="button" data-mc="float" aria-label="Float it over the layout" data-tip="Float it">${g("pop", 2)}</button>
          <button class="mc-btn" type="button" data-music="open" aria-label="Open the Music panel" data-tip="Open the Music panel">${g("dock", 2)}</button>`;
     return `<div class="mc-head" data-mc-grip>
@@ -200,9 +201,7 @@ const MusicFloat = (() => {
     anchor = at || anchor;
     show(drop);
     expand(drop, true);
-    const r = anchor.getBoundingClientRect(), w = drop.offsetWidth || 320;
-    drop.style.left = `${Math.round(Math.min(Math.max(MARGIN, r.right - w), innerWidth - w - MARGIN))}px`;
-    drop.style.top = `${Math.round(r.bottom + 6)}px`;
+    placeDrop();
     dropOpen = true;
     anchor.querySelector("[data-music='drop']")?.setAttribute("aria-expanded", "true");
     animate(drop, "is-dropping");
@@ -214,6 +213,16 @@ const MusicFloat = (() => {
     anchor?.querySelector("[data-music='drop']")?.setAttribute("aria-expanded", "false");
     if (instant) { drop.hidden = true; return; }
     animate(drop, "is-lifting", () => { if (!dropOpen) drop.hidden = true; });
+  }
+  // Under the mini player, its right edge on the mini player's right edge, never past the window:
+  // narrower on a narrow window, and its list shorter when the window is short.
+  function placeDrop() {
+    const r = anchor.getBoundingClientRect();
+    drop.style.width = `${Math.min(316, innerWidth - 2 * MARGIN)}px`;
+    const w = drop.offsetWidth, top = Math.round(r.bottom + 6);
+    drop.style.left = `${Math.round(Math.min(Math.max(MARGIN, r.right - w), innerWidth - w - MARGIN))}px`;
+    drop.style.top = `${top}px`;
+    drop.style.maxHeight = `${Math.max(160, innerHeight - top - MARGIN)}px`;
   }
   function toggleDropdown(at) { if (drop && !drop.hidden && dropOpen) closeDropdown(); else openDropdown(at); }
 
@@ -286,7 +295,7 @@ const MusicFloat = (() => {
       el.addEventListener("pointercancel", onUp);
       el.addEventListener("click", onClick);
     }
-    addEventListener("resize", () => { if (float && !float.hidden) { place(st.x, st.y); save(); } if (dropOpen) openDropdown(); });
+    addEventListener("resize", () => { if (float && !float.hidden) { place(st.x, st.y); save(); } if (dropOpen) placeDrop(); });
     // the list fills in after it opens: keep the whole window on screen as it grows
     new ResizeObserver(() => { if (!float.hidden && !drag) place(st.x, st.y); }).observe(float);
     document.addEventListener("keydown", (e) => { if (e.key === "Escape" && dropOpen) { closeDropdown(); anchor?.querySelector("[data-music='drop']")?.focus(); } });
@@ -303,6 +312,7 @@ const MusicFloat = (() => {
       refit() { for (const el of instances()) { core.fit(el._r.title); core.fit(el._r.sub); } },
       relook() { for (const el of [float, drop]) { el._r.art.dataset.art = ""; if (!el.hidden) paintOne(el); } },
       queued() { for (const el of instances()) if (el._list.kind === "queue") { el._list.key = ""; loadList(el); } },
+      refreshed() { for (const el of instances()) if (!el._r.list.hidden) { el._list.key = ""; loadList(el); } },
       mode(m) {
         if (m === "live" || m === "demo") { if (st.open && float.hidden) openFloat({ quiet: true }); }
         else { float.hidden = true; closeDropdown(true); }

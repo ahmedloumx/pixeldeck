@@ -30,8 +30,11 @@ FEATURES = ["spotify"]
 AUTHORIZE_URL = "https://accounts.spotify.com/authorize"
 TOKEN_URL = "https://accounts.spotify.com/api/token"
 API = "https://api.spotify.com/v1"
+# Everything the player may use, asked once: a later feature should not cost another sign-in.
+# (No email scope: nothing here needs it.)
 SCOPES = ("user-read-playback-state user-modify-playback-state user-read-currently-playing playlist-read-private user-read-private "
-          "user-library-read user-library-modify user-read-recently-played playlist-read-collaborative")
+          "user-library-read user-library-modify user-read-recently-played playlist-read-collaborative "
+          "user-read-playback-position user-top-read user-follow-read playlist-modify-private playlist-modify-public")
 # What the library asks for beyond the first sign-in. Someone who connected before these were
 # asked for gets a "reconnect" answer from the route that needs one, never a failure.
 LIBRARY_READ, LIBRARY_WRITE, RECENT = "user-library-read", "user-library-modify", "user-read-recently-played"
@@ -68,9 +71,10 @@ TEXT_MAX = 300
 
 PREMIUM = "Playback control needs Spotify Premium: play, pause, skip, seek, volume and devices are Premium only."
 NOT_CONNECTED = "Spotify is not connected. Press Connect in the Music panel."
-NO_DEVICE = "No active Spotify device. Open Spotify on a phone or computer, or pick a device in the list."
+NO_DEVICE = "No active Spotify device. Open Spotify on your phone or computer, or pick a device in the list."
+NO_DEVICE_OPEN = "No Spotify device is open. Open Spotify on your phone or computer, then try again."
 NOT_SHARED = "Spotify does not share this playlist with apps. Its own editorial playlists stay inside the Spotify app."
-RECONNECT = "Spotify was connected before PixelDeck asked to read your library. Reconnect to unlock it."
+RECONNECT = "Spotify asks once more because PixelDeck now reads your library; after this it stays signed in."
 
 
 class SpotifyError(Exception):
@@ -82,6 +86,10 @@ class SpotifyError(Exception):
 
 class NotConnected(PermissionError):
     """No usable sign-in: the server answers 403 and the page shows Connect."""
+
+
+class NoDevice(SpotifyError):
+    """Spotify has no active device to obey a player command."""
 
 
 # ---------------------------------------------------------------- plumbing
@@ -293,6 +301,7 @@ class Client:
         self.art_bytes = 0
         self.art_lock = threading.Lock()
         self.items_path = None         # "items" or "tracks": which name this account's API answers for a playlist's songs
+        self.last_device = None        # the device last seen playing: the first choice to wake
 
     # ---- settings and the token file ---------------------------------
 
@@ -338,7 +347,8 @@ class Client:
         data = {
             "client_id": client_id, "access_token": access, "refresh_token": refresh,
             "expires_at": self.clock() + (expires if _int(expires, 0) > 0 else 3600),
-            "scope": payload.get("scope") if isinstance(payload.get("scope"), str) else (previous or {}).get("scope", ""),
+            # a renewal that names no scopes keeps the ones granted at sign-in
+            "scope": payload["scope"] if isinstance(payload.get("scope"), str) and payload["scope"].strip() else (previous or {}).get("scope", ""),
         }
         _write_private(self.store(), data)
         return data
@@ -394,7 +404,7 @@ class Client:
             self._keep(payload, entry["client_id"])
             self.profile, self.profile_at = None, 0
 
-    def _access(self, stale=None):
+    def _access(self, stale=None, ahead=EARLY_REFRESH):
         """A live access token. With stale, that one was refused: renew unless another thread already did."""
         with self.lock:
             tok = self._load()
@@ -402,7 +412,7 @@ class Client:
                 raise NotConnected(NOT_CONNECTED)
             if stale is not None and tok["access_token"] != stale:
                 return tok["access_token"]
-            if stale is None and tok.get("expires_at", 0) - EARLY_REFRESH > self.clock():
+            if stale is None and tok.get("expires_at", 0) - ahead > self.clock():
                 return tok["access_token"]
             status, payload = self._token_request({"grant_type": "refresh_token", "refresh_token": tok["refresh_token"], "client_id": tok["client_id"]})
             if status == 200:
@@ -461,7 +471,7 @@ class Client:
             raise SpotifyError(403, f"Spotify refused this account{f': {message}' if message else ''}. In development mode only the "
                                     "app's owner and the users listed under User Management in the Spotify dashboard can use it.")
         if status == 404 and player and (reason == "NO_ACTIVE_DEVICE" or method != "GET"):
-            raise SpotifyError(404, NO_DEVICE)
+            raise NoDevice(404, NO_DEVICE)
         raise SpotifyError(status, message or f"Spotify answered {status}.")
 
     def me(self):
@@ -549,17 +559,42 @@ def _bounded(value, low, high, what):
     return value
 
 
+def _pick_device(devices):
+    """The device to wake: the one last seen playing, else the active one, else a computer, else any."""
+    usable = [d for d in devices if d and d["id"] and not d["restricted"]]
+    for fits in (lambda d: d["id"] == CLIENT.last_device, lambda d: d["active"], lambda d: d["type"].lower() == "computer", lambda d: True):
+        hit = next((d for d in usable if fits(d)), None)
+        if hit:
+            return hit
+    return None
+
+
+def _on_a_device(command, params):
+    """Run a player command. When Spotify has no active device, wake the best one, move playback
+    there and try once more on it; with no device at all, say how to get one."""
+    try:
+        return command(params)
+    except NoDevice:
+        raw = CLIENT.call("GET", "/me/player/devices") or {}
+        device = _pick_device([trim_device(d) for d in raw.get("devices") or []])
+        if not device:
+            raise NoDevice(404, NO_DEVICE_OPEN) from None
+        CLIENT.call("PUT", "/me/player", body={"device_ids": [device["id"]], "play": False})
+        CLIENT.last_device = device["id"]
+        return command({**params, "device_id": device["id"]})
+
+
 def _control(body):
     action, value = body.get("action"), body.get("value")
     params = _device_params(body)
     if action == "play":
-        CLIENT.call("PUT", "/me/player/play", params)
+        _on_a_device(lambda p: CLIENT.call("PUT", "/me/player/play", p), params)
     elif action == "pause":
         CLIENT.call("PUT", "/me/player/pause", params)
     elif action == "next":
-        CLIENT.call("POST", "/me/player/next", params)
+        _on_a_device(lambda p: CLIENT.call("POST", "/me/player/next", p), params)
     elif action == "previous":
-        CLIENT.call("POST", "/me/player/previous", params)
+        _on_a_device(lambda p: CLIENT.call("POST", "/me/player/previous", p), params)
     elif action == "seek":
         CLIENT.call("PUT", "/me/player/seek", {**params, "position_ms": _bounded(value, 0, 24 * 3600 * 1000, "position")})
     elif action == "volume":
@@ -581,9 +616,31 @@ def _now():
     if not CLIENT.connected():
         return {"connected": False}
     try:
-        return trim_player(CLIENT.call("GET", "/me/player", {"additional_types": "track,episode"}))
+        now = trim_player(CLIENT.call("GET", "/me/player", {"additional_types": "track,episode"}))
     except NotConnected as exc:
         return {"connected": False, "error": str(exc)}
+    if now.get("device") and now["device"]["id"]:
+        CLIENT.last_device = now["device"]["id"]
+    return now
+
+
+def _refresh():
+    """Everything at once, now: renew a sign-in that is close to its end, forget the cached
+    profile, and read what plays and the devices again."""
+    if not CLIENT.connected():
+        return {"now": {"connected": False}, "devices": []}
+    try:
+        CLIENT._access(ahead=600)
+    except NotConnected as exc:
+        return {"now": {"connected": False, "error": str(exc)}, "devices": []}
+    with CLIENT.lock:
+        CLIENT.profile, CLIENT.profile_at = None, 0
+    now = _now()
+    try:
+        devices = _devices()["devices"]
+    except (SpotifyError, PermissionError):
+        devices = []
+    return {"now": now, "devices": devices}
 
 
 def _devices():
@@ -597,6 +654,7 @@ def _transfer(body):
     if not device:
         raise ValueError("device_id required")
     CLIENT.call("PUT", "/me/player", body={"device_ids": [device], "play": body.get("play") is True})
+    CLIENT.last_device = device
     return {"ok": True}
 
 
@@ -823,7 +881,7 @@ def _play(body):
             raise ValueError("offset_uri is not a song in what plays")
         if not (context and match.group(1) == "artist"):  # an artist plays from its top: Spotify takes no offset there
             payload["offset"] = {"uri": start}
-    CLIENT.call("PUT", "/me/player/play", _device_params(body), body=payload)
+    _on_a_device(lambda p: CLIENT.call("PUT", "/me/player/play", p, body=payload), _device_params(body))
     return {"ok": True}
 
 
@@ -831,7 +889,7 @@ def _play_playlist(body):
     ident = body.get("id")
     if not isinstance(ident, str) or not PLAYLIST_ID_RE.fullmatch(ident):
         raise ValueError("id is not a Spotify playlist id")
-    CLIENT.call("PUT", "/me/player/play", _device_params(body), body={"context_uri": f"spotify:playlist:{ident}"})
+    _on_a_device(lambda p: CLIENT.call("PUT", "/me/player/play", p, body={"context_uri": f"spotify:playlist:{ident}"}), _device_params(body))
     return {"ok": True}
 
 
@@ -844,7 +902,7 @@ GETS = {
 }
 POSTS = {
     "spotify-control": _control, "spotify-transfer": _transfer, "spotify-playlist-play": _play_playlist,
-    "spotify-play": _play, "spotify-queue-add": _queue_add, "spotify-like": _like,
+    "spotify-play": _play, "spotify-queue-add": _queue_add, "spotify-like": _like, "spotify-refresh": lambda b: _refresh(),
 }
 
 

@@ -29,6 +29,9 @@
 .mu-from { font: 400 8px/1 var(--font-num); color: var(--color-muted); letter-spacing: 0.06em; }
 .mu-top-tools { display: flex; gap: var(--space-2xs); margin-left: auto; }
 .mu-tool { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; font-size: var(--text-sm); }
+/* refresh turns a quarter at a time while it asks */
+.is-busy > .mu-glyph--refresh { animation: mu-turn 480ms steps(4, end) infinite; }
+@keyframes mu-turn { to { transform: rotate(360deg); } }
 .mu-boot { display: grid; justify-items: center; gap: var(--space-sm); padding: var(--space-xl) 0; color: var(--color-muted); text-align: center; }
 .mu-boot .num8 { font-size: 10px; color: var(--mu-lcd-ink); text-shadow: 0 0 6px var(--mu-lcd-glow); }
 
@@ -41,9 +44,12 @@
 /* ------------------------------------------------------------ the boombox */
 .mu-stage { position: relative; padding-top: 58px; }
 .mu-crew { position: absolute; inset: 0 0 auto 0; height: 58px; pointer-events: none; }
-.mu-slime, .mu-bot { position: absolute; bottom: -2px; line-height: 0; }
-.mu-slime { left: 7%; }
-.mu-bot { right: 7%; bottom: -1px; }
+/* each sits in a fixed box, centred on its feet, so a squash or a stretch never slides it sideways */
+.mu-slime, .mu-bot { position: absolute; bottom: -2px; display: flex; align-items: flex-end; justify-content: center; line-height: 0; }
+.mu-slime { left: 7%; width: 72px; height: 48px; }
+.mu-bot { right: 7%; bottom: -1px; width: 56px; height: 60px; }
+.mu-slime svg { width: 64px; height: 40px; }
+.mu-bot svg { width: 48px; height: 52px; }
 :root.no-mascots .mu-crew { visibility: hidden; }
 
 .mu-box {
@@ -367,7 +373,10 @@
   color: var(--color-ink); background: var(--color-paper); border: var(--pixel) solid var(--color-rule-2);
   box-shadow: inset 0 0 0 var(--pixel) var(--color-paper-2), 6px 6px 0 var(--sprite-dark), 0 18px 40px oklch(0% 0 0 / 0.5); }
 .mc[hidden] { display: none; }
-.mc--drop { z-index: calc(var(--z-sticky) + 60); }
+/* the dropdown sits over everything, the bell panel's way: the sticky header, the slots, toasts */
+.mc--drop { z-index: calc(var(--z-toast) + 4); grid-template-rows: auto auto auto minmax(0, 1fr); overflow: hidden; }
+.mc--drop .mc-list { grid-template-rows: auto minmax(0, 1fr); min-height: 0; }
+.mc--drop .mc-rows { max-height: none; min-height: 0; }
 .mc.is-dragging { box-shadow: inset 0 0 0 var(--pixel) var(--color-paper-2), 10px 10px 0 var(--sprite-dark), 0 26px 50px oklch(0% 0 0 / 0.55); }
 .mc-head { display: flex; align-items: center; gap: 8px; height: 28px; margin: 0 -10px; padding: 0 4px 0 8px; cursor: grab; user-select: none; touch-action: none;
   background: repeating-linear-gradient(to bottom, var(--color-paper-2) 0 2px, var(--color-paper-3) 2px 4px); border-bottom: var(--pixel) solid var(--color-rule-2); }
@@ -435,22 +444,23 @@
 @keyframes mc-lift { from { clip-path: inset(0); } to { clip-path: inset(0 0 100% 0); } }
 
 /* ------------------------------------------------------------ the crew dances while it plays */
-.mu.is-playing .mu-slime { animation: mu-bob 520ms steps(2, jump-none) infinite; }
-.mu-slime { --bob: -8px; } .mu-bot { --nod: 4px; }
-.mu.is-playing .mu-slime g[data-f="1"] { display: inline; animation: mu-show 520ms steps(1, end) infinite; }
-.mu.is-playing .mu-slime g[data-f="0"] { animation: mu-hide 520ms steps(1, end) infinite; }
-.mu.is-playing .mu-bot { animation: mu-nod 520ms steps(2, jump-none) 260ms infinite; }
-.mu.is-playing .mu-bot g[data-f="2"] { display: inline; animation: mu-show 520ms steps(1, end) 260ms infinite; opacity: 0; }
-.mu.is-playing .mu-bot g[data-f="0"] { animation: mu-hide 520ms steps(1, end) 260ms infinite; }
-.mu.is-playing .mu-cone { animation: mu-thump 520ms steps(1, end) infinite; }
+/* A calm 100 beats a minute: the slime hops on one beat, the bot on the next. Each hop is a
+   squash, a small lift while stretched, a half settle, then rest; all in whole steps. */
+.mu.is-playing .mu-slime { animation: mu-hop 1200ms steps(1, end) infinite; }
+.mu.is-playing .mu-slime svg { animation: mu-squash-slime 1200ms steps(1, end) infinite; }
+.mu.is-playing .mu-bot { animation: mu-hop 1200ms steps(1, end) -600ms infinite; }
+.mu.is-playing .mu-bot svg { animation: mu-squash-bot 1200ms steps(1, end) -600ms infinite; }
+.mu.is-playing .mu-cone { animation: mu-thump 600ms steps(1, end) infinite; }
+/* the bot in the terminal bar bobs along, gently, while music plays */
+body.is-music-playing .term-mascot .spr { animation: mu-bob-small 1200ms steps(1, end) -600ms infinite; }
 
 @keyframes mu-scroll { to { transform: translateX(calc(-1 * var(--mq-dist, 0px))); } }
 @keyframes mu-blink { 50% { opacity: 0; } }
-@keyframes mu-bob { from { transform: translateY(0); } to { transform: translateY(var(--bob, -6px)); } }
-@keyframes mu-nod { from { transform: translateY(0); } to { transform: translateY(var(--nod, 3px)); } }
-@keyframes mu-show { 0% { opacity: 1; } 50% { opacity: 0; } }
-@keyframes mu-hide { 0% { opacity: 0; } 50% { opacity: 1; } }
-@keyframes mu-thump { 0% { transform: scale(1.07); } 50% { transform: scale(1); } }
+@keyframes mu-hop { 0% { translate: 0 0; } 12.5% { translate: 0 -4px; } 25% { translate: 0 -2px; } 37.5%, 100% { translate: 0 0; } }
+@keyframes mu-squash-slime { 0% { width: 68px; height: 36px; } 12.5% { width: 60px; height: 44px; } 25%, 100% { width: 64px; height: 40px; } }
+@keyframes mu-squash-bot { 0% { width: 52px; height: 48px; } 12.5% { width: 44px; height: 56px; } 25%, 100% { width: 48px; height: 52px; } }
+@keyframes mu-bob-small { 0%, 25%, 100% { translate: 0 0; } 12.5% { translate: 0 -2px; } }
+@keyframes mu-thump { 0% { transform: scale(1.05); } 25% { transform: scale(1); } }
 @keyframes mu-reel { to { transform: rotate(60deg); } }
 @keyframes mu-eq-a { 0% { clip-path: inset(75% 0 0 0); } 17% { clip-path: inset(25% 0 0 0); } 33% { clip-path: inset(50% 0 0 0); } 50% { clip-path: inset(12.5% 0 0 0); } 67% { clip-path: inset(62.5% 0 0 0); } 83% { clip-path: inset(37.5% 0 0 0); } }
 @keyframes mu-eq-b { 0% { clip-path: inset(50% 0 0 0); } 20% { clip-path: inset(87.5% 0 0 0); } 40% { clip-path: inset(25% 0 0 0); } 60% { clip-path: inset(62.5% 0 0 0); } 80% { clip-path: inset(0% 0 0 0); } }
@@ -462,8 +472,7 @@
   .mu *, .mu *::before, .mu *::after, .st-music *, .mc, .mc * { animation: none !important; }
   .ml-card:hover { transform: none; }
   .mu.is-playing .mu-eq i::after { clip-path: inset(var(--rest, 50%) 0 0 0); }
-  .mu.is-playing .mu-slime g[data-f="1"], .mu.is-playing .mu-bot g[data-f="2"] { display: none; }
-  .mu.is-playing .mu-slime g[data-f="0"], .mu.is-playing .mu-bot g[data-f="0"] { opacity: 1; }
+  body.is-music-playing .term-mascot .spr, .is-busy > .mu-glyph--refresh { animation: none !important; }
   .st-music.is-playing .mm-eq i:nth-child(2) { height: 100%; } .st-music.is-playing .mm-eq i:nth-child(3) { height: 60%; }
   .mu-tape:hover { transform: none; }
 }
@@ -471,8 +480,7 @@
 :root[data-motion="calm"] .mc, :root[data-motion="calm"] .mc * { animation: none !important; }
 :root[data-motion="calm"] .ml-card:hover { transform: none; }
 :root[data-motion="calm"] .mu.is-playing .mu-eq i::after { clip-path: inset(var(--rest, 50%) 0 0 0); }
-:root[data-motion="calm"] .mu.is-playing .mu-slime g[data-f="1"], :root[data-motion="calm"] .mu.is-playing .mu-bot g[data-f="2"] { display: none; }
-:root[data-motion="calm"] .mu.is-playing .mu-slime g[data-f="0"], :root[data-motion="calm"] .mu.is-playing .mu-bot g[data-f="0"] { opacity: 1; }
+:root[data-motion="calm"] body.is-music-playing .term-mascot .spr, :root[data-motion="calm"] .is-busy > .mu-glyph--refresh { animation: none !important; }
 :root[data-motion="calm"] .st-music.is-playing .mm-eq i:nth-child(2) { height: 100%; }
 :root[data-motion="calm"] .st-music.is-playing .mm-eq i:nth-child(3) { height: 60%; }
 :root[data-motion="calm"] .mu-tape:hover { transform: none; }
