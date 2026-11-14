@@ -8,6 +8,7 @@ limits user API tokens per hour and the dashboard polls in the background.
 
 import base64
 import json
+import secrets
 import threading
 import time
 import urllib.error
@@ -19,6 +20,27 @@ import config
 
 API = "https://api.bitbucket.org/2.0"
 HOURLY_LIMIT = 1000
+
+
+def multipart(fields, files, boundary=None):
+    """A multipart/form-data body: fields are (name, text) pairs, files (field name, file
+    name, bytes). The bytes go out untouched. A name holding a quote, CR or LF is refused,
+    not escaped: it would end the header it sits in. The boundary never occurs in a value."""
+    for name in [f[0] for f in fields] + [n for f in files for n in f[:2]]:
+        if not isinstance(name, str) or any(c in name for c in '"\r\n'):
+            raise ValueError("a form field name cannot hold quotes or line breaks")
+    values = [v.encode("utf-8") for _, v in fields] + [f[2] for f in files]
+    boundary = boundary or secrets.token_hex(16)
+    while any(boundary.encode() in v for v in values):
+        boundary = secrets.token_hex(16)
+    out = []
+    for (name, _), value in zip(fields, values):
+        out += [f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"), value, b"\r\n"]
+    for name, filename, data in files:
+        out += [f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"; filename="{filename}"\r\n'
+                "Content-Type: application/octet-stream\r\n\r\n".encode("utf-8"), data, b"\r\n"]
+    out.append(f"--{boundary}--\r\n".encode())
+    return boundary, b"".join(out)
 
 
 class BitbucketError(Exception):
@@ -111,6 +133,30 @@ class Client:
         except (urllib.error.URLError, TimeoutError) as exc:
             raise BitbucketError(0, str(getattr(exc, "reason", exc))) from None
         return raw[:limit].decode("utf-8", "replace"), len(raw) > limit
+
+    def post_form(self, path, fields, files):
+        """POST a multipart/form-data body (Bitbucket takes commits this way, at /src).
+        Answers the status and the Location header; errors as send() raises them."""
+        boundary, data = multipart(fields, files)
+        url = path if path.startswith("http") else API + path
+        request = urllib.request.Request(url, data=data, method="POST", headers={
+            "Accept": "application/json", "Authorization": self._auth_header(), "User-Agent": "pixeldeck/1.0",
+            "Content-Type": f"multipart/form-data; boundary={boundary}"})
+        with self._lock:
+            self._calls.append(time.time())
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                response.read()
+                return {"status": response.status, "location": response.headers.get("Location")}
+        except urllib.error.HTTPError as exc:
+            raw = exc.read().decode("utf-8", "replace")
+            try:
+                message = json.loads(raw)["error"]["message"]
+            except (ValueError, KeyError, TypeError):
+                message = raw[:240] or str(exc.reason)
+            raise BitbucketError(exc.code, message) from None
+        except (urllib.error.URLError, TimeoutError) as exc:
+            raise BitbucketError(0, str(getattr(exc, "reason", exc))) from None
 
     def paged(self, path, params=None, max_pages=10, stop=None, meta=None):
         """Yield values across pages; stop(value) returning True ends the walk.

@@ -1,9 +1,13 @@
-"""The Repos panel's routes: repositories, branches, commits and files, read from Bitbucket.
+"""The Repos panel's routes: repositories, branches, commits and files, read from Bitbucket,
+and one write: a commit of one edited text file.
 
-Read only: every call here is a GET. Every input is checked before it reaches a URL: the
-repository must be one of the listed slugs, a commit a hex hash, a branch a plain ref name,
-a path relative with no dot segments or control characters, and each path segment is
-url-encoded on its own.
+Every read is a GET. Every input is checked before it reaches a URL: the repository must be
+one of the listed slugs, a commit a hex hash, a branch a plain ref name, a path relative with
+no dot segments or control characters, and each path segment is url-encoded on its own.
+
+The commit is refused before any call when it would land straight on main, master, develop
+or the repository's main branch, and it always names both its branch and its parent, so a
+branch that moved since the file was opened is refused rather than overwritten.
 
 Branch names hold slashes, so a branch is resolved to its commit hash first and the code is
 browsed by hash. What a hash lists never changes, so those answers are kept (bounded by
@@ -16,7 +20,11 @@ import time
 from collections import OrderedDict
 from urllib.parse import quote
 
-FEATURES = ["repos"]
+import gitscan
+from bitbucket import BitbucketError
+
+FEATURES = ["repos", "repo-commit"]
+BODY_MAX = {"repo-commit": 3 * 1024 * 1024}  # a 512 KB file, JSON-escaped, with room to spare
 
 LIST_TTL = 300  # the repository list
 BRANCH_TTL = 60  # branch tips move with every push
@@ -39,6 +47,12 @@ BRANCH_FIELDS = ("next,size,values.name,values.target.hash,values.target.date,va
 COMMIT_FIELDS = "next,values.hash,values.date,values.message,values.author.raw,values.author.user.display_name"
 ATTRIBUTES = ("binary", "lfs", "link", "executable", "subrepository")
 UNREADABLE = ("binary", "lfs", "subrepository")  # shown as "open on Bitbucket", never downloaded
+# Bitbucket keeps an executable bit or a link only when the upload says so again, in a header
+# form that cannot be checked from here: those files are edited on Bitbucket instead.
+KEEP_MODE = ("executable", "link")
+PROTECTED = ("main", "master", "develop")
+CHART_SUFFIX = "-helm-chart"
+MESSAGE_MAX = 4000
 
 _SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 _HASH = re.compile(r"[0-9a-fA-F]{7,40}")
@@ -47,6 +61,7 @@ _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 # git's own ref rules, plus the double quote: names sit inside a quoted BBQL string.
 _BAD_REF = re.compile(r'[\x00-\x20\x7f~^:?*\[\\"]')
 _README = re.compile(r"readme(\.(md|markdown|txt|rst))?", re.IGNORECASE)
+_MESSAGE_BAD = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")  # a message keeps its tabs and new lines only
 
 
 class _Cache:
@@ -82,6 +97,11 @@ class _Cache:
 
     def _drop(self, key):
         self.bytes -= self.items.pop(key)[1]
+
+    def forget(self, match):
+        with self.lock:
+            for key in [k for k in self.items if match(k)]:
+                self._drop(key)
 
 
 CACHE = _Cache()
@@ -210,8 +230,34 @@ def repo_list(engine, force=False):
             "url": _web(engine, slug),
         })
     repos.sort(key=lambda r: r["updated_on"], reverse=True)
+    pairs = pair_charts([r["slug"] for r in repos])
+    charts = {}
+    for chart, service in pairs.items():
+        charts.setdefault(service, []).append(chart)
+    for r in repos:
+        slug = r["slug"]
+        r["charts"] = charts.get(slug, [])
+        r["service"] = pairs.get(slug, "")
+        r["kind"] = "helm" if slug.endswith(CHART_SUFFIX) else "service" if r["charts"] else "other"
     out = {"project": project, "repos": repos, "total": meta.get("size") or len(repos), "at": time.time()}
     return CACHE.put(("repos", key), out, ttl=LIST_TTL)
+
+
+def pair_charts(slugs):
+    """Each helm chart repository and the service it deploys, by name: the chart is the
+    service's slug plus "-helm-chart", or that with a trailing "-service" dropped first
+    (x-service-helm-chart deploys x). A chart matching neither is an infrastructure chart.
+    Two charts can claim one service: the exact match comes first, then by name."""
+    names = set(slugs)
+    services = {s for s in names if not s.endswith(CHART_SUFFIX)}
+    found = []
+    for chart in names - services:
+        base = chart[: -len(CHART_SUFFIX)]
+        if base in services:
+            found.append((base, 0, chart))
+        elif base.endswith("-service") and base[: -len("-service")] in services:
+            found.append((base[: -len("-service")], 1, chart))
+    return {chart: service for service, _, chart in sorted(found)}
 
 
 def known_repo(engine, value):
@@ -327,7 +373,135 @@ def read_file(engine, slug, sha, path):
             out["binary"] = True
         else:
             out["text"], out["cut"] = text, cut
+    out["endings"] = endings(out["text"]) if out["text"] is not None else None
+    out["locked"] = _locked(out)
     return CACHE.put(key, out, cost=len(out["text"] or "") + 256)
+
+
+def endings(text):
+    """The file's line endings: "lf", "crlf", "none" (one line), or "mixed" (both, or a lone CR)."""
+    crlf = text.count("\r\n")
+    lone_cr = text.count("\r") - crlf
+    lone_lf = text.count("\n") - crlf
+    if lone_cr or (crlf and lone_lf):
+        return "mixed"
+    return "crlf" if crlf else "lf" if lone_lf else "none"
+
+
+def _locked(out):
+    """Why this file cannot be edited here, or None. Whatever is shown must be the whole file,
+    byte for byte once encoded again, or saving it would change more than the edit."""
+    if out["binary"] or out["text"] is None:
+        return "Binary files are not edited here."
+    if out["cut"]:
+        return "Files over 512 KB are edited on Bitbucket."
+    if "\ufffd" in out["text"]:
+        return "This file is not plain UTF-8: edit it on Bitbucket so its bytes stay as they are."
+    if set(out["attributes"]) & set(KEEP_MODE):
+        return "Executable files and links are edited on Bitbucket, so their mode stays."
+    if out["endings"] == "mixed":
+        return "This file mixes line endings: edit it on Bitbucket so they stay as they are."
+    return None
+
+
+# ---- the one write ---------------------------------------------------------
+
+
+def _tip(engine, slug, branch):
+    """A branch's tip right now, past every cache, or None when there is no such branch."""
+    raw = engine.client.get(f"/repositories/{_ws(engine)}/{slug}/refs/branches",
+                            {"q": f'name="{branch}"', "fields": BRANCH_FIELDS})
+    return next((r for r in map(_branch_row, raw.get("values") or []) if r["name"] == branch and r["hash"]), None)
+
+
+def commit(engine, body):
+    """Commit one edited text file: to the branch it was opened on, or to a new branch made
+    from the commit it was opened at. Checked in this order: the request itself, the
+    protected names, the original file at that commit, then the branches as they are now."""
+    if not isinstance(body, dict):
+        raise ValueError("a JSON body is required")
+    slug = known_repo(engine, body.get("repo"))
+    branch = check_branch(body.get("branch"))
+    parent = check_hash(body.get("parent"))
+    if len(parent) != 40:
+        raise ValueError("the parent must be a full 40-character commit hash")
+    path = check_path(body.get("path"))
+    if not path or '"' in path:
+        raise ValueError("name the file to commit")
+    message = body.get("message")
+    if not isinstance(message, str) or not message.strip() or len(message) > MESSAGE_MAX or _MESSAGE_BAD.search(message):
+        raise ValueError(f"the commit message must be 1 to {MESSAGE_MAX} characters, without control characters")
+    content = body.get("content")
+    if not isinstance(content, str):
+        raise ValueError("the file's new text is required")
+    data = content.encode("utf-8")
+    if len(data) > FILE_MAX:
+        raise ValueError("files over 512 KB are edited on Bitbucket")
+    new = body.get("new_branch") or ""
+    target = check_branch(new) if new else branch
+    main = next((r["mainbranch"] for r in repo_list(engine)["repos"] if r["slug"] == slug), "")
+    if target in PROTECTED or target == main:
+        raise ValueError(f"PixelDeck does not commit straight to {target}: commit to a new branch, then open a pull request")
+
+    original = read_file(engine, slug, parent, path)
+    if original["locked"]:
+        raise ValueError(original["locked"])
+    if content == original["text"]:
+        raise ValueError("nothing changed")
+    now = endings(content)
+    if now == "mixed" or (original["endings"] in ("lf", "crlf") and now not in (original["endings"], "none")):
+        raise ValueError(f"the line endings changed: keep the file's own ({original['endings']})")
+
+    if new:
+        if _tip(engine, slug, new):
+            raise ValueError(f"a branch named {new} exists already: pick another name")
+    else:
+        tip = _tip(engine, slug, branch)
+        if not tip:
+            raise KeyError(f"no branch {branch} in {slug}")
+        if tip["hash"] != parent:
+            raise ValueError(f"{branch} moved since you opened the file (now at {tip['hash'][:7]}): reload it and edit again")
+
+    # branch and parents always go together: without branch Bitbucket commits on the main
+    # branch, and with parents it refuses (409) a branch whose tip is no longer that commit.
+    fields = [("message", message.rstrip()), ("branch", target), ("parents", parent)]
+    files = [("/" + path, path.rsplit("/", 1)[-1], data)]  # the leading slash keeps "message" a file
+    try:
+        engine.client.post_form(f"/repositories/{_ws(engine)}/{slug}/src", fields, files)
+    except BitbucketError as exc:
+        if exc.status in (401, 403):
+            raise PermissionError(f"Bitbucket refused the commit ({exc.status}): the token may lack repository write. "
+                                  "Give it the Repositories: Write permission, then try again.") from None
+        if exc.status == 409:
+            raise ValueError(f"{branch} moved since you opened the file: reload it and edit again") from None
+        raise
+    CACHE.forget(lambda k: k[0] in ("branches", "ref") and k[1] == slug)
+    out = {"repo": slug, "branch": target, "from": branch, "parent": parent, "path": path, "new_branch": bool(new), "hash": None}
+    # The commit is made: what follows only helps the page along, so it never fails the answer.
+    try:
+        tip = _tip(engine, slug, target)
+        out["hash"] = tip["hash"] if tip else None
+    except BitbucketError:
+        pass
+    if new:
+        out["pr"] = pr_flow(engine, slug, target, branch)
+    return out
+
+
+def pr_flow(engine, slug, branch, dest):
+    """How to open a pull request from a branch made here. PixelDeck's own dialog reads the
+    branch from your local clone, so the branch is fetched there first; without a clone, or
+    when the branch's author is not your git identity, Bitbucket's own page does it."""
+    url = f"{_web(engine, slug)}/pull-requests/new?source={quote(branch, safe='')}&dest={quote(dest, safe='')}"
+    try:
+        repo_dir = gitscan.repo_dirs(engine.root).get(slug)
+        if repo_dir is not None:
+            gitscan.git(repo_dir, "fetch", "--quiet", "origin", branch, timeout=30)
+            if any(i["repo"] == slug and i["branch"] == branch for i in engine.pushed(force=True)):
+                return {"flow": "preview"}
+    except Exception:  # noqa: BLE001 - the commit is made; a failed fetch only means the web page
+        pass
+    return {"flow": "web", "url": url}
 
 
 # ---- routing ---------------------------------------------------------------
@@ -345,11 +519,14 @@ def _routes():
 
 
 ROUTES = _routes()
+WRITES = {"repo-commit": commit}
 
 
 def route(handler, engine, method, name, query, body):
     """Answer a route this module owns, or None. A dict or list goes out as JSON; a
     (bytes, content type) pair goes out as is."""
+    if method == "POST" and name in WRITES:
+        return WRITES[name](engine, body)
     answer = ROUTES.get(name)
     if answer is None or method != "GET":
         return None

@@ -31,6 +31,22 @@ const Layout = (() => {
     hide: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
     copy: '<rect x="8.5" y="8.5" width="11" height="11" rx="1"/><path d="M15.5 8.5v-4h-11v11h4"/>',
   };
+  // A pixel glyph for each panel's tab, 9 by 9: # is a lit pixel. A copy wears its base's glyph.
+  const GLYPH = {
+    queue: ["##.######", "##.######", ".........", "##.######", "##.######", ".........", "##.####..", "##.####..", "........."],
+    repos: [".........", ".###.....", "#...####.", "#########", "#.......#", "#.......#", "#.......#", "#########", "........."],
+    pr: [".#.....#.", "###...###", ".#.....#.", ".#....#..", ".#...#...", ".#..#....", ".#.#.....", "###......", ".#......."],
+    insights: [".......##", ".......##", "....##.##", "....##.##", ".##.##.##", ".##.##.##", ".##.##.##", ".........", "#########"],
+    terminal: ["#########", "#.......#", "#.#.....#", "#..#....#", "#.#..##.#", "#.......#", "#########", ".........", "........."],
+    music: ["...######", "...######", "...#....#", "...#....#", "...#....#", ".###..###", "####.####", ".##...##.", "........."],
+  };
+  const glyph = (id) => {
+    const rows = GLYPH[panels[id]?.base] || GLYPH[id];
+    if (!rows) return "";
+    let r = "";
+    rows.forEach((row, y) => [...row].forEach((c, x) => { if (c === "#") r += `<rect x="${x}" y="${y}" width="1" height="1"/>`; }));
+    return `<svg class="tab-glyph" viewBox="0 0 9 9" width="11" height="11" fill="currentColor" shape-rendering="crispEdges" aria-hidden="true">${r}</svg>`;
+  };
   const icon = (n) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[n]}</svg>`;
   const clone = (o) => JSON.parse(JSON.stringify(o));
 
@@ -129,11 +145,8 @@ const Layout = (() => {
        <div class="splitter" data-split="right" role="separator" aria-orientation="vertical" aria-label="Resize the right area" tabindex="0"></div>
        <div class="splitter" data-split="bottom" role="separator" aria-orientation="horizontal" aria-label="Resize the bottom area" tabindex="0"></div>
        <div class="dropzone" data-zone="left">Left</div><div class="dropzone" data-zone="right">Right</div><div class="dropzone" data-zone="bottom">Bottom</div>`;
-    root.addEventListener("click", onClick);
-    root.addEventListener("dragstart", onDragStart);
-    root.addEventListener("dragend", () => root.classList.remove("is-dragging"));
-    root.addEventListener("dragover", onDragOver);
-    root.addEventListener("drop", onDrop);
+    root.addEventListener("click", onClick, true);
+    root.addEventListener("pointerdown", onTabDown);
     for (const sp of root.querySelectorAll(".splitter")) {
       sp.addEventListener("pointerdown", onSplitStart);
       sp.addEventListener("keydown", onSplitKey);
@@ -158,9 +171,9 @@ const Layout = (() => {
       el.hidden = !ids.length;
       el.classList.toggle("is-collapsed", !!state.collapsed[slot] && slot !== "main");
       el.querySelector(".slot-tabs").innerHTML = ids.map((id) => `
-        <button class="slot-tab${isCopy(id) ? " is-copy" : ""}" type="button" role="tab" draggable="true" data-tab="${id}" aria-selected="${state.active[slot] === id}">
-          <span class="slot-tab-title">${esc(panels[id].label || panels[id].title)}</span>${badges[id] ? `<span class="slot-badge">${esc(badges[id])}</span>` : ""}
-        </button>`).join("");
+        <button class="slot-tab${isCopy(id) ? " is-copy" : ""}" type="button" role="tab" data-tab="${id}" aria-selected="${state.active[slot] === id}">
+          ${glyph(id)}<span class="slot-tab-title">${esc(panels[id].label || panels[id].title)}</span>${badges[id] ? `<span class="slot-badge">${esc(badges[id])}</span>` : ""}
+        </button>`).join("") + (solo ? "" : `<button class="slot-add" type="button" data-act="add" data-area="${slot}" aria-label="Add a panel here" data-tip="Add a panel here">+</button>`);
       const tool = (act, ic, label) => `<button class="slot-tool" type="button" data-act="${act}" data-area="${slot}" data-tip="${label}" aria-label="${label}">${icon(ic)}</button>`;
       const active = state.active[slot];
       const tools = [];
@@ -197,9 +210,41 @@ const Layout = (() => {
     paint();
   }
 
+  // The + on a tab row: show a hidden panel here, or start a copy here.
+  let addPop = null;
+  function closeAdd() { if (addPop) { addPop.remove(); addPop = null; } }
+  function addMenu(button, slot) {
+    closeAdd();
+    const hidden = state.hidden.filter((id) => panels[id]);
+    const copyable = Object.keys(panels).filter((id) => panels[id].base === id && canCopy(id));
+    const items = [
+      ...hidden.map((id) => `<button class="rs-item" type="button" data-add-show="${id}" style="--k:0">${glyph(id)} Show ${esc(panels[id].title)}</button>`),
+      ...copyable.map((id, i) => `<button class="rs-item" type="button" data-add-copy="${id}" style="--k:${i + 1}">${glyph(id)} New copy of ${esc(panels[id].title)}</button>`),
+    ];
+    addPop = document.createElement("div");
+    addPop.className = "rs-pop slot-add-pop";
+    addPop.setAttribute("role", "menu");
+    addPop.innerHTML = items.length ? items.join("") : '<p class="rs-group">Every panel is out already.</p>';
+    document.body.append(addPop);
+    const r = button.getBoundingClientRect();
+    addPop.style.left = `${Math.round(Math.min(r.left, innerWidth - addPop.offsetWidth - 8))}px`;
+    addPop.style.top = `${Math.round(r.bottom + 4)}px`;
+    addPop.addEventListener("click", (e) => {
+      const show = e.target.closest("[data-add-show]"), copy = e.target.closest("[data-add-copy]");
+      if (show) move(show.dataset.addShow, slot);
+      if (copy) { const id = duplicate(copy.dataset.addCopy); if (id && slotOf(id) !== slot) move(id, slot); }
+      closeAdd();
+    });
+  }
+  document.addEventListener("pointerdown", (e) => { if (addPop && !addPop.contains(e.target) && !e.target.closest(".slot-add")) closeAdd(); }, true);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeAdd(); });
+
   function onClick(e) {
+    if (swallow) { e.stopPropagation(); e.preventDefault(); return; }
     const tab = e.target.closest(".slot-tab");
     if (tab) { activate(tab.dataset.tab); return; }
+    const add = e.target.closest(".slot-add");
+    if (add) { if (addPop) closeAdd(); else addMenu(add, add.dataset.area); return; }
     const tool = e.target.closest(".slot-tool");
     if (!tool) return;
     const slot = tool.dataset.area, id = state.active[slot];
@@ -209,38 +254,67 @@ const Layout = (() => {
     else if (act === "to-tabs") move(id, "main");
     else if (act === "window") popout(id);
     else if (act === "duplicate") duplicate(id);
+    else if (act === "add") addMenu(tool, slot);
     else if (act === "hide") { if (isCopy(id)) remove(id); else hide(id); }
     else if (act === "collapse") { state.collapsed[slot] = !state.collapsed[slot]; save(); paint(); }
   }
 
-  function onDragStart(e) {
-    const tab = e.target.closest(".slot-tab");
-    if (!tab) return;
-    e.dataTransfer.setData("text/x-panel", tab.dataset.tab);
-    e.dataTransfer.effectAllowed = "move";
-    root.classList.add("is-dragging");
-  }
-  function dropTarget(e) {
-    const zone = e.target.closest(".dropzone");
+  /* Tabs move with the pointer, not the browser's drag and drop: WebKitGTK, the Linux
+     window, drops custom drag data, so a dragged tab never landed there. Drag along a row to
+     reorder; drop on another area's tabs, or on Left, Right or Bottom, to move it there. */
+  let swallow = false;
+  function dropTarget(x, y, id) {
+    const el = document.elementFromPoint(x, y);
+    if (!el) return null;
+    const zone = el.closest(".dropzone");
     if (zone) return { slot: zone.dataset.zone, before: null };
-    const slotEl = e.target.closest(".slot");
-    if (!slotEl) return null;
+    const slotEl = el.closest(".slot");
+    if (!slotEl || !root.contains(slotEl)) return null;
+    const slot = slotEl.dataset.area;
+    const tabs = [...slotEl.querySelectorAll(".slot-tab")].filter((t) => t.dataset.tab !== id);
+    const after = tabs.find((t) => { const r = t.getBoundingClientRect(); return x < r.left + r.width / 2; });
+    return { slot, before: after ? after.dataset.tab : null, mark: after || tabs[tabs.length - 1] || null, end: !after };
+  }
+  function onTabDown(e) {
     const tab = e.target.closest(".slot-tab");
-    return { slot: slotEl.dataset.area, before: tab ? tab.dataset.tab : null };
+    if (!tab || e.button !== 0 || solo) return;
+    const id = tab.dataset.tab, x0 = e.clientX, y0 = e.clientY;
+    let ghost = null, target = null, marked = null;
+    const unmark = () => { if (marked) marked.classList.remove("is-drop-before", "is-drop-after"); marked = null; };
+    const move = (ev) => {
+      if (!ghost && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 6) return;
+      if (!ghost) {
+        ghost = tab.cloneNode(true);
+        ghost.className = "slot-tab tab-ghost";
+        ghost.removeAttribute("aria-selected");
+        document.body.append(ghost);
+        tab.classList.add("is-dragged");
+        root.classList.add("is-dragging");
+      }
+      ghost.style.left = `${ev.clientX + 8}px`;
+      ghost.style.top = `${ev.clientY + 8}px`;
+      target = dropTarget(ev.clientX, ev.clientY, id);
+      unmark();
+      if (target?.mark) { marked = target.mark; marked.classList.add(target.end ? "is-drop-after" : "is-drop-before"); }
+    };
+    const up = () => {
+      removeEventListener("pointermove", move);
+      removeEventListener("pointerup", up);
+      removeEventListener("pointercancel", up);
+      if (!ghost) return;
+      ghost.remove();
+      unmark();
+      tab.classList.remove("is-dragged");
+      root.classList.remove("is-dragging");
+      swallow = true;  // the click that ends a drag must not also select the tab
+      setTimeout(() => { swallow = false; }, 0);
+      if (target && panels[id] && target.before !== id) move_(id, target.slot, target.before);
+    };
+    addEventListener("pointermove", move);
+    addEventListener("pointerup", up);
+    addEventListener("pointercancel", up);
   }
-  function onDragOver(e) {
-    if (!e.dataTransfer.types.includes("text/x-panel")) return;
-    if (dropTarget(e)) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }
-  }
-  function onDrop(e) {
-    const id = e.dataTransfer.getData("text/x-panel");
-    const target = dropTarget(e);
-    root.classList.remove("is-dragging");
-    if (!id || !target || !panels[id]) return;
-    e.preventDefault();
-    if (target.before === id) return;
-    move(id, target.slot, target.before);
-  }
+  const move_ = (id, slot, before) => move(id, slot, before);
 
   let drag = null;
   function onSplitStart(e) {

@@ -1218,11 +1218,80 @@ function tabTasks() {
   return `<ul class="task-list">${tasks.map((t) => `<li class="task${t.state === "RESOLVED" ? " is-done" : ""}">${svg(t.state === "RESOLVED" ? "taskdone" : "task")}<div>${md(t.raw)}<div class="entry-meta"><span class="person">${esc(t.creator.name)}</span></div></div></li>`).join("")}</ul>`;
 }
 
+/* The pull request panel's own list: what needs you, what waits for your review, yours, and
+   the ones opened lately, with a search. A pull request can be picked and switched here
+   without the queue; the rail folds to a strip when the panel needs the room. */
+const RAIL_KEY = "prdesk.pr.rail.v1", RECENT_KEY = "prdesk.pr.recent.v1";
+const RAIL_TABS = [["needs", "Needs you"], ["review", "Review"], ["mine", "Mine"], ["recent", "Recent"]];
+let rail = (() => { try { return { tab: "needs", collapsed: null, q: "", ...(JSON.parse(localStorage.getItem(RAIL_KEY)) || {}) }; } catch { return { tab: "needs", collapsed: null, q: "" }; } })();
+const saveRail = () => { try { localStorage.setItem(RAIL_KEY, JSON.stringify({ tab: rail.tab, collapsed: rail.collapsed })); } catch { /* storage blocked */ } };
+function recentPrs() { try { const r = JSON.parse(localStorage.getItem(RECENT_KEY)); return Array.isArray(r) ? r : []; } catch { return []; } }
+function rememberPr(pr) {
+  const slim = { repo: pr.repo, id: pr.id, title: pr.title, state: pr.state, updated_on: pr.updated_on, author: { uuid: pr.author?.uuid, name: pr.author?.name } };
+  const list = [slim, ...recentPrs().filter((p) => prKey(p) !== prKey(pr))].slice(0, 20);
+  try { localStorage.setItem(RECENT_KEY, JSON.stringify(list)); } catch { /* storage blocked */ }
+}
+function railLists() {
+  const mine = state.me && state.people[state.me.uuid];
+  const b = mine ? buckets(mine, "me") : null;
+  return {
+    needs: b ? b.needs : [], review: b ? b.requests : [], mine: mine ? [...(mine.open || [])].sort((x, y) => (y.updated_on || "").localeCompare(x.updated_on || "")) : [],
+    recent: recentPrs().map((p) => findPr(prKey(p)) || p),
+  };
+}
+function railRow(pr) {
+  const s = signals(pr);
+  const tone = pr.state && pr.state !== "OPEN" ? (pr.state === "MERGED" ? "merged" : "closed") : s.changes.length ? "bad" : s.approved ? "ok" : s.needs ? "due" : "wait";
+  const on = state.pr && prKey(state.pr.pr) === prKey(pr);
+  return `<button class="rail-row${on ? " is-current" : ""}" type="button" data-rail-open="${esc(prKey(pr))}" aria-current="${on}">
+    <span class="rail-dot is-${tone}" aria-hidden="true"></span>
+    <span class="rail-text"><span class="rail-top"><span class="rail-id">${esc(pr.repo)} #${esc(pr.id)}</span><time>${esc(pr.updated_on ? ago(pr.updated_on) : "")}</time></span>
+      <b>${esc(pr.title || "")}</b>${pr.author?.name && !isMeUuid(pr.author.uuid) ? `<small>${esc(pr.author.name)}</small>` : ""}</span></button>`;
+}
+function paintPrRail() {
+  const box = Layout.body("pr")?.querySelector(".pr-rail");
+  if (!box) return;
+  const lists = railLists();
+  const q = rail.q.trim().toLowerCase();
+  const pick = (lists[rail.tab] || []).filter((pr) => !q || `${pr.repo} #${pr.id} ${pr.title} ${pr.ticket?.key || ""} ${pr.author?.name || ""}`.toLowerCase().includes(q));
+  const empty = { needs: "Nothing needs you.", review: "No review waits for you.", mine: "You have no open pull request.", recent: "Pull requests you open land here." }[rail.tab];
+  const chips = RAIL_TABS.map(([id, label]) => `<button class="date-chip" type="button" data-rail-tab="${id}" aria-pressed="${rail.tab === id}">${label}<span class="rail-n num8">${lists[id].length}</span></button>`).join("");
+  const list = box.querySelector(".rail-list");
+  box.querySelector(".rail-chips").innerHTML = chips;
+  list.innerHTML = pick.length ? pick.slice(0, 80).map(railRow).join("") : `<p class="rail-empty">${esc(q ? "Nothing matches." : empty)}</p>`;
+  box.querySelector(".rail-count").textContent = String(lists.needs.length + lists.review.length || "");
+}
+function prShell(el) {
+  let shell = el.querySelector(":scope > .pr-shell");
+  if (shell) return shell.querySelector(".pr-main");
+  if (rail.collapsed === null) rail.collapsed = el.clientWidth > 0 && el.clientWidth < 760;
+  el.innerHTML = `<div class="pr-shell${rail.collapsed ? " is-collapsed" : ""}">
+    <aside class="pr-rail" aria-label="Pull requests">
+      <header class="rail-head"><button class="rail-fold" type="button" data-rail-fold aria-label="Fold the list" data-tip="Fold or open the list"><span class="rail-fold-glyph" aria-hidden="true"></span></button>
+        <h3>Pull requests</h3><span class="rail-count num8"></span></header>
+      <div class="rail-chips" role="group" aria-label="Which pull requests"></div>
+      <label class="rail-search"><span class="visually-hidden">Search pull requests</span><input type="search" data-rail-search placeholder="Search: repo, title, ticket" value="${esc(rail.q)}" autocomplete="off"></label>
+      <div class="rail-list"></div>
+    </aside>
+    <div class="pr-main"></div></div>`;
+  return el.querySelector(".pr-main");
+}
+async function openByKey(key) {
+  let pr = findPr(key);
+  if (!pr) {
+    const [repo, id] = key.split("#");
+    try { pr = (await api(`pr?repo=${encodeURIComponent(repo)}&id=${Number(id)}`)).pr; } catch (err) { toast(`Could not open ${key}.`, err.message, true); return; }
+  }
+  openPr(pr);
+}
+
 function renderPr() {
-  const el = Layout.body("pr");
-  if (!el) return;
+  const host = Layout.body("pr");
+  if (!host) return;
+  const el = prShell(host);
+  paintPrRail();
   if (!state.pr) {
-    el.innerHTML = `<div class="pr-empty"><p class="pr-empty-title">Pick a pull request</p><p>From the queue, or press <kbd>j</kbd> and <kbd>k</kbd> to move and <kbd>Enter</kbd> to open. Press <kbd>?</kbd> for every key.</p></div>`;
+    el.innerHTML = `<div class="pr-empty">${Sprites.svg("bot", { scale: 3 })}<p class="pr-empty-title">Pick a pull request</p><p>From the list on the left, or from the queue. Press <kbd>?</kbd> for every key.</p></div>`;
     Layout.setBadge("pr", "");
     return;
   }
@@ -1310,6 +1379,7 @@ async function openPr(pr, { force = false, tab } = {}) {
   state.pr = same && !force ? state.pr : { pr, detail: null, extra: null, diff: null, tab: tab || state.pr?.tab || "overview" };
   if (tab) state.pr.tab = tab;
   markSeen(pr);
+  rememberPr(pr);
   for (const row of $$("tr[data-pr]")) row.classList.toggle("is-open", row.dataset.pr === prKey(pr));
   if (state.route.pr !== prKey(pr)) { state.route.pr = prKey(pr); history.replaceState(null, "", hashFor(state.route)); }
   Layout.activate("pr");
@@ -1816,6 +1886,7 @@ function renderAll() {
   renderBar();
   renderQueue();
   renderInsights();
+  paintPrRail();
   if (state.pr) {
     const fresh = findPr(prKey(state.pr.pr));
     if (fresh && fresh.updated_on !== state.pr.pr.updated_on) openPr(fresh, { force: true });
@@ -1831,6 +1902,7 @@ function applyBoot(b) {
   state.root = b.root || "";
   state.platform = b.platform || "";
   state.features = b.features || []; // an older server has none: the page skips what it lacks
+  if (b.restore !== undefined && state.restore === undefined) state.restore = b.restore;
 }
 const signature = (d) => JSON.stringify([d.open, d.merged, d.declined, d.review_requests, d.pushed, d.synced_at, d.members, d.project]);
 async function loadPerson(uuid) {
@@ -2189,6 +2261,15 @@ function bind() {
     if (refuse) return decideProposal(refuse, refuse.dataset.proposalDecline, "decline", !!refuse.closest("#pr-dialog"));
     const review = t.closest("[data-proposal-review]");
     if (review) { const p = review.closest(".proposal-banner")?._proposal; if (p) openPreview(p.repo, p.branch, p); return; }
+    const railOpen = t.closest("[data-rail-open]");
+    if (railOpen) return openByKey(railOpen.dataset.railOpen);
+    const railTab = t.closest("[data-rail-tab]");
+    if (railTab) { rail.tab = railTab.dataset.railTab; saveRail(); return paintPrRail(); }
+    if (t.closest("[data-rail-fold]")) {
+      rail.collapsed = !rail.collapsed; saveRail();
+      Layout.body("pr")?.querySelector(".pr-shell")?.classList.toggle("is-collapsed", rail.collapsed);
+      return;
+    }
     const linkBtn = t.closest("[data-copy-link]");
     if (linkBtn) return copyLink(linkBtn);
     const copyBtn = t.closest("[data-copy-threads]");
@@ -2281,6 +2362,7 @@ function bind() {
   });
   $("#team-save").addEventListener("click", saveTeam);
   $("#filter").addEventListener("input", (e) => { state.filter = e.target.value; renderQueue(); });
+  document.addEventListener("input", (e) => { if (e.target.matches("[data-rail-search]")) { rail.q = e.target.value; paintPrRail(); } });
   document.addEventListener("keydown", onKey);
 
   // A small target (an icon, a chip) gets its tip beside it, above or else below, so the tip
@@ -2318,6 +2400,59 @@ function parseHashFrom(href) {
   const saved = location.hash;
   const parts = href.replace(/^#\/?/, "").split("/");
   return { section: decodeURIComponent(parts[1] || "") , saved };
+}
+
+/* ------------------------------------------------------- where you left off */
+
+/* The terminals open when PixelDeck last stopped come back on a yes: shells in their folders
+   with their last screen, Claude Code resumed by its session. The layout and settings are
+   already back by then (keep.js). */
+function offerRestore() {
+  const r = state.restore;
+  if (!r || !r.terminals?.length || Layout.isSolo()) return false;
+  const read = (k) => { try { return JSON.parse(localStorage.getItem(k)) || {}; } catch { return {}; } };
+  const names = read("prdesk.termnames.v1"), titles = read("prdesk.termtitles.v1");
+  const when = r.saved_at ? new Date(r.saved_at * 1000).toLocaleString("en-GB", { weekday: "long", hour: "2-digit", minute: "2-digit" }) : "";
+  const rows = r.terminals.map((t, i) => `<label class="restore-row" style="--k:${Math.min(i, 10)}"><input type="checkbox" data-restore-id="${esc(t.id)}" checked>
+      <span class="restore-box" aria-hidden="true"></span>
+      <span class="restore-what"><b>${esc(names[t.id] || titles[t.id] || t.title || "Shell")}</b><small>${esc(shortPath(t.cwd || ""))}</small></span>
+      <span class="restore-kind is-${t.kind === "claude" ? "claude" : "shell"}">${t.kind === "claude" ? (t.resumes ? "Claude Code: resumes its session" : "Claude Code: newest session there") : "Shell: old screen kept"}</span></label>`).join("");
+  let d = $("#restore-dialog");
+  if (!d) { d = document.createElement("dialog"); d.id = "restore-dialog"; d.className = "restore-dialog"; d.setAttribute("aria-labelledby", "restore-title"); document.body.append(d); }
+  d.innerHTML = `<header class="restore-head"><span class="restore-mascots" aria-hidden="true">${Sprites.svg("buddy", { scale: 3 })}${Sprites.svg("bot", { scale: 3 })}</span>
+      <div><h2 id="restore-title">Pick up where you left off?</h2>
+      <p>${esc(`PixelDeck stopped${when ? ` on ${when}` : ""} with ${plural(r.terminals.length, "terminal")} open. Your layout and settings are already back.`)}</p></div></header>
+    <div class="restore-list">${rows}</div>
+    <footer class="restore-foot"><button class="btn btn--quiet" type="button" data-restore="skip">Start fresh</button>
+      <button class="btn btn--primary" type="button" data-restore="go">Bring them back</button></footer>`;
+  const count = () => { const n = $$("[data-restore-id]:checked", d).length; d.querySelector('[data-restore="go"]').textContent = n ? `Bring ${n === r.terminals.length ? "them" : plural(n, "terminal")} back` : "Bring them back"; d.querySelector('[data-restore="go"]').disabled = !n; };
+  d.addEventListener("change", count);
+  d.addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-restore]");
+    if (!b) return;
+    if (b.dataset.restore === "skip") {
+      state.restore = null;
+      d.close();
+      api("term-restore-skip", { method: "POST", body: {} }).catch(() => {});
+      return;
+    }
+    const ids = $$("[data-restore-id]:checked", d).map((x) => x.dataset.restoreId);
+    try {
+      const res = await busy(b, () => api("term-restore", { method: "POST", body: { ids } }));
+      Keep.carryTerminals(res.moved);
+      Term.reload();
+      setTimeout(() => Term.reload(), 1500);  // a terminal the stream brings in late
+      state.restore = null;
+      d.close();
+      Layout.activate("terminal");
+      const failed = res.moved.filter((m) => !m.new);
+      toast(`${plural(res.moved.length - failed.length, "terminal")} back where you left them.`, failed.length ? `${plural(failed.length, "terminal")} could not start: ${failed[0].error}` : "", !!failed.length);
+    } catch (err) { toast("Could not bring the terminals back.", err.message, true); }
+  });
+  d.addEventListener("cancel", () => { state.restore = null; });
+  d.showModal();
+  count();
+  return true;
 }
 
 /* ---------------------------------------------------------------- boot */
@@ -2403,7 +2538,7 @@ async function boot() {
   Repos.mount(Layout.body("repos"));
   Music.mount(Layout.body("music"));
   RetroSelect.enhanceAll();
-  Prefs.onChange(() => paintLayoutMenu());
+  Prefs.onChange((p, patch) => { paintLayoutMenu(); if ("theme" in patch) { Term.retheme(); for (const b of $$(".chart-box")) b.dataset.drawn = ""; paintCharts(); } });
   bind();
   state.route = parseHash();
   renderAll();
@@ -2415,7 +2550,7 @@ async function boot() {
   api("projects").then((r) => { state.projects = r.projects; state.project = r.project; renderBar(); }).catch(() => {});
   BootScreen.step("data");
   await loadView();
-  BootScreen.finish(state.me ? "" : "NO CONNECTION").then(() => Guide.firstRun());
+  BootScreen.finish(state.me ? "" : "NO CONNECTION").then(() => { if (!offerRestore()) Guide.firstRun(); });
   if (state.route.pr) { const pr = findPr(state.route.pr); if (pr) openPr(pr); }
   // The server re-reads your open pull requests every minute; the page asks it twice as often.
   setInterval(() => { if (!document.hidden) loadView({ silent: true }); }, 30000);

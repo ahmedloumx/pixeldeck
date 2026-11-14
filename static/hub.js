@@ -8,12 +8,13 @@
 
 const Prefs = (() => {
   const KEY = "prdesk.prefs.v1";
-  const DEFAULTS = { accent: "amber", motion: "auto", numbers: "arcade", mascots: true, bubbles: true, games: false };
+  const DEFAULTS = { theme: "night", accent: "amber", motion: "auto", numbers: "arcade", mascots: true, bubbles: true, games: false };
   let prefs = (() => { try { return { ...DEFAULTS, ...(JSON.parse(localStorage.getItem(KEY)) || {}) }; } catch { return { ...DEFAULTS }; } })();
   const listeners = new Set();
   function apply() {
     const root = document.documentElement;
     root.dataset.accent = prefs.accent;
+    root.dataset.theme = prefs.theme === "grey" ? "grey" : "night";
     root.dataset.motion = prefs.motion === "calm" ? "calm" : "";
     root.dataset.numbers = prefs.numbers;
     root.classList.toggle("no-mascots", !prefs.mascots);
@@ -199,7 +200,10 @@ const Settings = (() => {
       .map(([v, label]) => `<button class="swatch-btn" type="button" data-pref="accent" data-value="${v}" aria-pressed="${p.accent === v}" data-swatch="${v}"><span aria-hidden="true"></span>${label}</button>`).join("");
     const toggle = (key, label, hint) => `<label class="switch"><input type="checkbox" data-pref-toggle="${key}"${p[key] ? " checked" : ""}><span class="switch-knob" aria-hidden="true"></span><span>${esc(label)}${hint ? `<small>${esc(hint)}</small>` : ""}</span></label>`;
     const fontOk = (() => { try { return document.fonts.check('16px "ArcadeClassic"'); } catch { return false; } })();
-    return `<div class="set-block"><h3>Accent</h3><div class="swatches">${swatches}</div></div>
+    const themes = [["night", "Night"], ["grey", "Retro grey"]]
+      .map(([v, label]) => `<button class="swatch-btn theme-btn" type="button" data-pref="theme" data-value="${v}" aria-pressed="${p.theme === v}" data-theme-swatch="${v}"><span aria-hidden="true"></span>${label}</button>`).join("");
+    return `<div class="set-block"><h3>Theme</h3><div class="swatches">${themes}</div><p class="set-hint">Retro grey comes with its own mascots: an orange bot and a purple slime.</p></div>
+      <div class="set-block"><h3>Accent</h3><div class="swatches">${swatches}</div></div>
       <div class="set-block"><h3>Numbers</h3><div class="date-bar">${choice("numbers", "arcade", "Arcade")}${choice("numbers", "press", "Press Start")}${choice("numbers", "plain", "Plain")}</div>
         <p class="set-hint">Arcade uses the ArcadeClassic font when it is installed on this computer${fontOk ? " (it is)" : " (it is not, so Press Start stands in)"}.</p></div>
       <div class="set-block"><h3>Motion</h3><div class="date-bar">${choice("motion", "auto", "Follow the system")}${choice("motion", "calm", "Calm")}</div></div>

@@ -67,8 +67,8 @@ const Term = (() => {
   function theme() {
     const v = (name) => cssColor(getComputedStyle(document.documentElement).getPropertyValue(name) || "#888");
     return {
-      background: v("--color-paper-3"), foreground: v("--color-ink"), cursor: v("--color-accent"),
-      cursorAccent: v("--color-paper-3"), selectionBackground: v("--color-cool-soft"),
+      background: v("--term-bg"), foreground: v("--term-ink"), cursor: v("--term-cursor"),
+      cursorAccent: v("--term-bg"), selectionBackground: v("--term-select"),
     };
   }
 
@@ -76,6 +76,7 @@ const Term = (() => {
     root = el;
     root.classList.add("term-root");
     root.innerHTML = `<div class="term-bar"><div class="term-tabs" role="tablist" aria-label="Terminals"></div>
+      <button class="term-add" type="button" data-term-new aria-label="New shell" data-tip="New shell">+</button>
       <span class="term-mascot">${Sprites.svg("bot", { scale: 2, idle: "blink", follow: true })}</span>
       <button class="btn btn--quiet" type="button" data-term-new>New shell</button></div>
       <div class="term-split"><div class="term-panes"><div class="empty term-empty">${Sprites.svg("buddy", { scale: 3 })}<p>No terminal yet. The Claude button on a pull request opens one here, or start a shell.</p></div></div>
@@ -604,7 +605,22 @@ const Term = (() => {
   document.addEventListener("visibilitychange", () => { if (document.hidden) saveSnapshots(); });
   addEventListener("pagehide", () => saveSnapshots(true));
 
-  return { mount, attach, select, newShell, showBuild, buildWith, fit: fitCurrent, saveSnapshots, count: () => sessions.size,
+  // Names, titles and order can move under open terminals (a restore gives them new ids), so
+  // they can be read again from storage.
+  function reload() {
+    const n = names(), t = stored(TITLES_KEY);
+    for (const [id, s] of sessions) { if (n[id]) s.custom = n[id]; if (t[id] && !s.auto) s.auto = t[id]; }
+    let order = [];
+    try { order = JSON.parse(localStorage.getItem(ORDER_KEY)) || []; } catch { order = []; }
+    const known = Array.isArray(order) ? order.filter((id) => sessions.has(id)) : [];
+    if (known.length) setOrder([...known, ...[...sessions.keys()].filter((id) => !known.includes(id))]);
+    else paintTabs();
+  }
+
+  // A theme switch repaints the open terminals with the new colours.
+  function retheme() { for (const s of sessions.values()) if (s.term) s.term.options.theme = theme(); }
+
+  return { mount, attach, select, newShell, retheme, reload, showBuild, buildWith, fit: fitCurrent, saveSnapshots, count: () => sessions.size,
     renderers: () => [...sessions.values()].map((s) => s.renderer), order: () => [...sessions.keys()], dropPaths,
     // The last lines of the current terminal as text: with WebGL the screen is not in the DOM.
     lines: (n = 5) => {
