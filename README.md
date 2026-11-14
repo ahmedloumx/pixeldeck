@@ -64,8 +64,8 @@ Full documentation, with the architecture, security model and measured performan
   merges, deletions and new shells. Two mascots: the green slime does AI work (it comes when you
   start Claude and builds its terminal tab), the blue bot does PixelDeck's own work (it stands by
   a button while a merge, sync, decline or delete runs) and its eyes follow your pointer. They
-  race each other along the loading bar. Reduced motion, or Calm in the settings, turns the
-  motion off.
+  race each other along the loading bar. Menus unfold in a few pixel steps and their items
+  tick in one after another. Reduced motion, or Calm in the settings, turns the motion off.
 - **Arcade dock.** Tetris, Snake and Flappy, played with the slime and the bot, open beside the
   terminal from the Layout menu. While one of your pull requests waits on reviewers or on its
   merge, the bot on the terminal bar now and then suggests a round, with a line it has not said

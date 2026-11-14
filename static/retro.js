@@ -76,7 +76,7 @@ const RetroSelect = (() => {
     pop.focus({ preventScroll: true });
   }
   function item(opt, i) {
-    return `<div class="rs-item${opt.selected ? " is-selected" : ""}" role="option" id="rs-${i}" data-rs="${i}" aria-selected="${opt.selected}">${esc(opt.textContent)}</div>`;
+    return `<div class="rs-item${opt.selected ? " is-selected" : ""}" role="option" id="rs-${i}" data-rs="${i}" aria-selected="${opt.selected}" style="--k:${Math.min(i, 14)}">${esc(opt.textContent)}</div>`;
   }
   function mark(i, scroll) {
     if (!open) return;

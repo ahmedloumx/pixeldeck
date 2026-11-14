@@ -290,3 +290,31 @@
 
 /* ---------------------------------------------------------------- tooltips */
 .tooltip { width: max-content; max-width: min(26rem, calc(100vw - 16px)); white-space: normal; line-height: 1.4; border-radius: 0; border: var(--pixel) solid var(--color-rule-2); box-shadow: 3px 3px 0 oklch(0% 0 0 / 0.45); }
+
+/* ---------------------------------------------------------------- menus open like an 8-bit screen
+   A menu unfolds from its top edge in a few hard steps, and its items tick in one after
+   another. Each plays when the menu opens, never on a repaint; calm and reduced motion stop them. */
+@keyframes px-unfold { from { clip-path: inset(0 0 100% 0); transform: translateY(-4px); } 60% { transform: none; } to { clip-path: inset(0 0 0 0); } }
+@keyframes px-pop { from { transform: scale(0.94); opacity: 0; } 50% { transform: scale(1.015); opacity: 1; } to { transform: none; } }
+@keyframes px-item { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
+@keyframes px-fade { from { opacity: 0; } }
+.rs-pop { animation: px-unfold 200ms steps(5, end); }
+.rs-pop .rs-item { animation: px-item 160ms steps(3, end) both; animation-delay: calc(var(--k, 0) * 18ms + 60ms); }
+.bell-panel.is-opening { animation: px-unfold 220ms steps(5, end); }
+.bell-panel.is-opening .bell-list > li { animation: px-item 160ms steps(3, end) both; animation-delay: calc(var(--k, 0) * 22ms + 90ms); }
+.menu[open] > .menu-pop { animation: px-unfold 220ms steps(5, end); }
+.menu[open] > .layout-pop > * { animation: px-item 160ms steps(3, end) both; }
+.menu[open] > .layout-pop > :nth-child(2) { animation-delay: 30ms; } .menu[open] > .layout-pop > :nth-child(3) { animation-delay: 60ms; }
+.menu[open] > .layout-pop > :nth-child(4) { animation-delay: 90ms; } .menu[open] > .layout-pop > :nth-child(5) { animation-delay: 120ms; }
+.menu[open] > .layout-pop > :nth-child(6) { animation-delay: 150ms; } .menu[open] > .layout-pop > :nth-child(n+7) { animation-delay: 180ms; }
+.settings-dialog[open], .help-dialog[open], .team-dialog[open], .pr-dialog[open] { animation: px-pop 220ms steps(4, end) both; }
+.settings-dialog[open]::backdrop, .help-dialog[open]::backdrop, .team-dialog[open]::backdrop, .pr-dialog[open]::backdrop { animation: px-fade 200ms steps(3, end); }
+.team-dialog[open] .team-list .pick { animation: px-item 160ms steps(3, end) both; animation-delay: calc(var(--k, 0) * 20ms + 120ms); }
+.settings-dialog[open] .set-tab { animation: px-item 160ms steps(3, end) both; }
+.settings-dialog[open] .set-tab:nth-child(2) { animation-delay: 40ms; } .settings-dialog[open] .set-tab:nth-child(3) { animation-delay: 80ms; } .settings-dialog[open] .set-tab:nth-child(4) { animation-delay: 120ms; }
+.tooltip:not([hidden]) { animation: px-fade 120ms steps(2, end); }
+@media (prefers-reduced-motion: reduce) {
+  .rs-pop, .rs-pop .rs-item, .bell-panel.is-opening, .bell-panel.is-opening .bell-list > li, .menu[open] > .menu-pop, .menu[open] > .layout-pop > *,
+  .settings-dialog[open], .help-dialog[open], .team-dialog[open], .pr-dialog[open], .team-dialog[open] .team-list .pick, .settings-dialog[open] .set-tab,
+  .tooltip:not([hidden]) { animation: none; }
+}

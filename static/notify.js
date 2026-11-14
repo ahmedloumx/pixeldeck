@@ -194,12 +194,12 @@ const Notify = (() => {
   function itemsHtml() {
     const list = history.filter((ev) => filter === "all" || (filter === "mine" ? isMine(ev) || ev.kind === "review_requested" : !isMine(ev)));
     if (!list.length) return `<div class="bell-empty">${typeof Sprites !== "undefined" ? Sprites.svg("buddy", { scale: 3 }) : ""}<p>${history.length ? "Nothing here for this filter." : "Nothing yet. News about open pull requests lands here."}</p></div>`;
-    let last = "", out = "";
+    let last = "", out = "", k = 0;
     for (const ev of list) {
       const label = dayLabel(ev.at);
       if (label !== last) { out += `<li class="bell-day">${esc(label)}</li>`; last = label; }
       const tone = KINDS[ev.kind]?.tone || "info";
-      out += `<li><button class="bell-item is-${tone}${ev.read ? "" : " is-unread"}" type="button" data-notify-open="${ev.id}">
+      out += `<li style="--k:${Math.min(k++, 12)}"><button class="bell-item is-${tone}${ev.read ? "" : " is-unread"}" type="button" data-notify-open="${ev.id}">
         <span class="bell-face" aria-hidden="true">${esc(face(ev))}</span>
         <span class="bell-text"><b>${esc(sentence(ev))}</b><span>${esc(ev.title || "")}</span><span class="bell-meta"><span class="branch">${esc(ev.repo || "")}</span> ${esc(ago(new Date(ev.at * 1000).toISOString()))}</span></span>
         <span class="bell-kind">${esc(reelWord(ev))}</span></button></li>`;
@@ -239,6 +239,11 @@ const Notify = (() => {
       if (r) { panel.style.top = `${Math.round(r.bottom + 8)}px`; panel.style.right = `${Math.max(8, Math.round(innerWidth - r.right - 8))}px`; }
       panel.hidden = false;
       paintPanel();
+      panel.classList.remove("is-opening");
+      void panel.offsetWidth;
+      panel.classList.add("is-opening");
+      clearTimeout(panel._opening);
+      panel._opening = setTimeout(() => panel.classList.remove("is-opening"), 700);
       document.getElementById("bell")?.setAttribute("aria-expanded", "true");
     } else {
       panel.hidden = true;
