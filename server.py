@@ -315,7 +315,9 @@ class Desk(BaseHTTPRequestHandler):
             if method == "POST" and route == "review":
                 return self._send(200, actions.review(engine, body))
             if method == "POST" and route == "sync":
-                return self._send(200, actions.sync(engine, WORKSPACE_ROOT, body))
+                result = actions.sync(engine, WORKSPACE_ROOT, body)
+                engine.mark_synced(body.get("repo"), body.get("id"))  # no stale "behind" until the next look
+                return self._send(200, result)
             if method == "GET" and route == "pr-sync":
                 repo = (query.get("repo") or [""])[0]
                 pr_id = int((query.get("id") or ["0"])[0])
@@ -533,6 +535,8 @@ class Desk(BaseHTTPRequestHandler):
             "budget": engine.budget(),
         }
         if uuid == me.get("uuid"):
+            # How far each of your branches is behind its target, from the last look (no call here).
+            out["open"] = [{**pr, "behind": engine.behind(pr)} for pr in out["open"]]
             out["review_requests"] = self._review_requests(uuid)
             try:
                 out["pushed"] = self._scoped(engine.pushed())

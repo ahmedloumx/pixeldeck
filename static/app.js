@@ -338,11 +338,14 @@ function threadsCell(pr) {
   if (s.unresolved) return `${s.unresolved} open`;
   return "none";
 }
+// Your branch is behind its target (a teammate merged there): the server's last look, every 3 min.
+const behindTag = (pr, cls) => (pr.behind?.behind ? `<span class="${cls}" data-tip="The target moved on: sync this branch before it merges">${pr.behind.behind}${pr.behind.more ? "+" : ""} behind</span>` : "");
 function prRow(pr, opts = {}) {
   const current = state.pr && prKey(state.pr.pr) === prKey(pr) ? " is-open" : "";
   const ticket = pr.ticket ? `<span class="id">${esc(pr.ticket.key)}</span>` : "";
   const author = opts.showAuthor ? `<span>${esc(pr.author.name)}</span>` : "";
   const fresh = isNew(pr) ? `<span class="new-mark">New activity</span>` : "";
+  const behind = behindTag(pr, "q-behind");
   const merged = pr.state === "MERGED";
   const tookD = merged ? duration(tookMs(pr)) : null;
   const last = merged
@@ -351,7 +354,7 @@ function prRow(pr, opts = {}) {
   return `<tr data-pr="${esc(prKey(pr))}" class="row${current}" style="--i:${Math.min(opts.i || 0, 14)}">
     <td>${stateChip(pr)}</td>
     <td><a class="pr-title" href="${esc(pr.url)}" data-open="${esc(prKey(pr))}">${esc(pr.title)}</a>
-      <div class="pr-sub"><span class="id">${esc(pr.repo)} #${pr.id}</span>${ticket}${author}${fresh}</div>
+      <div class="pr-sub"><span class="id">${esc(pr.repo)} #${pr.id}</span>${ticket}${author}${behind}${fresh}</div>
       <div class="branch">${esc(pr.source)} into ${esc(pr.dest)}</div></td>
     <td>${faces(pr.reviews || [])}</td>${last}</tr>`;
 }
@@ -1265,7 +1268,7 @@ function railRow(pr) {
   const on = state.pr && prKey(state.pr.pr) === prKey(pr);
   return `<button class="rail-row${on ? " is-current" : ""}" type="button" data-rail-open="${esc(prKey(pr))}" aria-current="${on}">
     <span class="rail-dot is-${tone}" aria-hidden="true"></span>
-    <span class="rail-text"><span class="rail-top"><span class="rail-id">${esc(pr.repo)} #${esc(pr.id)}</span><time>${esc(pr.updated_on ? ago(pr.updated_on) : "")}</time></span>
+    <span class="rail-text"><span class="rail-top"><span class="rail-id">${esc(pr.repo)} #${esc(pr.id)}</span>${behindTag(findPr(prKey(pr)) || pr, "rail-behind")}<time>${esc(pr.updated_on ? ago(pr.updated_on) : "")}</time></span>
       <b>${esc(pr.title || "")}</b>${pr.author?.name && !isMeUuid(pr.author.uuid) ? `<small>${esc(pr.author.name)}</small>` : ""}</span></button>`;
 }
 // Folded unless you chose otherwise when the queue is on screen too: two lists side by side
@@ -2116,6 +2119,24 @@ function setCopyWho(id, who) {
   loadView({ silent: true });
 }
 
+/* Sync from a notification: merge the target into your branch and push, like Bitbucket's Sync.
+   Two clicks, as everywhere a push happens. A conflict stops it with nothing pushed. */
+async function syncFromEvent(ev, button) {
+  if (!armed(button, "Sure?")) return;
+  try {
+    const res = await busy(button, () => api("sync", { method: "POST", body: { repo: ev.repo, id: Number(ev.pr_id) } }));
+    toast(res.state === "synced" ? `Synced #${ev.pr_id}: ${plural(res.merged, "commit")} from ${ev.dest || "the target"} merged in and pushed.` : `#${ev.pr_id} is already up to date.`,
+      res.state === "synced" ? "Its pull request can merge now." : "");
+    reloadMine();
+  } catch (err) {
+    if (err.status === 409) {
+      const files = err.data?.conflicts || [];
+      toast(`Sync stopped on #${ev.pr_id}: ${plural(files.length, "file")} conflict with ${ev.dest || "the target"}. Nothing was pushed.`,
+        `${files.slice(0, 6).join(", ")}${files.length > 6 ? ", ..." : ""}. Resolve them in your checkout, or with the fix button on the pull request.`, true);
+    } else toast(`Could not sync #${ev.pr_id}.`, err.message, true);
+  }
+}
+
 /* A notification opens its pull request here, never in the browser: from what is loaded,
    else from its owner's list (a teammate not shown yet), else read on its own. */
 async function openFromEvent(ev) {
@@ -2585,6 +2606,7 @@ async function boot() {
       api, me: () => state.me, ready: () => !!state.me,
       onSettings: (tab) => Settings.open(tab),
       onOpen: openFromEvent,
+      onSync: syncFromEvent,
     });
   }
 }
