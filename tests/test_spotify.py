@@ -316,9 +316,18 @@ class ApiTest(SpotifyBase):
                     "https://i.scdn.co/image/ab67616d00004851#x", "https://i.scdn.co/image/../ab67616d00004851",
                     "https://i.scdn.co/images/ab67616d00004851", "https://i.scdn.co/image/AB67616D00004851",
                     "https://i.scdn.co/image/ab67616d00004851/", "https://I.SCDN.CO/image/ab67616d00004851",
-                    "https://i.scdn.co/image/ab67616d00004851\n", "https://i.scdn.co/image/", "", None, ["x"]):
+                    "https://i.scdn.co/image/ab67616d00004851\n", "https://i.scdn.co/image/", "", None, ["x"],
+                    "https://image-cdn-xx.spotifycdn.com/image/ab67706c0000da84", "https://spotifycdn.com/image/ab67706c0000da84",
+                    "https://image-cdn-ak.spotifycdn.com.evil.example/image/ab67706c0000da84", "https://image-cdn-ak.spotifycdn.com/image/ab67706c0000da84?w=1",
+                    "http://image-cdn-fa.spotifycdn.com/image/ab67706c0000da84", "https://mosaic.scdn.co/999/" + "a" * 40,
+                    "https://mosaic.scdn.co/640/" + "a" * 39, "https://mosaic.scdn.co/640/" + "a" * 161, "https://mosaic.scdn.co/640/../" + "a" * 40,
+                    "https://mosaic.scdn.co/image/" + "a" * 40):
             with self.subTest(url=bad), self.assertRaises(ValueError):
                 spotify.art_url(bad)
+        for good in (ART, "https://image-cdn-ak.spotifycdn.com/image/ab67706c0000da84" + "1" * 24,
+                     "https://image-cdn-fa.spotifycdn.com/image/ab67706c0000da84" + "2" * 24, "https://mosaic.scdn.co/640/" + "ab67616d0000b273" * 10):
+            with self.subTest(url=good):
+                self.assertEqual(spotify.art_url(good), good)
         with self.assertRaises(ValueError):
             self.route("GET", "spotify-art", {"url": ["https://evil.example/image/ab67616d00004851"]})
         self.assertEqual(self.fake.calls, [])
@@ -507,6 +516,26 @@ NO_ACTIVE = answer(404, {"error": {"status": 404, "message": "Player command fai
 PHONE = {"id": "phone1", "name": "Phone", "type": "Smartphone", "is_active": False, "is_restricted": False}
 DESK = {"id": "desk1", "name": "Desk", "type": "Computer", "is_active": False, "is_restricted": False}
 LOCKED_TV = {"id": "tv1", "name": "TV", "type": "TV", "is_active": True, "is_restricted": True}
+
+
+class PlaylistPictureTest(SpotifyBase):
+    def test_playlist_photos_and_collages_reach_the_page(self):
+        self.connect()
+        photo = "https://image-cdn-ak.spotifycdn.com/image/ab67706c0000da84" + "1" * 24
+        mosaic = "https://mosaic.scdn.co/640/" + "ab67616d0000b273" * 10
+        small = "https://mosaic.scdn.co/60/" + "ab67616d0000b273" * 10
+        self.fake.on("GET", API + "/me/playlists", page([
+            {"id": "p1", "name": "Trip", "images": [{"url": photo, "width": None, "height": None}]},
+            {"id": "p2", "name": "Mix", "images": [{"url": mosaic, "width": 640}, {"url": small, "width": 60}]},
+            {"id": "p3", "name": "Bare", "images": None},
+            {"id": "p4", "name": "Odd", "images": [{"url": "https://evil.example/image/abc", "width": 300}]}]))
+        lists = {p["id"]: p for p in self.route("GET", "spotify-playlists")["items"]}
+        self.assertEqual((lists["p1"]["art"], lists["p1"]["thumb"]), (photo, photo))
+        self.assertEqual((lists["p2"]["art"], lists["p2"]["thumb"]), (mosaic, mosaic), "the 60 px collage is too small for a thumbnail")
+        self.assertEqual((lists["p3"]["art"], lists["p4"]["art"]), (None, None))
+        self.fake.on("GET", photo, (200, {"content-type": "image/jpeg"}, b"\xff\xd8 photo"))
+        self.assertEqual(self.route("GET", "spotify-art", {"url": [photo]}), (b"\xff\xd8 photo", "image/jpeg"))
+        self.assertNotIn("Authorization", self.fake.to(photo)[0].headers)
 
 
 class DeviceTest(SpotifyBase):

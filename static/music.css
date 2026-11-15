@@ -9,10 +9,43 @@
   --mu-lcd-dim: oklch(33% 0.07 146); --mu-lcd-glow: oklch(80% 0.2 142 / 0.5);
   --mu-box: oklch(27% 0.012 250); --mu-box-hi: oklch(35% 0.012 250); --mu-box-lo: oklch(20% 0.01 250);
   --mu-metal: oklch(40% 0.01 250); --mu-paper: oklch(93% 0.025 88); --mu-paper-ink: oklch(24% 0.02 260);
+  /* the deck's own keys and lettering, so a theme can make it a dark machine or a silver one */
+  --mu-key-hi: oklch(52% 0.012 250); --mu-key-a: oklch(42% 0.012 250); --mu-key-b: oklch(33% 0.012 250); --mu-key-lo: oklch(27% 0.012 250);
+  --mu-key-ink: oklch(95% 0.005 250); --mu-deck-ink: oklch(95% 0.005 250); --mu-deck-muted: oklch(71% 0.01 250); --mu-brand: var(--sprite-stone);
+  --mu-device-bg: var(--mu-box-lo); --mu-kicker: var(--mu-lcd-ink); --mu-vol-ink: var(--mu-lcd-ink); --mu-vol-glow: var(--mu-lcd-glow);
+  /* the song playing, wherever it is listed */
+  --mu-now-bg: color-mix(in oklch, var(--mu-lcd-bg) 60%, var(--color-paper-3)); --mu-now-ink: var(--mu-lcd-ink); --mu-now-bar: var(--mu-lcd-ink);
+}
+/* Retro grey: a silver boombox with light keys; the screens stay dark, as screens are */
+:root[data-theme="grey"] {
+  --mu-box: #a4a4a4; --mu-box-hi: #c6c6c6; --mu-box-lo: #7b7b7b; --mu-metal: #8d8d8d;
+  --mu-key-hi: #fbfbfb; --mu-key-a: #e6e6e6; --mu-key-b: #cbcbcb; --mu-key-lo: #9e9e9e;
+  --mu-key-ink: #151515; --mu-deck-ink: #151515; --mu-deck-muted: #3a3a3a; --mu-brand: #262626;
+  --mu-device-bg: #e6e6e6; --mu-kicker: #0f4f20; --mu-vol-ink: #0c4a1a; --mu-vol-glow: transparent;
+  --mu-now-bg: #b2ccb4; --mu-now-ink: #0c4a1a; --mu-now-bar: #166329;
 }
 
-.mu-panel.panel-body { padding: var(--space-md) var(--space-lg) var(--space-xl); }
+/* The panel scrolls itself when the deck and the library are stacked; side by side, each
+   column scrolls on its own and the panel stays put. */
+.slot-body:has(> .mu-panel) { overflow: hidden; }
+.mu-panel.panel-body { height: 100%; overflow: auto; overscroll-behavior: contain; padding: var(--space-md) var(--space-lg); container-name: mu-panel; }
 .mu { display: grid; gap: var(--space-md); max-width: 1080px; margin-inline: auto; }
+.mu-cols { display: grid; gap: var(--space-lg); min-width: 0; }
+.mu-col { display: grid; gap: var(--space-md); align-content: start; min-width: 0; container-type: inline-size; }
+.mu-next { display: none; }
+/* Side by side once the deck fits at its natural width (640 px: the 256 px picture, an LCD
+   that still reads, the keys on two rows) next to a library with room for its rows (460 px),
+   plus the gap and the panel's padding: 1180 px. Below that they stack, the deck first. */
+@container mu-panel (min-width: 1180px) {
+  .mu[data-view="deck"] { display: flex; flex-direction: column; max-width: none; height: 100%; }
+  .mu[data-view="deck"] > .mu-cols { flex: 1 1 auto; min-height: 0; grid-template-columns: minmax(460px, 1fr) clamp(640px, 46%, 900px); grid-template-areas: "lib deck"; }
+  .mu-col { min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 0 6px 12px 0; }
+  .mu-col--lib { grid-area: lib; }
+  .mu-col--deck { grid-area: deck; }
+  .mu-next { display: grid; }
+  .mu-col--lib .ml { margin-top: 0; }
+  .mu-col--lib .ml-head { position: sticky; top: 0; z-index: 3; padding: 2px 0 10px; background: var(--color-paper); box-shadow: 0 1px 0 var(--color-rule); }
+}
 .mu [hidden] { display: none !important; }
 .mu-hint { color: var(--color-muted); font-size: var(--text-sm); }
 
@@ -66,7 +99,7 @@
   background: linear-gradient(90deg, var(--mu-box-hi) 0 22px, transparent 22px calc(100% - 22px), var(--mu-box-hi) calc(100% - 22px));
   box-shadow: none; }
 .mu-brand { position: absolute; top: 8px; left: 50%; display: flex; align-items: baseline; gap: var(--space-xs); transform: translateX(-50%); white-space: nowrap; }
-.mu-brand b { font: 700 14px/1 var(--font-pixel); letter-spacing: 0.18em; color: var(--sprite-stone); text-shadow: 0 1px 0 var(--sprite-dark); }
+.mu-brand b { font: 700 14px/1 var(--font-pixel); letter-spacing: 0.18em; color: var(--mu-brand); text-shadow: 0 1px 0 var(--mu-box-lo); }
 .mu-brand small { font: 400 7px/1 var(--font-num); color: var(--color-muted); letter-spacing: 0.08em; }
 .mu-power { align-self: center; width: 6px; height: 6px; background: oklch(32% 0.06 25); box-shadow: 0 0 0 var(--pixel) var(--sprite-dark); }
 .mu-power.is-on { background: var(--sprite-red); box-shadow: 0 0 0 var(--pixel) var(--sprite-dark), 0 0 8px var(--sprite-red); }
@@ -147,12 +180,14 @@
 /* ------------------------------------------------------------ keys */
 .mu-keys { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-md) var(--space-lg); padding-top: var(--space-2xs); }
 .mu-transport, .mu-toggles { display: flex; gap: var(--space-xs); }
+/* inside the boombox the lettering is the deck's own, whatever the page's theme */
+.mu-box { --color-ink: var(--mu-deck-ink); --color-ink-2: var(--mu-deck-ink); --color-muted: var(--mu-deck-muted); }
 .mu-key { appearance: none; display: grid; justify-items: center; align-content: center; gap: 6px; min-width: 66px; height: 58px; margin-bottom: 5px; padding: 6px 10px;
-  color: var(--color-ink); background: linear-gradient(oklch(42% 0.012 250), oklch(33% 0.012 250)); border: var(--pixel) solid var(--sprite-dark); border-radius: 0;
-  box-shadow: inset 0 3px 0 oklch(52% 0.012 250), inset 0 -4px 0 oklch(27% 0.012 250), 0 5px 0 var(--sprite-dark);
+  color: var(--mu-key-ink); background: linear-gradient(var(--mu-key-a), var(--mu-key-b)); border: var(--pixel) solid var(--sprite-dark); border-radius: 0;
+  box-shadow: inset 0 3px 0 var(--mu-key-hi), inset 0 -4px 0 var(--mu-key-lo), 0 5px 0 var(--sprite-dark);
   font: 400 8px/1 var(--font-num); letter-spacing: 0.06em; cursor: pointer; }
-.mu-key:hover { background: linear-gradient(oklch(47% 0.012 250), oklch(37% 0.012 250)); }
-.mu-key:active, .mu-key[aria-pressed="true"], .mu-key--play.is-playing { transform: translateY(4px); box-shadow: inset 0 3px 0 oklch(30% 0.012 250), inset 0 -2px 0 oklch(27% 0.012 250), 0 1px 0 var(--sprite-dark); }
+.mu-key:hover { filter: brightness(1.12); }
+.mu-key:active, .mu-key[aria-pressed="true"], .mu-key--play.is-playing { transform: translateY(4px); box-shadow: inset 0 3px 0 var(--mu-key-lo), inset 0 -2px 0 var(--mu-key-lo), 0 1px 0 var(--sprite-dark); }
 .mu-key:focus-visible { outline: var(--pixel) solid var(--color-focus); outline-offset: 3px; }
 .mu-key:disabled { color: var(--color-muted); opacity: 0.55; cursor: not-allowed; transform: none; }
 .mu-key--play { min-width: 92px; color: var(--color-accent-ink); background: linear-gradient(var(--color-accent), var(--color-accent-deep));
@@ -175,9 +210,9 @@
 .mu-vol-blocks i.is-hot { background: var(--sprite-yellow); }
 .mu-vol-blocks i.is-hot:last-child { background: var(--sprite-red); }
 .mu-vol-blocks[aria-disabled="true"] { cursor: not-allowed; opacity: 0.6; }
-.mu-vol-num { min-width: 3ch; font-size: 10px; color: var(--mu-lcd-ink); text-shadow: 0 0 6px var(--mu-lcd-glow); }
+.mu-vol-num { min-width: 3ch; font-size: 10px; color: var(--mu-vol-ink); text-shadow: 0 0 6px var(--mu-vol-glow); }
 .mu-device { display: grid; gap: 6px; margin: 0 0 5px auto; }
-.mu-device .rs-button { width: 15rem; min-height: 40px; background: var(--mu-box-lo); }
+.mu-device .rs-button { width: 15rem; min-height: 40px; color: var(--mu-deck-ink); background: var(--mu-device-bg); }
 
 .mu-note { padding: var(--space-xs) var(--space-sm); border-left: 4px solid var(--color-accent); background: var(--color-paper-3); color: var(--color-ink-2); font-size: var(--text-sm); }
 
@@ -216,10 +251,7 @@
 .mu-tape-foot { justify-self: center; display: flex; justify-content: center; gap: 14px; width: 66%; height: 15px; padding-top: 4px; margin-top: 6px;
   background: oklch(30% 0.012 250); clip-path: polygon(9% 0, 91% 0, 100% 100%, 0 100%); }
 .mu-tape-foot i { width: 5px; height: 5px; background: var(--sprite-dark); }
-.mu-tape-sticker { position: absolute; top: -9px; right: -6px; padding: 4px 5px; background: var(--sprite-red); color: var(--sprite-white); font-size: 7px;
-  box-shadow: 2px 2px 0 var(--sprite-dark); transform: rotate(4deg); visibility: hidden; }
 .mu-tape.is-on { box-shadow: inset 0 2px 0 oklch(36% 0.012 250), 0 0 0 var(--pixel) var(--tape), 4px 4px 0 var(--color-paper-3); }
-.mu-tape.is-on .mu-tape-sticker { visibility: visible; }
 .mu.is-playing .mu-tape.is-on .mu-reel { animation: mu-reel 540ms steps(3, end) infinite; }
 
 /* ------------------------------------------------------------ setup */
@@ -228,7 +260,7 @@
   box-shadow: inset 0 0 0 var(--pixel) var(--color-paper), inset 0 0 0 4px var(--color-rule), 6px 6px 0 var(--sprite-dark); }
 .mu-setup-head { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: var(--space-lg); }
 .mu-setup-art { filter: drop-shadow(4px 4px 0 var(--sprite-dark)); }
-.mu-kicker { margin-bottom: 6px; font-size: 8px; color: var(--mu-lcd-ink); text-shadow: 0 0 6px var(--mu-lcd-glow); letter-spacing: 0.1em; }
+.mu-kicker { margin-bottom: 6px; font-size: 8px; color: var(--mu-kicker); letter-spacing: 0.1em; }
 .mu-setup h2 { max-width: none; font: 600 var(--text-xl)/1.15 var(--font-pixel); letter-spacing: 0; }
 .mu-lead { margin-top: 6px; color: var(--color-ink-2); }
 .mu-steps { display: grid; gap: var(--space-sm); margin: 0; padding: 0; list-style: none; counter-reset: none; }
@@ -280,8 +312,10 @@
 .ml-tab:hover { color: var(--color-ink); border-color: var(--color-muted); }
 .ml-tab[aria-selected="true"] { color: var(--color-accent-ink); background: var(--color-accent); border-color: var(--color-accent); box-shadow: 0 var(--pixel) 0 var(--color-accent-deep); }
 .ml-tab:focus-visible { outline: var(--pixel) solid var(--color-focus); outline-offset: var(--pixel); }
-.ml-search { flex: 1 1 16rem; display: flex; margin-left: auto; max-width: 26rem; }
-.ml-search input { width: 100%; min-height: 34px; padding: 0 10px; color: var(--color-ink); background: var(--color-paper-3); border: var(--pixel) solid var(--color-rule-2); border-radius: 0; font: inherit; font-size: var(--text-sm); }
+.ml-search { position: relative; flex: 1 1 16rem; display: flex; margin-left: auto; max-width: 26rem; }
+.ml-search input { width: 100%; min-height: 34px; padding: 0 30px 0 10px; color: var(--color-ink); background: var(--color-paper-3); border: var(--pixel) solid var(--color-rule-2); border-radius: 0; font: inherit; font-size: var(--text-sm); }
+.ml-slash { position: absolute; right: 8px; top: 50%; translate: 0 -50%; padding: 3px 5px; font-size: 8px; color: var(--color-muted); border: 1px solid var(--color-rule-2); pointer-events: none; }
+.ml-search:focus-within .ml-slash, .ml-search.is-typing .ml-slash { visibility: hidden; }
 .ml-search input:focus { outline: none; border-color: var(--color-accent); box-shadow: 0 3px 0 var(--color-accent-deep); }
 .ml-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-xs); font-size: var(--text-sm); color: var(--color-muted); }
 .ml-back { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; }
@@ -291,9 +325,17 @@
 .ml-trail i { font-style: normal; color: var(--color-rule-2); }
 .ml-body { display: grid; gap: var(--space-sm); min-height: 6rem; }
 .ml-sub { margin: var(--space-xs) 0 0; font-size: 8px; color: var(--color-muted); letter-spacing: 0.08em; }
-.ml-empty, .ml-error p { color: var(--color-muted); font-size: var(--text-sm); }
-.ml-error { display: grid; gap: var(--space-xs); padding: var(--space-sm); border-left: 4px solid var(--color-bad); background: var(--color-paper-3); }
-.ml-error p:first-child { color: var(--color-ink-2); }
+/* empty: what would fill it; failed: what went wrong, and a way to try again */
+.ml-empty { display: flex; align-items: center; gap: var(--space-md); padding: var(--space-md); color: var(--color-muted); border: var(--pixel) dashed var(--color-rule-2); }
+.ml-empty .mu-cassette { flex: none; opacity: 0.75; filter: grayscale(0.6); }
+.ml-empty p { display: grid; gap: 2px; }
+.ml-empty b { font: 500 var(--text-md)/1.25 var(--font-pixel); color: var(--color-ink); }
+.ml-empty span { font-size: var(--text-sm); }
+.ml-error { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: var(--space-sm); padding: var(--space-sm) var(--space-md);
+  border: var(--pixel) solid var(--color-bad); background: var(--color-paper-3); box-shadow: 4px 4px 0 var(--color-bad-soft); }
+.ml-error-mark { display: grid; place-items: center; width: 26px; height: 26px; color: var(--sprite-white); background: var(--color-bad); font-size: 11px; }
+.ml-error p { color: var(--color-ink-2); font-size: var(--text-sm); }
+.ml-error p + p { margin-top: var(--space-xs); }
 .ml-loading { font-size: 8px; color: var(--mu-lcd-ink); text-shadow: 0 0 5px var(--mu-lcd-glow); animation: mu-blink 0.9s steps(1, end) infinite; }
 .ml-more { display: flex; justify-content: center; padding-top: var(--space-xs); }
 .ml-link { padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; text-decoration: none; }
@@ -305,12 +347,15 @@
 .ml-row { display: grid; grid-template-columns: 30px 32px minmax(0, 2fr) minmax(0, 1.2fr) 46px auto; align-items: center; gap: var(--space-sm);
   min-height: 46px; padding: 6px 8px; background: var(--color-paper-3); border-left: 3px solid transparent; }
 .ml-row:hover { background: var(--color-paper-2); }
-.ml-row.is-current { border-left-color: var(--mu-lcd-ink); background: color-mix(in oklch, var(--mu-lcd-bg) 55%, var(--color-paper-3)); }
-.ml-row.is-current .ml-main b { color: var(--mu-lcd-ink); }
+.ml-row.is-current { border-left-color: var(--mu-now-bar); background: var(--mu-now-bg); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--mu-now-bar) 30%, transparent); }
+.ml-row.is-current .ml-main b { color: var(--mu-now-ink); }
+.ml-row.is-current .ml-dur { color: var(--mu-now-ink); }
+.ml-row:focus { outline: none; }
+.ml-row:focus-visible { outline: var(--pixel) solid var(--color-focus); outline-offset: -2px; }
 .ml-row.is-off { opacity: 0.5; }
 .ml-num { font-size: 9px; color: var(--color-muted); text-align: right; }
 .ml-eq { display: none; align-items: flex-end; justify-content: flex-end; gap: 2px; height: 12px; }
-.ml-eq i { width: 3px; height: 40%; background: var(--mu-lcd-ink); }
+.ml-eq i { width: 3px; height: 40%; background: var(--mu-now-bar); }
 .ml-row.is-current .ml-n { display: none; }
 .ml-row.is-current .ml-eq { display: flex; }
 .is-playing .ml-row.is-current .ml-eq i { animation: mm-eq 600ms steps(1, end) infinite; }
@@ -335,7 +380,8 @@
 /* cards: albums and artists, each with the picture in the chosen look */
 .ml-grid { display: grid; gap: var(--space-md); }
 .ml-grid--album, .ml-grid--artist { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
-.ml-grid--tape { grid-template-columns: repeat(auto-fill, minmax(158px, 1fr)); }
+/* a cassette keeps its own height: one with a photo label is taller, and the others do not stretch to it */
+.ml-grid--tape { grid-template-columns: repeat(auto-fill, minmax(158px, 1fr)); align-items: start; }
 .ml-card { display: grid; gap: 4px; min-width: 0; padding: 8px 8px 10px; text-align: left; color: var(--color-ink); background: var(--color-paper-3);
   border: var(--pixel) solid var(--color-rule); border-radius: 0; cursor: pointer; font: inherit; }
 .ml-card:hover { border-color: var(--color-rule-2); background: var(--color-paper-2); transform: translateY(-2px); }
@@ -367,6 +413,86 @@
 .ml-lock h4 { margin: 0 0 6px; font: 600 var(--text-md)/1.2 var(--font-pixel); }
 .ml-lock p { color: var(--color-ink-2); font-size: var(--text-sm); }
 .ml-lock p + p { margin-top: var(--space-sm); }
+
+/* ------------------------------------------------------------ cover photos, on air, skeletons */
+/* a playlist's own cover photo is its cassette's label art */
+.ml-tape-art { position: relative; display: block; height: 72px; margin: -6px -8px 7px; overflow: hidden; background: var(--sprite-dark);
+  box-shadow: inset 0 -2px 0 oklch(0% 0 0 / 0.25); }
+.ml-tape-art canvas { display: block; width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated; }
+.ml-tape-art::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: repeating-linear-gradient(to bottom, oklch(0% 0 0 / 0.14) 0 1px, transparent 1px 3px), linear-gradient(transparent 60%, oklch(0% 0 0 / 0.25)); }
+.ml-hero-art.is-tape { display: grid; place-items: center; background: var(--color-paper-3); box-shadow: 4px 4px 0 var(--sprite-dark), inset 0 0 0 var(--pixel) var(--color-rule); }
+.ml-hero-art.is-tape::after { display: none; }
+
+/* on air: the list or album playing now; its lamp blinks while the music plays */
+.ml-onair { display: none; align-items: center; gap: 5px; width: max-content; padding: 3px 6px 3px 5px; font-size: 7px; letter-spacing: 0.06em; line-height: 1;
+  color: var(--sprite-white); background: var(--sprite-red); box-shadow: 2px 2px 0 var(--sprite-dark); }
+.ml-onair i { width: 5px; height: 5px; background: var(--sprite-white); }
+.ml-tape.is-on .ml-onair, .ml-card.is-on .ml-onair, .ml-hero.is-on .ml-onair { display: inline-flex; }
+.ml-tape .ml-onair { position: absolute; top: -9px; right: -6px; z-index: 1; transform: rotate(3deg); }
+.ml-card .ml-onair { position: absolute; top: 6px; left: 6px; z-index: 1; }
+.is-playing .is-on > .ml-onair i, .is-playing .is-on .ml-card-art > .ml-onair i, .is-playing .ml-hero.is-on .ml-onair i { animation: mu-blink 1s steps(1, end) infinite; }
+.ml-card.is-on { border-color: var(--sprite-red); }
+.ml-card { position: relative; }
+
+/* skeletons hold the shape of what is coming, so nothing jumps when it arrives */
+.ml-skel { display: block; min-height: 8px; background: linear-gradient(90deg, var(--color-paper-2) 0 42%, color-mix(in oklch, var(--color-rule) 70%, var(--color-paper-2)) 42% 58%, var(--color-paper-2) 58%) 0 0 / 300% 100%;
+  animation: ml-shimmer 1.2s steps(8, end) infinite; }
+.ml-row--skel { pointer-events: none; }
+.ml-row--skel .ml-main { gap: 7px; }
+.ml-skel--n { width: 16px; height: 8px; margin-left: auto; }
+.ml-skel--art { width: 32px; height: 32px; }
+.ml-skel--t { width: 62%; height: 10px; }
+.ml-skel--s { width: 38%; height: 8px; }
+.ml-skel--h { width: 70%; height: 20px; }
+.ml-card--skel { pointer-events: none; cursor: default; }
+.ml-card--skel .ml-card-art { box-shadow: none; }
+.ml-card--skel .ml-skel--t { margin-top: 6px; }
+.ml-tape--skel { pointer-events: none; }
+.ml-tape--skel .mu-tape-label { gap: 6px; }
+.ml-tape--skel .ml-skel { background-color: oklch(85% 0.02 88); }
+.ml-hero--skel .ml-hero-art { box-shadow: none; }
+.ml-hero--skel .ml-hero-text { gap: 10px; }
+.mu-next-skel { height: 34px; background: linear-gradient(90deg, var(--color-paper-2) 0 42%, var(--color-rule) 42% 58%, var(--color-paper-2) 58%) 0 0 / 300% 100%; animation: ml-shimmer 1.2s steps(8, end) infinite; }
+@keyframes ml-shimmer { from { background-position: 100% 0; } to { background-position: -50% 0; } }
+
+/* a view arrives in three steps; its rows and cards rise one after another (only what fits on screen waits) */
+.ml-body.is-entering > :not(.ml-rows):not(.ml-grid):not(.ml-section):not(.ml-hero) { animation: ml-in 210ms steps(3, end) both; }
+.ml-body.is-entering .ml-hero { animation: ml-in 210ms steps(3, end) both; }
+.ml-body.is-entering .ml-row, .ml-body.is-entering .ml-card, .ml-body.is-entering .ml-tape { animation: ml-rise 180ms steps(3, end) both; animation-delay: calc(var(--i, 0) * 18ms); }
+@keyframes ml-in { from { opacity: 0; transform: translateY(6px); } }
+@keyframes ml-rise { from { opacity: 0; transform: translateY(8px); } }
+/* the tab you pick presses in; the row you play lights at once, before Spotify answers */
+.ml-tab.is-new { animation: ml-press 180ms steps(2, end); }
+@keyframes ml-press { from { transform: translateY(2px); } }
+.ml-row.is-starting { animation: ml-start 600ms steps(3, end); }
+@keyframes ml-start { 0% { background: var(--color-accent-soft); box-shadow: inset 3px 0 0 var(--color-accent); } }
+.ml-search input:focus { animation: ml-press 140ms steps(2, end); }
+
+/* the deck: a new song types itself onto the LCD; the play key flips when it changes */
+.mu-lcd.is-new .mu-mq--title { animation: mu-type 360ms steps(6, end) both; }
+.mu-lcd.is-new .mu-mq--sub { animation: mu-type 300ms steps(5, end) 80ms both; }
+.mu-lcd.is-new .mu-mq--album { animation: mu-type 300ms steps(5, end) 140ms both; }
+@keyframes mu-type { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0); } }
+.is-flip > .mu-glyph { animation: mu-flip 180ms steps(3, end); }
+@keyframes mu-flip { from { clip-path: inset(50% 0 50% 0); } to { clip-path: inset(0); } }
+
+/* ------------------------------------------------------------ up next, under the deck when side by side */
+.mu-next { gap: 8px; padding: 10px 12px 12px; background: var(--color-paper-3); border: var(--pixel) solid var(--color-rule); box-shadow: 4px 4px 0 var(--color-paper-2); }
+.mu-next-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm); }
+.mu-next-title { margin: 0; font-size: 8px; color: var(--color-muted); letter-spacing: 0.1em; }
+.mu-next-more { min-height: 26px; font-size: var(--text-xs); }
+.mu-next-rows { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.mu-next-row { display: grid; grid-template-columns: 20px 28px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 36px; padding: 3px 6px; }
+.mu-next-row:nth-child(odd) { background: color-mix(in oklch, var(--color-paper-2) 55%, transparent); }
+.mu-next-n, .mu-next-dur { font-size: 8px; color: var(--color-muted); }
+.mu-next-art { width: 28px; height: 28px; image-rendering: pixelated; background: var(--sprite-dark); box-shadow: 0 0 0 1px var(--sprite-dark); }
+.mu-next-text { display: grid; min-width: 0; }
+.mu-next-text b, .mu-next-text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mu-next-text b { font-weight: 500; font-size: var(--text-sm); }
+.mu-next-text small { font-size: var(--text-xs); color: var(--color-muted); }
+.mu-next-empty { padding: 6px; font-size: var(--text-sm); color: var(--color-muted); }
+.mu-next .mu-next-row { animation: ml-rise 180ms steps(3, end) both; animation-delay: calc(var(--i, 0) * 22ms); }
 
 /* ------------------------------------------------------------ the compact player: floating, or dropped from the status bar */
 .mc { position: fixed; z-index: calc(var(--z-sticky) + 50); display: grid; gap: 8px; width: 316px; padding: 0 10px 10px;
@@ -400,8 +526,8 @@
 .mc-seek i { position: absolute; inset: 0 auto 0 0; background: var(--mu-lcd-ink); box-shadow: 0 0 4px var(--mu-lcd-glow); }
 .mc-time { display: flex; justify-content: space-between; font-size: 7px; }
 .mc-keys { display: flex; align-items: center; gap: 4px; }
-.mc-key { display: grid; place-items: center; width: 34px; height: 28px; padding: 0; color: var(--color-ink); background: linear-gradient(oklch(42% 0.012 250), oklch(33% 0.012 250));
-  border: var(--pixel) solid var(--sprite-dark); border-radius: 0; box-shadow: inset 0 2px 0 oklch(52% 0.012 250), 0 3px 0 var(--sprite-dark); margin-bottom: 3px; cursor: pointer; }
+.mc-key { display: grid; place-items: center; width: 34px; height: 28px; padding: 0; color: var(--mu-key-ink); background: linear-gradient(var(--mu-key-a), var(--mu-key-b));
+  border: var(--pixel) solid var(--sprite-dark); border-radius: 0; box-shadow: inset 0 2px 0 var(--mu-key-hi), 0 3px 0 var(--sprite-dark); margin-bottom: 3px; cursor: pointer; }
 .mc-key:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--sprite-dark); }
 .mc-key:disabled { opacity: 0.5; cursor: not-allowed; }
 .mc-key--play { width: 42px; color: var(--color-accent-ink); background: linear-gradient(var(--color-accent), var(--color-accent-deep)); }
@@ -512,3 +638,9 @@ body.is-music-playing .term-mascot .spr { animation: mu-bob-small 1200ms steps(1
   .ml-row { grid-template-columns: 32px minmax(0, 1fr) auto; }
   .ml-num, .ml-dur { display: none; }
 }
+
+/* A playlist without a cover keeps the same shape: its label strip is quiet stripes in its own
+   tape colour, so every card in the shelf lines up. */
+.ml-tape-art.is-blank { background: repeating-linear-gradient(135deg, color-mix(in oklch, var(--tape) 30%, var(--sprite-dark)) 0 6px, var(--sprite-dark) 6px 12px); }
+.ml-tape-art.is-blank::after { content: none; }
+.ml-tape--skel .ml-tape-art.is-blank { background: color-mix(in oklch, var(--mu-paper-ink, #222) 12%, transparent); }

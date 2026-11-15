@@ -29,7 +29,16 @@ const Music = (() => {
   let signIn = null;                     // { url, opened, until, scopes } while a sign-in is out in the browser
   let pollTimer = 0, statusTimer = 0, revealTimer = 0, seekTimer = 0, volTimer = 0;
   let pendingSeek = null, pendingVol = null;
-  let lastFilled = -1, paintedItem = null, endAsked = false, trackSeen = null;
+  let lastFilled = -1, paintedItem = null, endAsked = false, trackSeen = null, lastOn = null;
+  // A short stepped flourish on a change: the class is put back on so its animation runs again.
+  function flash(el, cls, ms) {
+    if (!el || still()) return;
+    el.classList.remove(cls);
+    void el.offsetWidth;
+    el.classList.add(cls);
+    clearTimeout(el[`_${cls}`]);
+    el[`_${cls}`] = setTimeout(() => el.classList.remove(cls), ms);
+  }
   const views = new Set();               // other views of the same state: { paint, tick, visible, relook }
   const trackListeners = new Set();
   const listeners = new Set();
@@ -233,6 +242,7 @@ const Music = (() => {
     if (els.look) els.look.textContent = LOOKS[look].label;
     if (els.art) { els.art.dataset.art = ""; drawArt(els.art, artKey(player?.item), artCss()); }
     if (miniEls.art) drawArt(miniEls.art, artKey(player?.item), 18);
+    if (els.nextRows) for (const c of els.nextRows.querySelectorAll("canvas[data-thumb]")) { c.dataset.art = ""; drawArt(c, c.dataset.thumb, 32); }
     for (const v of views) v.relook?.();
   }
   const cycleLook = () => setLook({ 8: "16", 16: "32", 32: "8" }[look]);
@@ -342,6 +352,8 @@ const Music = (() => {
         <span class="mu-top-tools"><button class="btn btn--quiet mu-tool" type="button" data-music="refresh" data-tip="Ask Spotify again now: what plays, the devices, the sign-in">${glyph("refresh", 2)}<span>Refresh</span></button>
           <button class="btn btn--quiet mu-tool" type="button" data-music="popout" data-tip="Float a mini player over the layout">${glyph("pop", 2)}<span>Pop out</span></button></span></div>
       <div class="mu-ribbon" data-ref="ribbon" hidden></div>
+      <div class="mu-cols">
+      <section class="mu-col mu-col--deck" aria-label="Now playing">
       <div class="mu-stage">
         <div class="mu-crew" aria-hidden="true"><span class="mu-slime">${crew("buddy")}</span><span class="mu-bot">${crew("bot")}</span></div>
         <div class="mu-box">
@@ -380,7 +392,12 @@ const Music = (() => {
         </div>
       </div>
       <p class="mu-note" data-ref="note" role="status" hidden></p>
-      <div class="mu-lib" data-ref="lib"></div>
+      <section class="mu-next" data-ref="upnext" aria-labelledby="mu-next-title"><header class="mu-next-head"><h3 class="mu-next-title num8" id="mu-next-title">UP NEXT</h3>
+        <button class="btn btn--quiet mu-next-more" type="button" data-music="queue-tab">The whole queue</button></header>
+        <ol class="mu-next-rows" data-ref="nextRows"></ol></section>
+      </section>
+      <section class="mu-col mu-col--lib" aria-label="Library"><div class="mu-lib" data-ref="lib"></div></section>
+      </div>
     </div>`;
   }
 
@@ -467,10 +484,19 @@ const Music = (() => {
     document.body.classList.toggle("is-music-playing", (mode === "live" || mode === "demo") && playing());
     const item = player?.item;
     const key = item?.id ?? item?.name ?? null;
-    if (key !== trackSeen) { trackSeen = key; for (const fn of trackListeners) fn(item); if (item?.id) checkLikes([item.id]); }
+    if (key !== trackSeen) {
+      const first = trackSeen === undefined;
+      trackSeen = key;
+      for (const fn of trackListeners) fn(item);
+      if (item?.id) checkLikes([item.id]);
+      if (!first) flash(els.lcd, "is-new", 420);
+      loadUpNext();
+    }
+    const on = playing();
+    if (on !== lastOn) { if (lastOn !== null) { flash(els.play, "is-flip", 200); flash(miniEls.play, "is-flip", 200); } lastOn = on; }
     for (const v of views) v.paint?.();
     if (view !== "deck" || !els.lcd) return;
-    const p = player, on = playing();
+    const p = player;
     paintedItem = key;
     root.firstElementChild.classList.toggle("is-playing", on);
     root.firstElementChild.classList.toggle("is-idle", !item);
@@ -572,6 +598,34 @@ const Music = (() => {
     const want = cur?.id && list.some((d) => d.id === cur.id) ? cur.id : (list.find((d) => d.active)?.id || sel.value);
     if (want && sel.value !== want) sel.value = want;
     RetroSelect.sync(sel);
+  }
+
+  /* ------------------------------------------------------------ up next, under the deck when there is room */
+
+  let nextKey = "", nextAt = 0;
+  const nextShown = () => !!els.upnext && els.upnext.getClientRects().length > 0;
+  async function loadUpNext(force = false) {
+    if ((mode !== "live" && mode !== "demo") || !nextShown()) return;
+    const key = `${itemKey()}|${player?.context?.uri || ""}`;
+    if (!force && key === nextKey && Date.now() - nextAt < 30000) return;
+    nextKey = key;
+    nextAt = Date.now();
+    if (!els.nextRows.children.length) els.nextRows.innerHTML = '<li class="mu-next-skel"></li>'.repeat(4);
+    try {
+      const out = await source().queue();
+      if (nextKey === key) paintUpNext(out.items || []);
+    } catch (err) {
+      if (err.message !== "reloading" && nextKey === key) paintUpNext(null);
+    }
+  }
+  function paintUpNext(items) {
+    if (!els.nextRows) return;
+    els.nextRows.innerHTML = items === null ? '<li class="mu-next-empty">Spotify did not say what plays next.</li>'
+      : !items.length ? '<li class="mu-next-empty">Nothing queued after this song.</li>'
+        : items.slice(0, 12).map((t, i) => `<li class="mu-next-row" style="--i:${i}"><span class="mu-next-n num8">${String(i + 1).padStart(2, "0")}</span>
+            <canvas class="mu-next-art" width="16" height="16" data-thumb="${esc(t.thumb || `plain:${t.id || t.name}`)}" aria-hidden="true"></canvas>
+            <span class="mu-next-text"><b>${esc(t.name)}</b><small>${esc((t.artists || []).join(", "))}</small></span><span class="mu-next-dur num8">${fmt(t.duration_ms)}</span></li>`).join("");
+    for (const c of els.nextRows.querySelectorAll("canvas[data-thumb]")) drawArt(c, c.dataset.thumb, 32);
   }
 
   /* ------------------------------------------------------------ status and polling */
@@ -686,6 +740,7 @@ const Music = (() => {
         schedule(cadence());
       }
       for (const v of views) v.refreshed?.();
+      loadUpNext(true);
     } catch (err) {
       if (err.message !== "reloading") toast("Could not refresh the music.", err.message, true);
     } finally {
@@ -815,6 +870,7 @@ const Music = (() => {
       await source().queueAdd(uri);
       toast("Added to the queue.", name || "");
       for (const v of views) v.queued?.();
+      loadUpNext(true);
       return true;
     } catch (err) {
       if (err.message === "reloading") return false;
@@ -991,6 +1047,7 @@ const Music = (() => {
     }
     if (what === "popout") { if (typeof MusicFloat !== "undefined") MusicFloat.popOut(); return; }
     if (what === "refresh") return refreshNow(t);
+    if (what === "queue-tab") { if (typeof MusicLibrary !== "undefined") MusicLibrary.showTab("queue"); return; }
     if (what === "connect") return connect(t);
     if (what === "disconnect") return disconnect(t);
     if (what === "preview") return startDemo();
@@ -1032,9 +1089,16 @@ const Music = (() => {
       refit();
       if (now && !wasShown && (mode === "live" || mode === "demo")) { poll(); loadDevices(); }
       if (now && !wasShown && els.art && player) { els.art.dataset.art = ""; drawArt(els.art, artKey(player.item), artCss()); }
+      if (now) loadUpNext();
       wasShown = now;
     }).observe(root);
     document.addEventListener("visibilitychange", () => { if (!document.hidden && (mode === "live" || mode === "demo")) poll(); });
+    // "/" finds music, from anywhere but a field or a terminal, while the panel shows
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented || !shown() || view !== "deck") return;
+      if (e.target.closest?.("input, textarea, select, [contenteditable=''], [contenteditable='true'], .xterm, dialog")) return;
+      if (typeof MusicLibrary !== "undefined" && MusicLibrary.focusSearch()) e.preventDefault();
+    });
     addEventListener("focus", () => { if (signIn || mode === "setup") refreshStatus(); });
     // The local clock: time, blocks and the end of a song, four times a second while it plays.
     setInterval(async () => {

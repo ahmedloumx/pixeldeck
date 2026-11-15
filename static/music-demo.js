@@ -210,6 +210,57 @@ const MusicDemo = (() => {
     },
   };
 
+  // Made-up "photos" for the playlists that have one: soft light, haze and a little grain, so they
+  // read as pictures someone took rather than drawn covers.
+  function grain(g, rand, amount = 0.06) {
+    for (let i = 0; i < 900; i++) { g.fillStyle = `rgba(${rand() > 0.5 ? "255,255,255" : "0,0,0"}, ${amount * rand()})`; g.fillRect(rand() * 100, rand() * 100, 0.6, 0.6); }
+  }
+  const PHOTOS = {
+    beach(g, rand) {
+      g.fillStyle = linear(g, 0, 0, 0, 58, [[0, "#6fa8dc"], [0.6, "#f6c9a0"], [1, "#ffb27a"]]); g.fillRect(0, 0, 100, 58);
+      g.fillStyle = radial(g, 70, 50, 1, 22, [[0, "rgba(255, 244, 214, 1)"], [0.3, "rgba(255, 220, 160, 0.8)"], [1, "rgba(255, 200, 140, 0)"]]); g.fillRect(40, 25, 60, 40);
+      g.fillStyle = linear(g, 0, 56, 0, 78, [[0, "#3f7fae"], [1, "#2b5d86"]]); g.fillRect(0, 56, 100, 22);
+      g.fillStyle = "rgba(255, 236, 200, 0.55)";
+      for (let k = 0; k < 9; k++) g.fillRect(52 + Math.sin(k) * 8, 58 + k * 2.2, 26 - k * 2, 0.8);
+      g.fillStyle = linear(g, 0, 76, 0, 100, [[0, "#e7cfa2"], [1, "#c9a978"]]);
+      g.beginPath(); g.moveTo(0, 80); g.quadraticCurveTo(50, 72, 100, 78); g.lineTo(100, 100); g.lineTo(0, 100); g.fill();
+      g.fillStyle = "rgba(255, 255, 255, 0.7)"; g.beginPath(); g.moveTo(0, 79); g.quadraticCurveTo(50, 71, 100, 77); g.lineTo(100, 78.5); g.quadraticCurveTo(50, 72.5, 0, 80.5); g.fill();
+      g.fillStyle = "#2b2b33";  // two people on the sand, far off
+      for (const x of [26, 30]) { g.fillRect(x, 81, 1.6, 5); g.beginPath(); g.arc(x + 0.8, 80, 1, 0, Math.PI * 2); g.fill(); }
+      grain(g, rand);
+    },
+    peaks(g, rand) {
+      g.fillStyle = linear(g, 0, 0, 0, 50, [[0, "#9cc3e6"], [1, "#e8eef3"]]); g.fillRect(0, 0, 100, 50);
+      const ridge = (base, amp, color, seed) => {
+        const r2 = rng(seed);
+        g.fillStyle = color; g.beginPath(); g.moveTo(0, 100);
+        for (let x = 0; x <= 100; x += 4) g.lineTo(x, base - amp * Math.abs(Math.sin(x / 13 + r2() * 0.6)) - r2() * 3);
+        g.lineTo(100, 100); g.fill();
+      };
+      ridge(52, 22, "#8c9fb5", "far"); ridge(60, 16, "#5d7189", "mid");
+      g.fillStyle = "rgba(255, 255, 255, 0.8)";
+      for (const [x, y] of [[22, 34], [58, 31], [80, 37]]) { g.beginPath(); g.moveTo(x - 4, y + 5); g.lineTo(x, y); g.lineTo(x + 4, y + 5); g.fill(); }
+      g.fillStyle = linear(g, 0, 62, 0, 82, [[0, "#3e6a73"], [1, "#22434b"]]); g.fillRect(0, 62, 100, 20);
+      g.fillStyle = "rgba(200, 225, 240, 0.35)"; for (let k = 0; k < 6; k++) g.fillRect(rand() * 80, 64 + k * 3, 10 + rand() * 14, 0.6);
+      g.fillStyle = linear(g, 0, 80, 0, 100, [[0, "#3c5a2f"], [1, "#24381c"]]); g.fillRect(0, 80, 100, 20);
+      g.fillStyle = "#1f2f19";
+      for (let x = 2; x < 100; x += 6) { const h = 8 + rand() * 9; g.beginPath(); g.moveTo(x, 86 - h); g.lineTo(x - 3, 92); g.lineTo(x + 3, 92); g.fill(); }
+      grain(g, rand);
+    },
+    lights(g, rand) {
+      g.fillStyle = linear(g, 0, 0, 0, 100, [[0, "#140b22"], [1, "#2a1530"]]); g.fillRect(0, 0, 100, 100);
+      const hues = ["255, 180, 90", "255, 90, 140", "120, 200, 255", "255, 230, 140", "190, 120, 255"];
+      for (let i = 0; i < 26; i++) {
+        const x = rand() * 100, y = 15 + rand() * 70, r = 4 + rand() * 9, c = hues[i % hues.length];
+        g.fillStyle = radial(g, x, y, 0, r, [[0, `rgba(${c}, 0.75)`], [0.7, `rgba(${c}, 0.35)`], [1, `rgba(${c}, 0)`]]);
+        g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+      }
+      g.fillStyle = "rgba(10, 6, 16, 0.85)"; g.fillRect(0, 84, 100, 16);
+      g.fillStyle = "rgba(255, 210, 140, 0.9)"; g.fillRect(8, 88, 30, 1.2);
+      grain(g, rand, 0.08);
+    },
+  };
+
   const coverCache = new Map();
   /** A demo cover as a 256 px canvas, made once. */
   function cover(name) {
@@ -219,7 +270,8 @@ const MusicDemo = (() => {
     const g = c.getContext("2d");
     g.scale(SIZE / 100, SIZE / 100);
     const [kind, seed] = String(name).split(".");
-    (COVERS[kind] || COVERS.vinyl)(g, rng(name + (seed || "")));
+    if (kind === "photo") (PHOTOS[seed] || PHOTOS.beach)(g, rng(name));
+    else (COVERS[kind] || COVERS.vinyl)(g, rng(name + (seed || "")));
     coverCache.set(name, c);
     return c;
   }
@@ -267,10 +319,12 @@ const MusicDemo = (() => {
     for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
     return pool.slice(0, count);
   };
+  // Half of them carry a cover photo, the way most people's own playlists end up.
   const PLAYLISTS = [
-    ["demoFocus", "Focus Mode: Pixels", "You", 24], ["demoMerge", "Merge Day Anthems", "You", 18], ["demoDuck", "Rubber Duck Radio", "Pixel Pat", 31],
-    ["demoRebase", "Late Night Rebase", "You", 12], ["demoGreen", "Green Build Grooves", "Robo Rita", 27], ["demoStandup", "Standup Shuffle", "You", 9],
-  ].map(([id, name, owner, count]) => ({ id, name, owner, tracks: pick(id, count) }));
+    ["demoFocus", "Focus Mode: Pixels", "You", 24, null], ["demoMerge", "Summer Road Trip", "You", 18, "photo.beach"],
+    ["demoDuck", "Rubber Duck Radio", "Pixel Pat", 31, null], ["demoRebase", "Late Night Rebase", "You", 12, "photo.lights"],
+    ["demoGreen", "Mountain Mornings", "Robo Rita", 27, "photo.peaks"], ["demoStandup", "Standup Shuffle", "You", 9, null],
+  ].map(([id, name, owner, count, photo]) => ({ id, name, owner, photo, tracks: pick(id, count) }));
   PLAYLISTS[0].tracks = [TRACKS[0].id, ...PLAYLISTS[0].tracks.filter((t) => t !== TRACKS[0].id)].slice(0, 24);
   const byId = new Map(TRACKS.map((t) => [t.id, t]));
   const liked = new Set(pick("liked", 64));
@@ -289,8 +343,8 @@ const MusicDemo = (() => {
   }
   const albumCard = (a) => ({ id: a.id, uri: `spotify:album:${a.id}`, name: a.name, artists: [ARTISTS[a.artist].name], artist_ids: [ARTISTS[a.artist].id],
     year: a.year, tracks: a.tracks.length, art: art(a), thumb: art(a) });
-  const listCard = (p) => { const first = byId.get(p.tracks[0]); return { id: p.id, uri: `spotify:playlist:${p.id}`, name: p.name, owner: p.owner,
-    by_spotify: false, tracks: p.tracks.length, art: art(ALBUMS[first.album]), thumb: art(ALBUMS[first.album]) }; };
+  const listCard = (p) => ({ id: p.id, uri: `spotify:playlist:${p.id}`, name: p.name, owner: p.owner, by_spotify: false, tracks: p.tracks.length,
+    art: p.photo ? `demo:${p.photo}` : null, thumb: p.photo ? `demo:${p.photo}` : null });
   const artistCard = (a, i) => ({ id: a.id, uri: `spotify:artist:${a.id}`, name: a.name, genres: a.genres, art: art(ALBUMS[ALBUM_LIST.findIndex((x) => x[1] === i)] || ALBUMS[0]),
     thumb: art(ALBUMS[ALBUM_LIST.findIndex((x) => x[1] === i)] || ALBUMS[0]) });
   function page(all, offset, size = 50) {
