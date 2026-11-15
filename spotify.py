@@ -4,7 +4,7 @@ Sign-in is the Authorization Code flow with PKCE, so there is no client secret, 
 SPOTIFY_CLIENT_ID from the .env (re-read when it changes). The system browser goes to
 Spotify and comes back to /spotify/callback on this server. The tokens it earns are kept
 in the state folder (mode 600) and never reach the page or a log: the page gets trimmed
-answers, and album art fetched here from i.scdn.co, because its CSP allows no other host.
+answers, and pictures fetched here from Spotify's image hosts, because its CSP allows no other host.
 """
 
 import base64
@@ -58,7 +58,11 @@ WAIT_MAX = 3600        # a Retry-After beyond this is treated as an hour
 
 # Album art lives on Spotify's image host under a hex id. Anything else is refused, so this
 # route can never be pointed at another host, port, path or query.
-ART_RE = re.compile(r"https://i\.scdn\.co/image/[0-9a-f]{16,64}")
+# Album art is on i.scdn.co; a playlist cover you uploaded (a photo) is on image-cdn-ak or
+# image-cdn-fa.spotifycdn.com; a playlist without one shows a collage of four album covers from
+# mosaic.scdn.co (its path is a size and up to four 40 character ids run together).
+ART_RE = re.compile(r"https://(?:i\.scdn\.co|image-cdn-(?:ak|fa)\.spotifycdn\.com)/image/[0-9a-f]{16,64}"
+                    r"|https://mosaic\.scdn\.co/(?:60|300|640)/[0-9a-f]{40,160}")
 ART_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 CLIENT_ID_RE = re.compile(r"[0-9A-Za-z]{16,64}")
 PLAYLIST_ID_RE = re.compile(r"[0-9A-Za-z]{1,64}")
@@ -164,9 +168,9 @@ def redirect_uri(port):
 
 
 def art_url(value):
-    """The album art URL when it is exactly https://i.scdn.co/image/<hex id>, else ValueError."""
+    """The picture URL when it is exactly one of Spotify's image addresses (see ART_RE), else ValueError."""
     if not isinstance(value, str) or not ART_RE.fullmatch(value):
-        raise ValueError("art must be an https://i.scdn.co/image/ address")
+        raise ValueError("art must be a picture address on Spotify's image hosts")
     return value
 
 
