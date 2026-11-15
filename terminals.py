@@ -133,13 +133,20 @@ class Session:
                 "alive": self.alive, "exit_code": self.exit_code}
 
 
+def _take_terminal():
+    """Run in the child, after its new session starts: make the terminal on stdin its
+    controlling terminal. Without it a program never hears that the terminal was resized
+    (no SIGWINCH, so Claude Code kept drawing at its first width) and Ctrl+C reaches no one."""
+    fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+
+
 class UnixSession(Session):
     def _start(self, argv, cols, rows):
         self.master, slave = pty.openpty()
         self._resize(cols, rows)
         self.proc = subprocess.Popen(
             argv, cwd=self.cwd, env=_clean_env(), stdin=slave, stdout=slave, stderr=slave,
-            start_new_session=True, close_fds=True,
+            start_new_session=True, close_fds=True, preexec_fn=_take_terminal,
         )
         os.close(slave)
 
