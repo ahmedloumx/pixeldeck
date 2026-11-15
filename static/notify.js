@@ -17,6 +17,9 @@ const Notify = (() => {
   const STAY_MS = 9000;
   const KINDS = {
     review_requested: { label: "Reviews asked of you", reel: "YOU?", tone: "due" },
+    behind: { label: "Your branch fell behind its target", reel: "SYNC", tone: "due" },
+    unapproved: { label: "Approvals taken back", reel: "UNDO", tone: "bad" },
+    tasks: { label: "New tasks", reel: "TASK", tone: "info" },
     approved: { label: "Approvals", reel: "OK!", tone: "ok" },
     changes_requested: { label: "Changes requested", reel: "FIX", tone: "bad" },
     comments: { label: "New comments", reel: "+", tone: "info" },
@@ -25,13 +28,16 @@ const Notify = (() => {
     declined: { label: "Declined", reel: "NOPE", tone: "bad" },
     updated: { label: "New commits", reel: "PUSH", tone: "info" },
   };
-  const DEFAULT_KINDS = Object.fromEntries(Object.keys(KINDS).map((k) => [k, k !== "updated"]));
+  // Everything notifies unless you turn it off: you asked to hear about every change.
+  const DEFAULT_KINDS = Object.fromEntries(Object.keys(KINDS).map((k) => [k, true]));
   const FILLER = ["7", "$", "BAR", "?", "777", "!", "%", "#", "*", "+"];
   const read = (key, fallback) => { try { const v = JSON.parse(localStorage.getItem(key)); return v ?? fallback; } catch { return fallback; } };
   const write = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* storage blocked */ } };
   const calm = () => matchMedia("(prefers-reduced-motion: reduce)").matches || document.documentElement.dataset.motion === "calm";
 
   const saved = read(PREFS_KEY, {}) || {};
+  // Settings saved before every kind was on had new commits off by default, not by choice.
+  if (!saved.v) { saved.kinds = { ...(saved.kinds || {}), updated: true }; saved.v = 2; }
   let prefs = { scope: "all", snoozeUntil: 0, ...saved, kinds: { ...DEFAULT_KINDS, ...(saved.kinds || {}) } };
   let history = read(HISTORY_KEY, []);
   if (!Array.isArray(history)) history = [];
@@ -57,6 +63,9 @@ const Notify = (() => {
         ? `${first(ev.names[0])} left ${ev.count === 1 ? "a comment" : `${ev.count} comments`} on ${whose} ${pr}`
         : `${ev.count === 1 ? "A new comment" : `${ev.count} new comments`} on ${whose} ${pr}`;
       case "updated": return `${actor} pushed new commits to ${pr}`;
+      case "behind": return `${pr} is ${ev.count}${ev.more ? "+" : ""} ${ev.count === 1 && !ev.more ? "commit" : "commits"} behind ${ev.dest || "its target"}`;
+      case "unapproved": return `${actor} took back the approval on ${whose} ${pr}`;
+      case "tasks": return `${ev.count === 1 ? "A new task" : `${ev.count} new tasks`} on ${whose} ${pr}`;
       case "merged": return ev.actor ? `${actor} merged ${whose} ${pr}` : `${isMine(ev) ? "Your" : whose} ${pr} was merged`;
       case "declined": return ev.actor ? `${actor} declined ${whose} ${pr}` : `${isMine(ev) ? "Your" : whose} ${pr} was declined`;
       case "review_requested": return `${actor} asked you to review ${pr}`;
@@ -159,6 +168,7 @@ const Notify = (() => {
         <span class="sb-meta"><span class="branch">${esc(ev.repo || "")}</span><span class="sb-extra"></span></span>
       </button>
       <div class="sb-tools">
+        ${ev.kind === "behind" ? `<button class="sb-tool sb-sync" type="button" data-notify-sync="${ev.id}" data-tip="Merge ${esc(ev.dest || "the target")} into the branch and push, like Bitbucket's Sync">SYNC</button>` : ""}
         <button class="sb-tool" type="button" data-notify-snooze="3600000" title="Silence for an hour" aria-label="Silence for an hour">zZ</button>
         <button class="sb-tool" type="button" data-notify-dismiss aria-label="Dismiss">×</button>
       </div>`;
@@ -202,7 +212,7 @@ const Notify = (() => {
       out += `<li style="--k:${Math.min(k++, 12)}"><button class="bell-item is-${tone}${ev.read ? "" : " is-unread"}" type="button" data-notify-open="${ev.id}">
         <span class="bell-face" aria-hidden="true">${esc(face(ev))}</span>
         <span class="bell-text"><b>${esc(sentence(ev))}</b><span>${esc(ev.title || "")}</span><span class="bell-meta"><span class="branch">${esc(ev.repo || "")}</span> ${esc(ago(new Date(ev.at * 1000).toISOString()))}</span></span>
-        <span class="bell-kind">${esc(reelWord(ev))}</span></button></li>`;
+        <span class="bell-kind">${esc(reelWord(ev))}</span></button>${ev.kind === "behind" ? `<button class="bell-sync btn" type="button" data-notify-sync="${ev.id}">Sync</button>` : ""}</li>`;
     }
     return `<ol class="bell-list">${out}</ol>`;
   }
@@ -271,6 +281,12 @@ const Notify = (() => {
       if (ev) { ev.read = true; write(HISTORY_KEY, history); changed(); if (opts?.onOpen) opts.onOpen(ev); }
       if (open.closest(".slot-banner")) leave(current);
       if (open.closest(".bell-panel")) toggle(null, false);
+      return;
+    }
+    const sync = t.closest("[data-notify-sync]");
+    if (sync) {
+      const ev = find(sync.dataset.notifySync) || (current && String(current.ev.id) === sync.dataset.notifySync ? current.ev : null);
+      if (ev && opts?.onSync) { if (current) clearTimeout(current.timer); opts.onSync(ev, sync); }
       return;
     }
     const sn = t.closest("[data-notify-snooze]");

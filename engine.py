@@ -22,6 +22,7 @@ from bitbucket import HOURLY_LIMIT, BitbucketError, Client
 ME_EVERY = 300
 OPEN_EVERY = 60  # your open pull requests alone: one call, so an approval shows within a minute or two
 TEAM_EVERY = 900
+BEHIND_EVERY = 180  # your open pull requests checked against their target: one call each
 COMMENT_LOOKUPS = 5  # pull requests whose new comments are checked for authors, per refresh
 TEAM_OPEN_EVERY = 300  # a teammate's open list alone, one call: team news within minutes, not a quarter hour
 DETAIL_MAX_AGE = 900
@@ -156,6 +157,46 @@ class Engine:
         return self.team()
 
     # ---- pull requests --------------------------------------------------
+
+    def check_behind(self):
+        """Has a merge into the target left one of your branches behind? One call per open pull
+        request of yours: the commits on the target that the branch does not have (five at most,
+        that is enough to say so). A branch that falls behind is news once, until it is synced;
+        the first look after a start only records, like a first sync."""
+        me = self._me_uuid()
+        entry = self.person(me) if me else None
+        if not entry:
+            return []
+        store = self.data.setdefault("behind", {})
+        found, open_keys = [], set()
+        for pr in entry.get("open", []):
+            key = f"{pr['repo']}#{pr['id']}"
+            open_keys.add(key)
+            try:
+                raw = self.client.get(f"/repositories/{self.client.workspace}/{pr['repo']}/commits",
+                                      {"include": pr["dest"], "exclude": pr["source"], "pagelen": 5, "fields": "values.hash,next"})
+            except BitbucketError:
+                continue
+            behind, more = len(raw.get("values") or []), bool(raw.get("next"))
+            before = store.get(key)
+            with self.lock:
+                store[key] = {"behind": behind, "more": more, "at": time.time()}
+            if before is not None and not before.get("behind") and behind:
+                found.append(events._base(pr, "behind", count=behind, more=more))
+        with self.lock:
+            for key in [k for k in store if k not in open_keys]:
+                del store[key]
+        if found:
+            self.events.record(me, found)
+        self._save()
+        return found
+
+    def behind(self, pr):
+        return (self.data.get("behind") or {}).get(f"{pr['repo']}#{pr['id']}")
+
+    def mark_synced(self, repo, pr_id):
+        with self.lock:
+            self.data.setdefault("behind", {})[f"{repo}#{pr_id}"] = {"behind": 0, "more": False, "at": time.time()}
 
     def _person_lock(self, uuid):
         """One refresh per person at a time: two at once would both compare against the same
@@ -537,6 +578,9 @@ class Engine:
                 stale = [m for m in self.team() if self._open_due(m["uuid"], TEAM_OPEN_EVERY)]
                 if stale:
                     self.refresh_open(min(stale, key=lambda m: (self.person(m["uuid"]) or {}).get("open_at") or 0)["uuid"])
+            if time.time() - getattr(self, "_behind_at", 0) > BEHIND_EVERY:
+                self._behind_at = time.time()
+                self.check_behind()
             if not self.warm_history(me, budget=8):
                 for mate in self.team():
                     if self.warm_history(mate["uuid"], budget=4):

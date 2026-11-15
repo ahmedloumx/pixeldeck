@@ -56,6 +56,9 @@ def diff(before_open, after_open, me_uuid, merged=None, declined=None):
         added = (pr.get("comment_count") or 0) - (old.get("comment_count") or 0)
         if added > 0:
             out.append(_base(pr, "comments", count=added))
+        tasks = (pr.get("task_count") or 0) - (old.get("task_count") or 0)
+        if tasks > 0:
+            out.append(_base(pr, "tasks", count=tasks))
         if pr.get("source_commit") and old.get("source_commit") and pr["source_commit"] != old["source_commit"] and not mine(pr):
             out.append(_base(pr, "updated", actor=_who(pr.get("author"))))
     closed = {_key(p): ("declined", p) for p in declined or []}
@@ -84,6 +87,9 @@ def _review_changes(old, new, me_uuid):
         state = r.get("state")
         if state != prev.get("state") and state in ("approved", "changes_requested"):
             out.append(_base(new, state, actor=_who(r)))
+        elif prev.get("state") == "approved" and state != "approved":
+            # Taken back by the reviewer, or cleared by a new push where the repository does that.
+            out.append(_base(new, "unapproved", actor=_who(r)))
     return out
 
 

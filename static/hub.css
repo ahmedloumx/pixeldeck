@@ -472,3 +472,10 @@
 .queue-split .sec-chip.is-current .sec-ico { color: var(--sec); }
 .queue-split .sec-chip .sec-n { min-width: 22px; padding: 2px 5px; margin: 0; text-align: center; font-size: 9px; line-height: 1.2; }
 .queue-split .sec-chip .sec-n.has-n { color: var(--sec); background: color-mix(in oklch, var(--sec) 16%, transparent); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--sec) 35%, transparent); }
+
+/* ---------------------------------------------------------------- sync from a notification */
+.sb-tool.sb-sync { width: auto; padding: 0 6px; color: var(--color-accent-ink); background: var(--color-accent); border-color: var(--color-accent); }
+.sb-tool.sb-sync.btn--armed { background: var(--color-bad); border-color: var(--color-bad); }
+.bell-list > li { position: relative; }
+.bell-sync { position: absolute; right: var(--space-md); bottom: var(--space-xs); min-height: 24px; padding: 0 var(--space-xs); font-size: var(--text-xs); }
+.rail-behind, .q-behind { margin-left: 4px; padding: 0 4px; font: 400 8px/14px var(--font-num); color: var(--color-accent); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-accent) 45%, transparent); white-space: nowrap; }

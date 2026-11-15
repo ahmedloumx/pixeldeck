@@ -52,6 +52,9 @@ Full documentation, with the architecture, security model and measured performan
   in as a slot machine banner (one per burst, with a count) and lands behind the bell with its
   history. Silence it per kind, keep only your own pull requests, or snooze it. Your own actions
   never notify you.
+  When a merge into its target leaves one of your branches behind, you hear it at once (one call
+  per open pull request of yours every 3 minutes) with a Sync button, like Bitbucket's; approvals
+  taken back and new tasks notify too, and every kind is on by default.
 - **Status bar.** Bitbucket API calls used this hour, when your pull requests were read and the
   next read, the connection, the bell, settings and the guide.
 - **Themes.** Night (the default) or an optional Retro grey, which brings its own mascots: the same
