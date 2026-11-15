@@ -115,7 +115,7 @@ const MusicLibrary = (() => {
     // the play key sits in the tape window, between the reels
     return `<div class="mu-tape ml-tape${art ? " has-art" : ""}" style="--tape:var(${TAPE_TONES[hash(p.id) % TAPE_TONES.length]});--i:${Math.min(i, 14)}" data-id="${esc(p.id)}">
       <span class="mu-tape-label">
-        ${art ? `<span class="ml-tape-art"><canvas width="32" height="32" data-thumb="${esc(art)}" data-css="156" aria-hidden="true"></canvas></span>` : ""}
+        ${art ? `<span class="ml-tape-art"><canvas width="32" height="32" data-thumb="${esc(art)}" data-css="156" aria-hidden="true"></canvas></span>` : '<span class="ml-tape-art is-blank" aria-hidden="true"></span>'}
         <button class="ml-tape-open" type="button" data-lib="playlist" data-id="${esc(p.id)}" aria-label="Open the playlist ${esc(p.name)}">
           <span class="mu-tape-top"><span class="mu-tape-side num8" aria-hidden="true">A</span><b>${esc(p.name)}</b></span><small>${esc(meta)}</small></button>
         <span class="mu-tape-window"><i class="mu-reel" aria-hidden="true"></i>
@@ -161,7 +161,7 @@ const MusicLibrary = (() => {
     <span class="ml-dur"><span class="ml-skel ml-skel--n"></span></span><span class="ml-tools"></span></li>`;
   const skelRows = (n = 8) => `<ol class="ml-rows" aria-hidden="true">${Array.from({ length: n }, (_, i) => skelRow(i)).join("")}</ol>`;
   const skelCards = (kind, n = 6) => `<div class="ml-grid ml-grid--${kind}" aria-hidden="true">${Array.from({ length: n }, (_, i) =>
-    kind === "tape" ? `<div class="mu-tape ml-tape ml-tape--skel" style="--i:${i}"><span class="mu-tape-label"><span class="ml-skel ml-skel--t"></span><span class="ml-skel ml-skel--s"></span>
+    kind === "tape" ? `<div class="mu-tape ml-tape ml-tape--skel" style="--i:${i}"><span class="mu-tape-label"><span class="ml-tape-art is-blank" aria-hidden="true"></span><span class="ml-skel ml-skel--t"></span><span class="ml-skel ml-skel--s"></span>
       <span class="mu-tape-window"><i class="mu-reel"></i><i class="mu-reel"></i></span></span><span class="mu-tape-foot"><i></i><i></i><i></i></span></div>`
       : `<div class="ml-card ml-card--skel" style="--i:${i}"><span class="ml-card-art ml-skel"></span><span class="ml-skel ml-skel--t"></span><span class="ml-skel ml-skel--s"></span></div>`).join("")}</div>`;
   const skelHero = () => `<div class="ml-hero ml-hero--skel" aria-hidden="true"><span class="ml-hero-art ml-skel"></span><div class="ml-hero-text"><span class="ml-skel ml-skel--s"></span>

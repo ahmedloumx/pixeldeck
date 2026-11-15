@@ -638,3 +638,9 @@ body.is-music-playing .term-mascot .spr { animation: mu-bob-small 1200ms steps(1
   .ml-row { grid-template-columns: 32px minmax(0, 1fr) auto; }
   .ml-num, .ml-dur { display: none; }
 }
+
+/* A playlist without a cover keeps the same shape: its label strip is quiet stripes in its own
+   tape colour, so every card in the shelf lines up. */
+.ml-tape-art.is-blank { background: repeating-linear-gradient(135deg, color-mix(in oklch, var(--tape) 30%, var(--sprite-dark)) 0 6px, var(--sprite-dark) 6px 12px); }
+.ml-tape-art.is-blank::after { content: none; }
+.ml-tape--skel .ml-tape-art.is-blank { background: color-mix(in oklch, var(--mu-paper-ink, #222) 12%, transparent); }
