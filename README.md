@@ -109,6 +109,14 @@ Full documentation, with the architecture, security model and measured performan
   your devices and your playlists as cassettes; a mini player sits in the status bar. It drives
   your own Spotify app (desktop or phone) through Spotify's Web API. Each person uses their own
   Spotify app, see below. **Preview** in the player shows it with made-up music.
+- **Lyrics.** The LYRICS key puts the song's lyrics beside the deck, from
+  [LRCLIB](https://lrclib.net), a free and open lyrics database (Spotify's API has none). Timed
+  lyrics follow the song and a click on a line jumps there; the small player has a LYRICS tab.
+  Only the song's title, artist, album and length are sent to lrclib.net, while the lyrics are
+  open, and answers are kept so a replay asks nothing.
+- **Devices.** PLAY ON shows the device playing with a picture of its kind (computer, phone,
+  speaker, TV, car, console) and lists the others; a pick moves the music there. The status
+  bar names the device when the music plays somewhere other than this computer.
 - **Guide.** A short tour on the first start, a spotlight on each part with a mascot telling it.
   The **?** in the status bar brings it back.
 

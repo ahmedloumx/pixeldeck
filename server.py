@@ -38,6 +38,7 @@ import sessions  # noqa: E402
 import spotify  # noqa: E402
 import jira  # noqa: E402
 import launcher  # noqa: E402
+import lyrics  # noqa: E402
 import terminals  # noqa: E402
 import opener  # noqa: E402
 import proposals  # noqa: E402
@@ -55,8 +56,8 @@ AGENT_KEY = secrets.token_urlsafe(32)
 AGENT_ROUTES = {("POST", "propose"), ("GET", "proposal")}
 PROPOSALS = proposals.Proposals()
 FEATURES = ["merge", "sync", "drop", "proposals", "snapshots", "reviews", "events", "status", "settings", "merge-options", "jira",
-            "restore", "ui-state", "open-link", *repos.FEATURES, *spotify.FEATURES]
-ROUTE_MODULES = (repos, spotify)  # each answers its own routes, or None
+            "restore", "ui-state", "open-link", *repos.FEATURES, *spotify.FEATURES, "lyrics"]
+ROUTE_MODULES = (repos, spotify, lyrics)  # each answers its own routes, or None
 JIRA = jira.Jira()
 SNAPSHOT_MAX = 4 * 1024 * 1024
 MIN_COLS, MIN_ROWS = 20, 4  # a collapsed panel must not squeeze a program into a sliver
@@ -382,6 +383,8 @@ class Desk(BaseHTTPRequestHandler):
         except BitbucketError as exc:
             return self._error(HTTPStatus.BAD_GATEWAY, exc.message, upstream=exc.status, auth=engine.auth)
         except spotify.SpotifyError as exc:
+            return self._error(HTTPStatus.BAD_GATEWAY, exc.message, upstream=exc.status)
+        except lyrics.LyricsError as exc:
             return self._error(HTTPStatus.BAD_GATEWAY, exc.message, upstream=exc.status)
         except jira.JiraError as exc:
             return self._error(HTTPStatus.BAD_GATEWAY, exc.message, upstream=exc.status, jira=JIRA.status())

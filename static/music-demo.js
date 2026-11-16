@@ -468,5 +468,28 @@ const MusicDemo = (() => {
     art: async (item) => cover(String(item.art || item.thumb).slice(5)),
   };
 
-  return { source, cover, rng };
+  /* Made-up lyrics for the made-up songs, the same every time for a song. Most come timed,
+     some only as text, a few are missing, so every case of the lyrics view can be seen. */
+  const LYRIC_A = ["Streetlights hum", "The harbor blinks", "A cursor waits", "The night drive loops", "Scanlines drift", "Your high score fades", "The signal hums", "Pixel rain falls"];
+  const LYRIC_B = ["in a minor key", "in eight-bit blue", "on the window glass", "down the empty pier", "past the arcade door", "across the dial", "at a quarter to three", "where the colours stay"];
+  const CHORUS = ["Neon tides, neon tides", "Pull me back to the shore", "Press start one more", "One more life, one more try"];
+  function lyrics(item) {
+    const r = rng(`lyrics ${item?.id || item?.name}`);
+    const roll = r();
+    if (roll < 0.1) return { found: false, instrumental: false, synced: null, plain: null };
+    const dur = Math.max(30000, item?.duration_ms || 180000);
+    const synced = [[0, ""]];
+    let t = 3000 + Math.floor(r() * 2000), n = 0;
+    while (t < dur - 4000) {
+      const chorus = n % 8 >= 5;
+      const text = chorus ? CHORUS[n % CHORUS.length] : `${LYRIC_A[Math.floor(r() * LYRIC_A.length)]} ${LYRIC_B[Math.floor(r() * LYRIC_B.length)]}`;
+      synced.push([t, text]);
+      t += 3000 + Math.floor(r() * 1800);
+      if (++n % 8 === 0) { synced.push([t, ""]); t += 2500; }
+    }
+    const plain = synced.filter(([, x]) => x).map(([, x]) => x).join("\n");
+    return roll < 0.25 ? { found: true, instrumental: false, synced: null, plain } : { found: true, instrumental: false, synced, plain };
+  }
+
+  return { source, cover, rng, lyrics };
 })();
