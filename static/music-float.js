@@ -45,8 +45,9 @@ const MusicFloat = (() => {
         <div class="mc-vol" data-music="volume" role="slider" tabindex="0" aria-label="Volume" aria-valuemin="0" aria-valuemax="100">${"<i></i>".repeat(10)}</div></div>
       <div class="mc-list" hidden>
         <div class="mc-list-tabs" role="tablist" aria-label="List"><button class="mc-tab" type="button" role="tab" data-mc="tab" data-tab="queue">UP NEXT</button>
-          <button class="mc-tab" type="button" role="tab" data-mc="tab" data-tab="context">THIS LIST</button></div>
-        <ol class="mc-rows"></ol></div>`;
+          <button class="mc-tab" type="button" role="tab" data-mc="tab" data-tab="context">THIS LIST</button>
+          <button class="mc-tab" type="button" role="tab" data-mc="tab" data-tab="lyrics">LYRICS</button></div>
+        <ol class="mc-rows"></ol><div class="mc-lyrics" hidden></div></div>`;
   }
   function make(kind) {
     const el = document.createElement("div");
@@ -101,6 +102,12 @@ const MusicFloat = (() => {
 
   async function loadList(el) {
     const p = core.player, ctx = p?.context, kind = el._list.kind;
+    // Lyrics follow the song on their own: the list only shows them.
+    const lyr = el.querySelector(".mc-lyrics");
+    el._r.rows.hidden = kind === "lyrics";
+    if (lyr) lyr.hidden = kind !== "lyrics";
+    if (kind === "lyrics") { if (typeof MusicLyrics !== "undefined" && lyr) MusicLyrics.attach(lyr, { mini: true }); return; }
+    if (lyr && typeof MusicLyrics !== "undefined") MusicLyrics.detach(lyr);
     const key = `${kind}|${p?.item?.id || ""}|${ctx?.uri || ""}`;
     el._list.key = key;
     const rows = el._r.rows;

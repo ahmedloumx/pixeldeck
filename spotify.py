@@ -15,6 +15,7 @@ import os
 import re
 import secrets
 import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -527,6 +528,8 @@ def _status(port):
         "configured": bool(client_id), "client_id_ok": bool(CLIENT_ID_RE.fullmatch(client_id)),
         "connected": False, "redirect_uri": redirect_uri(port), "setting": SETTING,
         "env_file": str(config.env_path()), "user": None, "error": None, "can_launch": _launcher() is not None,
+        # Spotify's desktop app names its device after the computer: the page tells "here" apart
+        "here": socket.gethostname(),
     }
     if not client.connected():
         return out

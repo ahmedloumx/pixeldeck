@@ -383,11 +383,13 @@ const Music = (() => {
               <button class="mu-key mu-key--toggle mu-key--like" type="button" data-music="like" data-ref="like" aria-pressed="false" aria-label="Like this song">${glyph("heart", 2)}<span>LIKE</span></button>
               <button class="mu-key mu-key--toggle" type="button" data-music="shuffle" data-ref="shuffle" aria-pressed="false"><i class="mu-led" aria-hidden="true"></i><span>SHUF</span></button>
               <button class="mu-key mu-key--toggle" type="button" data-music="repeat" data-ref="repeat" aria-pressed="false"><i class="mu-led" aria-hidden="true"></i><span data-ref="repeatLabel">RPT</span></button>
+              <button class="mu-key mu-key--toggle" type="button" data-music="lyrics" data-ref="lyricsKey" aria-pressed="false" data-tip="Lyrics in place of the library, from LRCLIB"><i class="mu-led" aria-hidden="true"></i><span>LYRICS</span></button>
             </div>
             <div class="mu-vol"><span class="mu-vol-label num8" aria-hidden="true">VOL</span>
               <div class="mu-vol-blocks" data-ref="vol" data-music="volume" role="slider" tabindex="0" aria-label="Volume" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">${vol}</div>
               <span class="num8 mu-vol-num" data-ref="volnum" aria-hidden="true">0</span></div>
-            <label class="mu-device"><span class="mu-device-label num8">PLAY ON</span><span class="visually-hidden">Play on</span><select data-retro data-ref="device"></select></label>
+            <div class="mu-device"><span class="mu-device-label num8" aria-hidden="true">PLAY ON</span>
+              <button class="md-btn" type="button" data-music="devices" data-ref="devbtn" aria-haspopup="listbox" aria-expanded="false"></button></div>
           </div>
         </div>
       </div>
@@ -396,7 +398,7 @@ const Music = (() => {
         <button class="btn btn--quiet mu-next-more" type="button" data-music="queue-tab">The whole queue</button></header>
         <ol class="mu-next-rows" data-ref="nextRows"></ol></section>
       </section>
-      <section class="mu-col mu-col--lib" aria-label="Library"><div class="mu-lib" data-ref="lib"></div></section>
+      <section class="mu-col mu-col--lib" aria-label="Library and lyrics"><div class="mu-lib" data-ref="lib"></div><div class="mu-lyrics" data-ref="lyrics" hidden></div></section>
       </div>
     </div>`;
   }
@@ -414,6 +416,7 @@ const Music = (() => {
       paintedItem = undefined;
       RetroSelect.enhanceAll(root);
       if (typeof MusicLibrary !== "undefined") MusicLibrary.mount(els.lib, core);
+      applyLyrics();
       paintAll();
     }
   }
@@ -494,6 +497,7 @@ const Music = (() => {
     }
     const on = playing();
     if (on !== lastOn) { if (lastOn !== null) { flash(els.play, "is-flip", 200); flash(miniEls.play, "is-flip", 200); } lastOn = on; }
+    paintDevices();
     for (const v of views) v.paint?.();
     if (view !== "deck" || !els.lcd) return;
     const p = player;
@@ -510,7 +514,7 @@ const Music = (() => {
     els.play.classList.toggle("is-playing", on);
     els.play.setAttribute("aria-label", on ? "Pause" : "Play");
     els.playLabel.textContent = on ? "PAUSE" : "PLAY";
-    els.play.disabled = !p || (on ? !can("pausing") : (!item && !els.device?.value) || !can("resuming"));
+    els.play.disabled = !p || (on ? !can("pausing") : (!item && !chosenDev) || !can("resuming"));
     els.prev.disabled = !item || !can("skipping_prev");
     els.next.disabled = !item || !can("skipping_next");
     const liked = item?.id ? likes.get(item.id) : undefined;
@@ -572,8 +576,8 @@ const Music = (() => {
       mini.innerHTML = `<button class="mm-play" type="button" data-music="toggle" aria-label="Play">${glyph("play", 2)}${glyph("pause", 2)}</button>
         <button class="mm-title" type="button" data-music="drop" aria-haspopup="dialog" aria-expanded="false"><canvas class="mm-art" width="18" height="18" aria-hidden="true"></canvas>
         <span class="mu-mq mm-mq"><span class="mu-mq-track"><span class="mu-mq-text"></span><span class="mu-mq-text" aria-hidden="true"></span></span></span>
-        <span class="mm-eq" aria-hidden="true"><i></i><i></i><i></i></span></button>`;
-      miniEls = { play: mini.querySelector(".mm-play"), title: mini.querySelector(".mm-title"), art: mini.querySelector(".mm-art"), mq: mini.querySelector(".mm-mq") };
+        <span class="mm-eq" aria-hidden="true"><i></i><i></i><i></i></span></button><span class="mm-where" hidden></span>`;
+      miniEls = { play: mini.querySelector(".mm-play"), title: mini.querySelector(".mm-title"), art: mini.querySelector(".mm-art"), mq: mini.querySelector(".mm-mq"), where: mini.querySelector(".mm-where") };
     }
     const item = player?.item, isOn = playing();
     mini.classList.toggle("is-playing", isOn);
@@ -584,20 +588,37 @@ const Music = (() => {
     miniEls.title.setAttribute("aria-label", item ? `Now playing: ${item.name} by ${item.artists.join(", ")}. Open the music dropdown.` : "Open the music dropdown");
     const want = artKey(player ? item : null);
     if (miniEls.art.dataset.art !== want) drawArt(miniEls.art, want, 18);
+    const dev = player?.device, here = String(status?.here || "").toLowerCase();
+    const away = !!dev?.name && !!item && dev.name.toLowerCase() !== here && (mode === "demo" || !!here);
+    miniEls.where.hidden = !away;
+    if (away && typeof MusicDevices !== "undefined") {
+      const html = `${MusicDevices.icon(dev.type, "mm-where-pic")}<span>${esc(dev.name)}</span>`;
+      if (miniEls.where._html !== html) { miniEls.where.innerHTML = html; miniEls.where._html = html; }
+      miniEls.where.dataset.tip = `Playing on ${dev.name}`;
+    }
   }
 
+  // PLAY ON: the device playing, with its kind's picture; a click lists them all.
+  let chosenDev = "";
   function paintDevices() {
-    const sel = els.device;
-    if (!sel) return;
+    if (!els.devbtn || typeof MusicDevices === "undefined") return;
+    const cur = player?.device?.id ? player.device : null;
     const list = [...devices];
-    const cur = player?.device;
-    if (cur?.id && !list.some((d) => d.id === cur.id)) list.unshift({ ...cur });
-    const html = list.length ? list.map((d) => `<option value="${esc(d.id)}">${esc(d.name)}</option>`).join("")
-      : '<option value="">No device: open Spotify somewhere</option>';
-    if (sel._html !== html) { sel.innerHTML = html; sel._html = html; }
-    const want = cur?.id && list.some((d) => d.id === cur.id) ? cur.id : (list.find((d) => d.active)?.id || sel.value);
-    if (want && sel.value !== want) sel.value = want;
-    RetroSelect.sync(sel);
+    if (!list.some((d) => d.id === chosenDev)) chosenDev = cur?.id || list.find((d) => d.active)?.id || list[0]?.id || "";
+    if (cur?.id) chosenDev = cur.id;
+    MusicDevices.button(els.devbtn, { list, current: cur, chosen: chosenDev, playing: playing() });
+  }
+
+  // Lyrics take the library's place, until the key is pressed again; kept across restarts.
+  const LYRICS_KEY = "prdesk.music.lyrics.v1";
+  let lyricsOn = (() => { try { return localStorage.getItem(LYRICS_KEY) === "1"; } catch { return false; } })();
+  function applyLyrics() {
+    if (!els.lyrics || !els.lib) return;
+    els.lib.hidden = lyricsOn;
+    els.lyrics.hidden = !lyricsOn;
+    els.lyricsKey?.setAttribute("aria-pressed", String(lyricsOn));
+    if (typeof MusicLyrics === "undefined") return;
+    if (lyricsOn) MusicLyrics.attach(els.lyrics); else MusicLyrics.detach(els.lyrics);
   }
 
   /* ------------------------------------------------------------ up next, under the deck when there is room */
@@ -800,7 +821,7 @@ const Music = (() => {
 
   /* ------------------------------------------------------------ actions */
 
-  const deviceChoice = () => (player?.active ? undefined : els.device?.value || undefined);
+  const deviceChoice = () => (player?.active ? undefined : chosenDev || undefined);
 
   // Another key goes after a seek or volume still waiting to be sent, so that one goes first.
   // A skip drops a waiting seek: it was meant for the song being left.
@@ -1047,6 +1068,16 @@ const Music = (() => {
     }
     if (what === "popout") { if (typeof MusicFloat !== "undefined") MusicFloat.popOut(); return; }
     if (what === "refresh") return refreshNow(t);
+    if (what === "lyrics") {
+      lyricsOn = !lyricsOn;
+      try { localStorage.setItem(LYRICS_KEY, lyricsOn ? "1" : "0"); } catch { /* storage blocked */ }
+      return applyLyrics();
+    }
+    if (what === "devices") {
+      if (typeof MusicDevices === "undefined") return;
+      loadDevices(true);
+      return MusicDevices.open(t, (id) => { chosenDev = id; paintDevices(); transfer(id); });
+    }
     if (what === "queue-tab") { if (typeof MusicLibrary !== "undefined") MusicLibrary.showTab("queue"); return; }
     if (what === "connect") return connect(t);
     if (what === "disconnect") return disconnect(t);
@@ -1081,7 +1112,6 @@ const Music = (() => {
       const slider = e.target.closest?.("[data-music='seek'], [data-music='volume']");
       if (slider && nudge(slider.dataset.music, e.key)) e.preventDefault();
     });
-    root.addEventListener("change", (e) => { if (e.target === els.device) transfer(e.target.value); });
     // Showing the panel again wakes it: measure the marquees, ask what plays if that is stale.
     let wasShown = false;
     new ResizeObserver(() => {
@@ -1111,6 +1141,7 @@ const Music = (() => {
     reducedQuery.addEventListener?.("change", calm);
     if (typeof Prefs !== "undefined") Prefs.onChange(calm);
     if (typeof MusicFloat !== "undefined") MusicFloat.mount(core);
+    if (typeof MusicLyrics !== "undefined") MusicLyrics.mount(core);
     demo = new URLSearchParams(location.search).has("musicdemo");
     build();
     if (demo) {
