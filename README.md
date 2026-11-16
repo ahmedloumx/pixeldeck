@@ -31,9 +31,14 @@ Full documentation, with the architecture, security model and measured performan
   prepares a worktree on the branch, briefs Claude with the open threads (quoted as data, never as
   instructions) and starts it in the built-in terminal. The brief comes from templates you can
   replace with your own.
-- **The pull request list.** The pull request panel has its own list on the left: what needs you,
-  what waits for your review, yours and the ones you opened lately, with a search. Pick and
-  switch there without the queue; the list folds to a strip when the panel needs the room.
+- **One Pull Requests panel.** The queue's side menu sits on the left; a pull request opens in
+  the list's place beside it, and a section click or Back to the queue returns to the list.
+  The status line under its title says who approved, whether the branch is up to date with its
+  target and what is still open. Merge is green once nothing waits and yellow while a review or
+  a sync is due; after a Sync the branch reads as up to date at once.
+- **Claude comes back as it ran.** A Claude Code terminal started with
+  --dangerously-skip-permissions (or a --permission-mode) is resumed with the same flag, and the
+  restore popup lets you choose.
 - **Pick up where you left off.** PixelDeck keeps the open terminals every few seconds and when it
   stops. At the next start a popup offers them back: shells in their folders with their last
   screen, Claude Code resumed by its session id. The layout, theme and terminal names are kept

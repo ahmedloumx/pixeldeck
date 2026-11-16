@@ -11,12 +11,12 @@ const Layout = (() => {
   const SLOTS = ["left", "main", "right", "bottom"];
   const PRESETS = {
     split: {
-      slots: { left: ["queue", "repos"], main: ["pr", "insights"], right: [], bottom: ["terminal"] },
-      active: { left: "queue", main: "insights", right: "", bottom: "terminal" },
+      slots: { left: ["repos"], main: ["queue", "insights"], right: [], bottom: ["terminal"] },
+      active: { left: "repos", main: "queue", right: "", bottom: "terminal" },
       size: { left: 30, right: 30, bottom: 34 }, collapsed: {}, hidden: ["music"],
     },
     compact: {
-      slots: { left: [], main: ["queue", "repos", "pr", "insights", "terminal"], right: [], bottom: [] },
+      slots: { left: [], main: ["queue", "repos", "insights", "terminal"], right: [], bottom: [] },
       active: { left: "", main: "queue", right: "", bottom: "" },
       size: { left: 30, right: 30, bottom: 34 }, collapsed: {}, hidden: ["music"],
     },
@@ -33,9 +33,8 @@ const Layout = (() => {
   };
   // A pixel glyph for each panel's tab, 9 by 9: # is a lit pixel. A copy wears its base's glyph.
   const GLYPH = {
-    queue: ["##.######", "##.######", ".........", "##.######", "##.######", ".........", "##.####..", "##.####..", "........."],
+    queue: [".#.....#.", "###...###", ".#.....#.", ".#....#..", ".#...#...", ".#..#....", ".#.#.....", "###......", ".#......."],
     repos: [".........", ".###.....", "#...####.", "#########", "#.......#", "#.......#", "#.......#", "#########", "........."],
-    pr: [".#.....#.", "###...###", ".#.....#.", ".#....#..", ".#...#...", ".#..#....", ".#.#.....", "###......", ".#......."],
     insights: [".......##", ".......##", "....##.##", "....##.##", ".##.##.##", ".##.##.##", ".##.##.##", ".........", "#########"],
     terminal: ["#########", "#.......#", "#.#.....#", "#..#....#", "#.#..##.#", "#.......#", "#########", ".........", "........."],
     music: ["...######", "...######", "...#....#", "...#....#", "...#....#", ".###..###", "####.####", ".##...##.", "........."],
@@ -54,10 +53,23 @@ const Layout = (() => {
   const panels = {};
   const badges = {};
 
+  // The pull request panel became part of the queue. A layout saved with it gives the queue
+  // the place the pull request had: that was the room a pull request was read in.
+  function migrate(s) {
+    const where = SLOTS.find((slot) => (s.slots[slot] || []).includes("pr"));
+    if (!where) return s;
+    const list = s.slots[where];
+    for (const slot of SLOTS) if (slot !== where) s.slots[slot] = (s.slots[slot] || []).filter((id) => id !== "queue");
+    s.hidden = (s.hidden || []).filter((id) => id !== "queue");
+    if (list.includes("queue")) list.splice(list.indexOf("pr"), 1);
+    else list.splice(list.indexOf("pr"), 1, "queue");
+    if (s.active && s.active[where] === "pr") s.active[where] = "queue";
+    return s;
+  }
   function load() {
     try {
       const s = JSON.parse(localStorage.getItem(KEY));
-      if (s && s.slots) return s;
+      if (s && s.slots) return migrate(s);
     } catch { /* storage blocked */ }
     return clone(PRESETS.split);
   }

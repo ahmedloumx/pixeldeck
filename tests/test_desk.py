@@ -426,6 +426,17 @@ class MergeTest(unittest.TestCase):
         self.assertEqual((method, path), ("POST", "/repositories/acme/shop-api/pullrequests/42/merge"))
         self.assertEqual(body, {"type": "pullrequest", "merge_strategy": "squash"})
 
+    def test_answers_before_your_pull_requests_are_read_again(self):
+        import threading
+        actions, engine, pr = self._engine()
+        release, refreshed = threading.Event(), threading.Event()
+        engine.refresh_person = lambda uuid: (release.wait(5), refreshed.set())
+        out = actions.merge(engine, {"repo": pr["repo"], "id": pr["id"]})
+        self.assertEqual(out["state"], "MERGED")
+        self.assertFalse(refreshed.is_set(), "the merge answered while the refresh still ran")
+        release.set()
+        self.assertTrue(refreshed.wait(5), "the refresh still happens, after the answer")
+
     def test_refuses_someone_elses_pull_request(self):
         actions, engine, pr = self._engine(author="{other}")
         with self.assertRaises(PermissionError):

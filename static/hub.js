@@ -222,10 +222,23 @@ const Settings = (() => {
     const d = dialog();
     if (!d) return;
     const body = tab === "connections" ? connectionsHtml() : tab === "notifications" ? (typeof Notify !== "undefined" ? Notify.settingsHtml() : "") : tab === "look" ? lookHtml() : aboutHtml();
-    d.innerHTML = `<div class="set-shell">
-      <nav class="set-tabs" role="tablist" aria-label="Settings">${TABS.map(([id, label]) => `<button class="set-tab" type="button" role="tab" data-settings-tab="${id}" aria-selected="${tab === id}">${label}</button>`).join("")}</nav>
-      <section class="set-body" role="tabpanel"><header class="set-head"><h2 id="settings-title">${esc(TABS.find(([id]) => id === tab)[1])}</h2>
-        <button class="btn btn--quiet" type="button" data-settings-close aria-label="Close settings">Close</button></header>${body}</section></div>`;
+    // The list of sections is drawn once: redrawing it would replay its entrance on every
+    // click. Only the section itself changes, and a redraw of the same one keeps its scroll.
+    let pane = d.querySelector(":scope > .set-shell > .set-body");
+    if (!pane) {
+      d.innerHTML = `<div class="set-shell">
+        <nav class="set-tabs" role="tablist" aria-label="Settings">${TABS.map(([id, label]) => `<button class="set-tab" type="button" role="tab" data-settings-tab="${id}" aria-selected="false">${label}</button>`).join("")}</nav>
+        <section class="set-body" role="tabpanel"></section></div>`;
+      pane = d.querySelector(".set-body");
+    }
+    for (const b of d.querySelectorAll("[data-settings-tab]")) b.setAttribute("aria-selected", String(b.dataset.settingsTab === tab));
+    const same = pane.dataset.tab === tab;
+    const top = same ? pane.scrollTop : 0;
+    pane.dataset.tab = tab;
+    pane.innerHTML = `<header class="set-head"><h2 id="settings-title">${esc(TABS.find(([id]) => id === tab)[1])}</h2>
+        <button class="btn btn--quiet" type="button" data-settings-close aria-label="Close settings">Close</button></header>${body}`;
+    pane.scrollTop = top;
+    if (!same) { pane.classList.remove("is-switching"); void pane.offsetWidth; pane.classList.add("is-switching"); }
   }
   async function load(test = false) {
     if (typeof Music !== "undefined" && (state.features || []).includes("spotify")) {

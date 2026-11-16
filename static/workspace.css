@@ -43,9 +43,9 @@ body { overflow: hidden; }
 .slot-tool:active { transform: translateY(1px); }
 .slot-tool svg { width: 16px; height: 16px; }
 .slot-body { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
-.slot-body:has(> [data-panel="pr"]), .slot-body:has(> [data-panel="terminal"]) { overflow: hidden; }
+.slot-body:has(> [data-panel="queue"].has-pr), .slot-body:has(> [data-panel="terminal"]) { overflow: hidden; }
 .panel-body { padding: var(--space-lg); }
-.panel-body[data-panel="pr"], .panel-body[data-panel="terminal"] { padding: 0; height: 100%; }
+.panel-body[data-panel="terminal"] { padding: 0; height: 100%; }
 .slot.is-collapsed .slot-body { display: none; }
 .slot.is-collapsed[data-area="left"] .slot-head, .slot.is-collapsed[data-area="right"] .slot-head { flex-direction: column; height: 100%; border-bottom: 0; }
 .slot.is-collapsed[data-area="left"] .slot-tabs, .slot.is-collapsed[data-area="right"] .slot-tabs { flex-direction: column; writing-mode: vertical-rl; }
@@ -95,10 +95,16 @@ body { overflow: hidden; }
    view at once, the current one is the raised button. A narrow panel wraps them on top. */
 .queue-split { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--space-lg); align-items: start; }
 .queue-main { min-width: 0; container-type: inline-size; }
-.sec-chips {
-  position: sticky; top: var(--space-sm); display: flex; flex-direction: column; gap: var(--space-3xs);
-  min-width: 10.5rem; padding-right: var(--space-md); border-right: var(--rule-hair) solid var(--color-rule);
-}
+.queue-side { position: sticky; top: var(--space-sm); min-width: 10.5rem; padding-right: var(--space-md); border-right: var(--rule-hair) solid var(--color-rule); }
+.queue-side-head { margin: 0 0 var(--space-sm); padding: 0 var(--space-sm); font: 500 var(--text-sm) var(--font-pixel); letter-spacing: 0; color: var(--color-muted); }
+.sec-chips { display: flex; flex-direction: column; gap: var(--space-3xs); }
+/* A pull request open: it takes the list's place, edge to edge, and the side menu stays. */
+.panel-body[data-panel="queue"].has-pr { height: 100%; padding: 0; }
+.has-pr > .queue-split { height: 100%; gap: 0; align-items: stretch; }
+.has-pr > .queue-split > .queue-main { display: none; }
+.has-pr > .queue-split > .queue-side { position: static; min-height: 0; overflow: auto; padding: var(--space-lg) var(--space-sm) var(--space-lg) var(--space-lg); }
+.queue-pr { min-width: 0; min-height: 0; height: 100%; }
+.queue-pr[hidden] { display: none; }
 .sec-chip {
   display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm); min-height: 34px; padding: var(--space-2xs) var(--space-sm);
   border: var(--pixel) solid transparent; border-radius: 2px; color: var(--color-ink-2); font-size: var(--text-sm); text-decoration: none; white-space: nowrap;
@@ -116,17 +122,18 @@ body { overflow: hidden; }
 .sec-short { display: none; }
 @container (max-width: 44rem) {
   .queue-split { gap: var(--space-md); }
-  .sec-chips { min-width: 0; padding-right: var(--space-sm); }
+  .queue-side { min-width: 0; padding-right: var(--space-sm); }
   .sec-chip { padding-inline: var(--space-xs); }
   .sec-long { display: none; }
   .sec-short { display: inline; }
 }
 @container (max-width: 30rem) {
   .queue-split { grid-template-columns: minmax(0, 1fr); gap: 0; }
-  .sec-chips {
-    position: static; flex-direction: row; flex-wrap: wrap; min-width: 0; padding: 0 0 var(--space-xs); margin-bottom: var(--space-md);
-    border-right: 0; border-bottom: var(--rule-hair) solid var(--color-rule);
-  }
+  .queue-side { position: static; min-width: 0; padding: 0 0 var(--space-xs); margin-bottom: var(--space-md); border-right: 0; border-bottom: var(--rule-hair) solid var(--color-rule); }
+  .queue-side-head { display: none; }
+  .sec-chips { flex-direction: row; flex-wrap: wrap; }
+  /* too narrow for both: the open pull request has the panel to itself */
+  .has-pr > .queue-split > .queue-side { display: none; }
   .sec-chip { border-color: var(--color-rule); }
 }
 .sec-n { color: var(--color-muted); line-height: 1; margin-top: 2px; }
@@ -179,8 +186,6 @@ tr.is-cursor { box-shadow: inset 3px 0 0 var(--color-accent); background: var(--
 .tree-note { overflow: hidden; text-overflow: ellipsis; }
 
 /* ---------- pull request panel ---------- */
-.pr-empty { display: grid; place-content: center; gap: var(--space-sm); height: 100%; padding: var(--space-xl); text-align: center; color: var(--color-muted); }
-.pr-empty-title { font-family: var(--font-pixel); font-size: var(--text-2xl); color: var(--color-ink); }
 .pr-view { display: flex; flex-direction: column; height: 100%; }
 .pr-head { padding: var(--space-md) var(--space-lg) var(--space-sm); border-bottom: var(--rule-hair) solid var(--color-rule); }
 .pr-top { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-xs) var(--space-sm); margin-bottom: var(--space-xs); font-size: var(--text-sm); color: var(--color-muted); }

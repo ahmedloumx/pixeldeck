@@ -4,7 +4,8 @@ Every few seconds, on any change and when the server stops, the open terminals a
 to the state folder: their name, their folder, whether Claude Code runs in them (with its
 session id) and the last screen a page drew. At the next start the page offers to bring them
 back: a shell in the same folder with its old screen above the new prompt, and Claude Code
-resumed by its session id (claude --resume <id>), or the newest one in that folder.
+resumed by its session id (claude --resume <id>), or the newest one in that folder, with the
+permission flags it was started with (--dangerously-skip-permissions, --permission-mode).
 
 The page's settings (layout, theme, terminal names...) are kept here as well. The window can
 be killed before WebKit writes its local storage to disk; the server's copy survives that.
@@ -22,9 +23,15 @@ import config
 SAVE_EVERY = 5
 SCREEN_MAX = 200_000          # characters of a saved screen, per terminal
 UI_KEYS = ("prdesk.layout.v2", "prdesk.prefs.v1", "prdesk.termnames.v1", "prdesk.termorder.v1", "prdesk.termtitles.v1",
-           "prdesk.insights.range.v1", "prdesk.datefilter.v1", "prdesk.notify.v1", "prdesk.dock.width.v1")
+           "prdesk.insights.range.v1", "prdesk.datefilter.v1", "prdesk.notify.v1", "prdesk.dock.width.v1", "prdesk.restore.v1")
 UI_VALUE_MAX = 64 * 1024
 UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+# The only parts of Claude Code's command line carried to its resumed self: how it asks for
+# permission. Exact tokens only; nothing else of a command line is replayed (a launch from a
+# pull request carries a whole prompt there).
+SKIP_PERMISSIONS = "--dangerously-skip-permissions"
+FLAG_ALONE = (SKIP_PERMISSIONS, "--allow-dangerously-skip-permissions")
+PERMISSION_MODES = ("default", "acceptEdits", "plan", "auto", "bypassPermissions", "dontAsk")
 
 
 def _write(path, payload):
@@ -71,8 +78,29 @@ def _claude(pids, sessions_dir):
     for pid in pids:
         info = _read(sessions_dir / f"{pid}.json")
         if isinstance(info, dict) and isinstance(info.get("sessionId"), str) and UUID.fullmatch(info["sessionId"]):
-            return {"session": info["sessionId"], "cwd": info.get("cwd") if isinstance(info.get("cwd"), str) else None}
+            return {"session": info["sessionId"], "cwd": info.get("cwd") if isinstance(info.get("cwd"), str) else None, "pid": pid}
     return None
+
+
+def permission_flags(argv):
+    """The permission flags in a command line, by exact token: the rest is never kept."""
+    out, args = [], [a for a in argv if isinstance(a, str)]
+    for i, arg in enumerate(args):
+        if arg in FLAG_ALONE and arg not in out:
+            out.append(arg)
+        mode = arg.split("=", 1)[1] if arg.startswith("--permission-mode=") else (
+            args[i + 1] if arg == "--permission-mode" and i + 1 < len(args) else None)
+        if mode in PERMISSION_MODES and "--permission-mode" not in out:
+            out += ["--permission-mode", mode]
+    return out
+
+
+def _argv(pid):
+    try:
+        raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError:
+        return []
+    return [part.decode("utf-8", "replace") for part in raw.split(b"\0") if part]
 
 
 def describe(session, sessions_dir):
@@ -86,6 +114,7 @@ def describe(session, sessions_dir):
     return {
         "id": session.id, "title": session.title, "cwd": cwd, "started": session.started,
         "kind": "claude" if claude else "shell", "claude_session": (claude or {}).get("session"),
+        "claude_flags": permission_flags(_argv(claude["pid"])) if claude else [],
         "screen": (snap.get("text") or "")[-SCREEN_MAX:], "cols": snap.get("cols"), "rows": snap.get("rows"),
     }
 
@@ -148,7 +177,9 @@ class Keeper:
         if not self.offer:
             return None
         return {"saved_at": self.offer.get("saved_at"), "terminals": [
-            {k: t.get(k) for k in ("id", "title", "cwd", "kind", "started")} | {"resumes": bool(t.get("claude_session"))}
+            {k: t.get(k) for k in ("id", "title", "cwd", "kind", "started")} | {
+                "resumes": bool(t.get("claude_session")),
+                "skips": SKIP_PERMISSIONS in permission_flags(t.get("claude_flags") or [])}
             for t in self.offer["terminals"]]}
 
     def decline(self):
@@ -204,14 +235,25 @@ class Keeper:
         return {"stamp": current["stamp"]}
 
 
-def restore_argv(entry, shell_argv, claude_binary):
+def restore_argv(entry, shell_argv, claude_binary, skip_permissions=None):
     """The command that brings one terminal back: Claude Code resumed by its session id (only an
-    id shaped like one), or the newest session in that folder, or a shell."""
+    id shaped like one), or the newest session in that folder, or a shell.
+
+    Claude Code comes back with the permission flags it ran with, read again through the
+    allowlist since the saved file is only data. skip_permissions, when the page sends it, is
+    your choice in the restore popup and wins: True adds --dangerously-skip-permissions, False
+    leaves every way of skipping out."""
     if entry.get("kind") == "claude":
+        flags = permission_flags(entry.get("claude_flags") or [])
+        if skip_permissions is True:
+            flags = [SKIP_PERMISSIONS]
+        elif skip_permissions is False:
+            mode = flags[flags.index("--permission-mode") + 1] if "--permission-mode" in flags else None
+            flags = ["--permission-mode", mode] if mode and mode != "bypassPermissions" else []
         sid = entry.get("claude_session")
         if isinstance(sid, str) and UUID.fullmatch(sid):
-            return [claude_binary(), "--resume", sid]
-        return [claude_binary(), "--continue"]
+            return [claude_binary(), *flags, "--resume", sid]
+        return [claude_binary(), *flags, "--continue"]
     return shell_argv()
 
 
