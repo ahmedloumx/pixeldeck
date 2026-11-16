@@ -1,0 +1,122 @@
+/* The top bar: menus, the scope chip, Jump, the status cluster and, in the PixelDeck window,
+   the window's own buttons. One row, 35 px with its rule. */
+
+:root { --bar-height: 36px; }
+.bar-inner { flex-wrap: nowrap; min-height: 35px; height: 35px; gap: 6px; padding: 0 6px 0 8px; }
+.has-own-titlebar .bar-inner { padding-right: 0; }
+.bar .brand { gap: 7px; margin-right: 4px; padding-right: 12px; height: 22px; border-right: var(--rule-hair) solid var(--color-rule); border-radius: 0; }
+.bar .brand img { width: 18px; height: 18px; }
+.bar .brand span { font: 600 15px var(--font-pixel); letter-spacing: 0; }
+.bar-inner > *, .statusbar > * { flex-shrink: 0; }
+.bar-drag { flex: 1 1 auto; min-width: 12px; align-self: stretch; }
+
+/* ------------------------------------------------------------------ the menus */
+.menubar { display: flex; align-self: stretch; }
+.mb-menu { position: relative; display: flex; }
+.mb-title { display: inline-flex; align-items: center; padding: 0 9px; border: 0; background: none; color: var(--color-ink-2); font: 500 14px var(--font-pixel); white-space: nowrap; cursor: default; }
+.mb-title u { text-decoration: none; box-shadow: inset 0 -2px 0 color-mix(in oklch, var(--color-accent) 70%, transparent); }
+.mb-title:hover, .mb-title[aria-expanded="true"], .mb-title:focus-visible { color: var(--color-accent-ink); background: var(--color-accent); outline: none; }
+.mb-title[aria-expanded="true"] u, .mb-title:hover u { box-shadow: inset 0 -2px 0 var(--color-accent-ink); }
+.mb-pop {
+  position: absolute; top: 100%; left: 0; z-index: 60; min-width: 280px; max-height: calc(100dvh - 60px); overflow: auto; padding: 4px;
+  background: var(--color-paper); border: var(--pixel) solid var(--color-rule-2); box-shadow: 4px 4px 0 oklch(8% 0 0 / 0.9);
+  animation: mb-open 110ms steps(3, end);
+}
+@keyframes mb-open { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0); } }
+.mb-item {
+  display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 6px; width: 100%; min-height: 28px; padding: 0 10px 0 6px;
+  border: 0; background: none; color: var(--color-ink); font: 400 13px var(--font-body); text-align: left; cursor: default;
+}
+.mb-item:hover, .mb-item:focus-visible { background: var(--color-accent); color: var(--color-accent-ink); outline: none; }
+.mb-item[aria-disabled="true"] { color: var(--color-muted); opacity: 0.55; pointer-events: none; }
+.mb-check { color: var(--color-accent); font: 400 9px var(--font-num); }
+.mb-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mb-label small { margin-left: 4px; color: var(--color-muted); font-size: 12px; }
+.mb-key, .mb-count { font: 400 8px var(--font-num); color: var(--color-muted); white-space: nowrap; }
+.mb-item:hover .mb-check, .mb-item:hover .mb-key, .mb-item:hover .mb-count, .mb-item:hover small,
+.mb-item:focus-visible .mb-check, .mb-item:focus-visible .mb-key, .mb-item:focus-visible .mb-count, .mb-item:focus-visible small { color: var(--color-accent-ink); }
+.mb-group { margin: 0; padding: 8px 10px 3px 30px; font: 400 8px var(--font-num); color: var(--color-muted); letter-spacing: 0.04em; text-transform: uppercase; }
+.mb-rule { margin: 4px 6px; border-top: var(--rule-hair) dashed var(--color-rule-2); }
+
+/* ------------------------------------------------------------- the scope chip */
+.scope { display: inline-flex; align-items: stretch; height: 24px; padding: 0; border: var(--rule-hair) solid var(--color-rule-2); background: var(--color-paper); color: var(--color-ink);
+  box-shadow: 2px 2px 0 oklch(8% 0 0 / 0.8); font: 400 9px var(--font-num); cursor: pointer; max-width: 340px; }
+.scope:hover, .scope[aria-expanded="true"] { border-color: var(--color-accent); }
+.scope-part { display: inline-flex; align-items: center; gap: 6px; min-width: 0; padding: 0 8px; }
+.scope-part + .scope-part { border-left: var(--rule-hair) solid var(--color-rule-2); }
+.scope-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: uppercase; max-width: 150px; }
+.scope-mark { color: var(--color-muted); }
+.scope-caret { color: var(--color-accent); }
+.scope .face { width: 15px; height: 15px; font-size: 6px; }
+.scope-pop { position: fixed; width: 540px; max-width: calc(100vw - 16px); padding: 10px; }
+.scope-find { width: 100%; height: 28px; margin-bottom: 8px; padding: 0 8px; border: var(--rule-hair) solid var(--color-rule-2); background: var(--color-paper-2); color: var(--color-ink); font: inherit; font-size: 13px; }
+.scope-find:focus-visible { outline: var(--pixel) solid var(--color-focus); outline-offset: 0; }
+.scope-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.scope-col .mb-group { padding-left: 6px; }
+.scope-none { margin: 4px 6px; color: var(--color-muted); font-size: 13px; }
+
+/* ------------------------------------------------------------------- Jump */
+.jump-btn { display: inline-flex; align-items: center; gap: 8px; height: 24px; min-width: 150px; padding: 0 5px 0 8px; margin-left: 4px;
+  border: var(--rule-hair) dashed var(--color-rule-2); background: none; color: var(--color-muted); font: 400 13px var(--font-body); cursor: pointer; }
+.jump-btn:hover, .jump-btn:focus-visible { border-style: solid; border-color: var(--color-accent); color: var(--color-ink); outline: none; }
+.jump-btn kbd { margin-left: auto; padding: 1px 4px; border: var(--rule-hair) solid var(--color-rule-2); background: var(--color-paper-2); color: var(--color-ink-2); font: 400 8px var(--font-num); }
+.jump { width: min(660px, calc(100vw - 32px)); max-height: min(70dvh, 620px); margin-top: 12vh; padding: 0; border: var(--pixel) solid var(--color-accent); background: var(--color-paper); color: var(--color-ink);
+  box-shadow: 4px 4px 0 oklch(8% 0 0 / 0.9); }
+.jump[open] { display: flex; flex-direction: column; animation: mb-open 130ms steps(3, end); }
+.jump::backdrop { background: var(--color-scrim); }
+.jump-field { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: var(--rule-hair) solid var(--color-rule); }
+.jump-prompt { color: var(--color-accent); font: 400 11px var(--font-num); }
+.jump-input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; color: var(--color-ink); font: 400 15px var(--font-body); }
+.jump-list { flex: 1; min-height: 0; overflow: auto; padding: 4px; }
+.jump-row { grid-template-columns: minmax(28px, auto) minmax(0, 1fr) auto; gap: 10px; }
+.jump-row.is-at { background: var(--color-accent); color: var(--color-accent-ink); }
+.jump-row.is-at small, .jump-row.is-at .jump-lead, .jump-row.is-at .mb-key { color: var(--color-accent-ink); }
+.jump-lead { color: var(--color-accent); font: 400 9px var(--font-num); }
+.jump-tag { padding: 2px 4px; border: var(--rule-hair) solid var(--color-rule-2); color: var(--color-ink-2); font: 400 8px var(--font-num); }
+.jump-tag.is-ok { border-color: var(--color-ok); color: var(--color-ok); }
+.jump-tag.is-wait { border-color: var(--color-wait); color: var(--color-wait); }
+.jump-tag.is-bad { border-color: var(--color-bad); color: var(--color-bad); }
+.jump-row.is-at .jump-tag { border-color: var(--color-accent-ink); color: var(--color-accent-ink); }
+.jump-none { margin: 10px; color: var(--color-muted); font-size: 13px; }
+.jump-keys { display: flex; flex-wrap: wrap; gap: 14px; margin: 0; padding: 7px 12px; border-top: var(--rule-hair) solid var(--color-rule); font: 400 8px var(--font-num); color: var(--color-muted); }
+
+/* ------------------------------------------------------- status and refresh */
+.bar .statusbar { margin-left: 0; gap: 4px; }
+.bar .st-item, .bar .st-icon { height: 26px; }
+.bar .st-icon { width: 28px; }
+.st-refresh.btn { min-height: 26px; min-width: 28px; padding: 0 6px; border-color: transparent; background: none; color: var(--color-ink-2); }
+.st-refresh.btn:hover { border-color: var(--color-rule); color: var(--color-ink); }
+.st-refresh .pix-icon { display: block; }
+.st-refresh.is-busy .pix-icon { display: none; }
+
+/* --------------------------------------------------------- the window buttons */
+.winctl { display: flex; align-self: stretch; margin-left: 6px; border-left: var(--rule-hair) solid var(--color-rule); }
+.winctl[hidden] { display: none; }
+.win-btn { display: grid; place-items: center; width: 40px; padding: 0; border: 0; background: none; color: var(--color-ink-2); cursor: default; }
+.win-btn:hover, .win-btn:focus-visible { background: var(--color-paper-2); color: var(--color-ink); outline: none; }
+.win-btn[data-win="close"]:hover, .win-btn[data-win="close"]:focus-visible { background: var(--color-bad); color: #fff; }
+.win-btn .pix-icon { width: 10px; height: 10px; }
+.is-maximized .win-btn .win-max { display: none; }
+.win-btn .win-restore { display: none; }
+.is-maximized .win-btn .win-restore { display: block; }
+.has-own-titlebar .bar { user-select: none; -webkit-user-select: none; }
+
+/* -------------------------------------------- the list filter, in its panel */
+.queue-col { min-width: 0; }
+.queue-filter { display: flex; align-items: center; gap: 8px; max-width: 26rem; height: 30px; margin: 0 0 var(--space-md); padding: 0 8px;
+  border: var(--rule-hair) solid var(--color-rule-2); background: var(--color-paper-2); color: var(--color-muted); }
+.queue-filter:focus-within { border-color: var(--color-accent); }
+.queue-filter input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: none; color: var(--color-ink); font: inherit; font-size: 13px; }
+.queue-filter kbd { padding: 1px 4px; border: var(--rule-hair) solid var(--color-rule-2); font: 400 8px var(--font-num); color: var(--color-ink-2); }
+
+/* ---------------------------------------------------------- narrower windows
+   Room goes in this order: the next-read countdown and Jump's words; the brand's name and the
+   API figures; the sync time and part of the song title; the API meter; the song. Each stays
+   in its tooltip or menu. The bar keeps at least 56 px of bare bar to drag the window by. */
+.bar-drag { min-width: 56px; }
+@media (max-width: 1720px) { .bar .st-next, .bar .st-unit, .jump-btn .jump-text { display: none; } .jump-btn { min-width: 0; } }
+@media (max-width: 1440px) { .bar .brand span, .bar .st-api .st-label, .bar .st-num { display: none; } .bar .brand { padding-right: 8px; } }
+@media (max-width: 1320px) { .bar .sync-text { display: none; } .bar .st-music { max-width: 140px; } .scope-text { max-width: 120px; } }
+@media (max-width: 1180px) { .bar .st-api { display: none; } .bar .st-music { max-width: 110px; } }
+@media (max-width: 1060px) { .bar .st-music { display: none; } .scope-text { max-width: 80px; } }
+@media (max-width: 940px) { .mb-title { padding: 0 6px; font-size: 13px; } .scope-part:first-child .scope-text { display: none; } }

@@ -31,6 +31,12 @@ Full documentation, with the architecture, security model and measured performan
   prepares a worktree on the branch, briefs Claude with the open threads (quoted as data, never as
   instructions) and starts it in the built-in terminal. The brief comes from templates you can
   replace with your own.
+- **A menu bar for a title bar.** Desk, View, Go, Pull request, Team and Help gather what
+  PixelDeck does; Alt and the underlined letter opens one. One chip picks the project and the
+  person, and Jump (Ctrl K) finds any pull request by number, title, ticket or branch, any
+  teammate and any menu command. In the PixelDeck window the bar replaces the system title bar:
+  drag its empty parts to move the window, double-click to maximize, and its own buttons
+  minimize, maximize and close (Personalise brings the system title bar back).
 - **One Pull Requests panel.** The queue's side menu sits on the left; a pull request opens in
   the list's place beside it, and a section click or Back to the queue returns to the list.
   The status line under its title says who approved, whether the branch is up to date with its

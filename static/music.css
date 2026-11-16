@@ -503,6 +503,9 @@
 .mc--drop { z-index: calc(var(--z-toast) + 4); grid-template-rows: auto auto auto minmax(0, 1fr); overflow: hidden; }
 .mc--drop .mc-list { grid-template-rows: auto minmax(0, 1fr); min-height: 0; }
 .mc--drop .mc-rows { max-height: none; min-height: 0; }
+.mc-more { padding: 4px 0 0; }
+.mc-more-btn { display: flex; gap: 6px; width: 100%; padding: 6px 8px; border: var(--rule-hair) dashed var(--color-rule-2); background: none; color: var(--color-ink-2); font: 400 9px var(--font-num); cursor: pointer; }
+.mc-more-btn:hover, .mc-more-btn:focus-visible { border-style: solid; border-color: var(--mu-lcd-ink); color: var(--color-ink); outline: none; }
 .mc.is-dragging { box-shadow: inset 0 0 0 var(--pixel) var(--color-paper-2), 10px 10px 0 var(--sprite-dark), 0 26px 50px oklch(0% 0 0 / 0.55); }
 .mc-head { display: flex; align-items: center; gap: 8px; height: 28px; margin: 0 -10px; padding: 0 4px 0 8px; cursor: grab; user-select: none; touch-action: none;
   background: repeating-linear-gradient(to bottom, var(--color-paper-2) 0 2px, var(--color-paper-3) 2px 4px); border-bottom: var(--pixel) solid var(--color-rule-2); }

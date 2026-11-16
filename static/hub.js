@@ -8,7 +8,7 @@
 
 const Prefs = (() => {
   const KEY = "prdesk.prefs.v1";
-  const DEFAULTS = { theme: "night", accent: "amber", motion: "auto", numbers: "arcade", mascots: true, bubbles: true, games: false };
+  const DEFAULTS = { theme: "night", accent: "amber", motion: "auto", numbers: "arcade", mascots: true, bubbles: true, games: false, titlebar: "custom" };
   let prefs = (() => { try { return { ...DEFAULTS, ...(JSON.parse(localStorage.getItem(KEY)) || {}) }; } catch { return { ...DEFAULTS }; } })();
   const listeners = new Set();
   function apply() {
@@ -36,6 +36,11 @@ const PixelIcon = (() => {
     gear: ["....###....", ".##.###.##.", ".#########.", "..##...##..", "###.....###", "###.....###", "###.....###", "..##...##..", ".#########.", ".##.###.##.", "....###...."],
     help: ["..#####..", ".##...##.", ".##...##.", ".....##..", "....##...", "...##....", "...##....", ".........", "...##....", "...##....", "........."],
     plug: ["..#...#..", "..#...#..", "#########", "#########", ".#######.", ".#######.", "..#####..", "....#....", "....#....", "....#...."],
+    refresh: ["...####..", "..#....#.", ".#....###", ".#.....#.", ".#.......", ".#.....#.", "..#...#..", "...###...", "........."],
+    min: ["..........", "..........", "..........", "..........", "..........", "..........", "..........", "..........", "##########", "##########"],
+    max: ["##########", "##########", "#........#", "#........#", "#........#", "#........#", "#........#", "#........#", "#........#", "##########"],
+    restore: ["...#######", "...#######", "...#.....#", "#######..#", "#######..#", "#.....#..#", "#.....####", "#.....#...", "#.....#...", "#######..."],
+    close: ["##......##", "###....###", ".###..###.", "..######..", "...####...", "...####...", "..######..", ".###..###.", "###....###", "##......##"],
     layout: ["###########", "#...#.....#", "#...#.....#", "#...#.....#", "#...#.....#", "#...#######", "#...#.....#", "#...#.....#", "#...#.....#", "#...#.....#", "###########"],
   };
   function svg(name, px = 2) {
@@ -123,19 +128,13 @@ const StatusBar = (() => {
   }
   function start() {
     $id("bell").innerHTML = `${PixelIcon.svg("bell")}<span class="st-badge" id="bell-badge" hidden></span>`;
-    $id("settings-btn").innerHTML = PixelIcon.svg("gear");
-    $id("guide-btn").innerHTML = PixelIcon.svg("help");
-    if ($id("layout-btn")) $id("layout-btn").innerHTML = PixelIcon.svg("layout");
+    $id("refresh").insertAdjacentHTML("beforeend", PixelIcon.svg("refresh"));
+    for (const b of document.querySelectorAll("#winctl [data-win]")) {
+      b.innerHTML = b.dataset.win === "maximize"
+        ? `<span class="win-max">${PixelIcon.svg("max", 1)}</span><span class="win-restore">${PixelIcon.svg("restore", 1)}</span>`
+        : PixelIcon.svg(b.dataset.win === "minimize" ? "min" : "close", 1);
+    }
     $id("bell").hidden = !has("events");
-    $id("settings-btn").addEventListener("click", () => Settings.open());
-    $id("guide-btn").addEventListener("click", () => { if (typeof Guide !== "undefined") Guide.start(); });
-    // The layout menu is a <details>: like the bell, a press outside it or Escape closes it.
-    // Capture, so a panel that stops the event (the terminal) still closes it.
-    const menu = $id("layout-menu");
-    document.addEventListener("pointerdown", (e) => { if (menu?.open && !menu.contains(e.target)) menu.open = false; }, true);
-    document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape" && menu?.open) { menu.open = false; menu.querySelector("summary")?.focus(); }
-    });
     if (typeof Notify !== "undefined") Notify.onChange(paintBell);
     clearInterval(tick);
     tick = setInterval(paintSync, 1000);
@@ -207,6 +206,8 @@ const Settings = (() => {
       <div class="set-block"><h3>Numbers</h3><div class="date-bar">${choice("numbers", "arcade", "Arcade")}${choice("numbers", "press", "Press Start")}${choice("numbers", "plain", "Plain")}</div>
         <p class="set-hint">Arcade uses the ArcadeClassic font when it is installed on this computer${fontOk ? " (it is)" : " (it is not, so Press Start stands in)"}.</p></div>
       <div class="set-block"><h3>Motion</h3><div class="date-bar">${choice("motion", "auto", "Follow the system")}${choice("motion", "calm", "Calm")}</div></div>
+      ${typeof PixelChrome !== "undefined" && PixelChrome.available() ? `<div class="set-block"><h3>Title bar</h3><div class="date-bar">${choice("titlebar", "custom", "PixelDeck's menu bar")}${choice("titlebar", "system", "The system's")}</div>
+        <p class="set-hint">PixelDeck's own bar moves the window from its empty parts and carries the window buttons. The system's brings back the usual title bar above it.</p></div>` : ""}
       <div class="set-block"><h3>Arcade</h3><div class="switch-grid">${toggle("mascots", "Mascots", "the slime and the bot")}${toggle("bubbles", "Bot ideas", "the bot suggests a game while you wait")}${toggle("games", "Games beside the terminal", "Tetris, Snake and Flappy")}</div></div>
       <div class="set-block"><h3>Guide</h3><p><button class="btn" type="button" data-guide-again>Show the guide again</button></p></div>`;
   }

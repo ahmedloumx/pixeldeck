@@ -674,9 +674,11 @@ function renderQueueIn(id) {
   // list being redrawn on every refresh.
   let split = el.querySelector(":scope > .queue-split");
   if (!split) {
+    const filter = copy ? "" : `<label class="queue-filter"><span aria-hidden="true">&#8981;</span><span class="visually-hidden">Filter the pull request list</span>
+      <input type="search" id="filter" placeholder="Filter this list: repo, branch, title, ticket" autocomplete="off" value="${esc(state.filter)}"><kbd>/</kbd></label>`;
     el.innerHTML = `<div class="queue-split">
       <aside class="queue-side"><h2 class="queue-side-head">Queue</h2><nav class="sec-chips" role="tablist" aria-label="Sections" aria-orientation="vertical"></nav></aside>
-      <div class="queue-main"></div>${copy ? "" : `<div class="queue-pr" hidden></div>`}</div>`;
+      <div class="queue-col">${filter}<div class="queue-main"></div></div>${copy ? "" : `<div class="queue-pr" hidden></div>`}</div>`;
     split = el.firstElementChild;
   }
   split.querySelector(".sec-chips").innerHTML = chips;
@@ -1402,6 +1404,7 @@ async function openPr(pr, { force = false, tab } = {}) {
   state.pr = same && !force ? state.pr : { pr, detail: null, extra: null, diff: null, tab: tab || state.pr?.tab || "overview" };
   if (tab) state.pr.tab = tab;
   markSeen(pr);
+  rememberPr(pr);
   for (const row of $$("tr[data-pr]")) row.classList.toggle("is-open", row.dataset.pr === prKey(pr));
   if (state.route.pr !== prKey(pr)) { state.route.pr = prKey(pr); history.replaceState(null, "", hashFor(state.route)); }
   Layout.activate("queue");
@@ -1929,42 +1932,34 @@ async function saveTeam() {
 /* ------------------------------------------------------------ top bar */
 
 function renderBar() {
-  const sel = $("#person");
-  const value = state.route.who;
-  const html = whoOptions("", { edit: true });
-  if (sel.dataset.html !== html) { sel.innerHTML = html; sel.dataset.html = html; }
-  sel.value = value;
-  RetroSelect.sync(sel);
-  const proj = $("#project");
-  const key = state.project?.key || "";
-  const popts = [`<option value="">Every project</option>`, ...(state.projects || []).map((p) => `<option value="${esc(p.key)}">${esc(p.name)}</option>`)];
-  if (key && !(state.projects || []).some((p) => p.key === key)) popts.push(`<option value="${esc(key)}">${esc(state.project.name || key)}</option>`);
-  const phtml = popts.join("");
-  if (proj.dataset.html !== phtml) { proj.innerHTML = phtml; proj.dataset.html = phtml; }
-  proj.value = key;
-  RetroSelect.sync(proj);
+  MenuBar.paintScope();
   const { used, limit } = state.budget;
   StatusBar.paint();
-  $("#refresh").title = `Refresh from Bitbucket (r). ${used} of ${limit} API calls used this hour.`;
-  paintLayoutMenu();
+  $("#refresh").dataset.tip = `Refresh from Bitbucket (r). ${used} of ${limit} API calls used this hour.`;
 }
 
-// The Layout menu: which panels show, their copies, and the arcade switches.
-function paintLayoutMenu() {
-  const list = Layout.visibility();
-  const rows = list.filter((p) => !p.copy).map((p) => {
-    const copies = list.filter((c) => c.copy && c.base === p.id).map((c) => `<div class="panel-row is-copy"><span class="panel-row-name">${esc(c.title)}</span>
-      <button class="mini-btn" type="button" data-panel-show="${esc(c.id)}">Show</button><button class="mini-btn" type="button" data-panel-remove="${esc(c.id)}" aria-label="Close ${esc(c.title)}">×</button></div>`).join("");
-    return `<div class="panel-row"><label class="switch"><input type="checkbox" data-panel-toggle="${p.id}"${p.hidden ? "" : " checked"}><span class="switch-knob" aria-hidden="true"></span>${esc(p.title)}</label>
-      ${p.copyable ? `<button class="mini-btn" type="button" data-panel-copy="${p.id}" title="A copy keeps its own person, section and range">+ Copy</button>` : ""}</div>${copies}`;
-  }).join("");
-  const box = $("#panels-menu-list");
-  if (box.dataset.html !== rows) { box.innerHTML = rows; box.dataset.html = rows; }
-  const p = Prefs.get();
-  const arcade = `<label class="switch"><input type="checkbox" data-pref-toggle="games"${p.games ? " checked" : ""}><span class="switch-knob" aria-hidden="true"></span>Games beside the terminal</label>
-    <label class="switch"><input type="checkbox" data-pref-toggle="bubbles"${p.bubbles ? " checked" : ""}><span class="switch-knob" aria-hidden="true"></span>The bot suggests a game while you wait</label>`;
-  const a = $("#arcade-menu-list");
-  if (a.dataset.html !== arcade) { a.innerHTML = arcade; a.dataset.html = arcade; }
+// Whose pull requests and which project: the scope chip, the Team menu and Jump all set them here.
+function setWho(who) {
+  if (who === "edit-team") return openTeamDialog();
+  return go({ who, section: state.route.section });
+}
+async function setProject(key) {
+  try {
+    const res = await api("project", { method: "POST", body: { key } });
+    state.project = res.project; state.people = {}; state.teamData = null; state.loadedAt = {};
+    state.animate = {};
+    renderAll();
+    await loadView();
+    toast(res.project ? `Showing ${res.project.name} only.` : "Showing every project.");
+  } catch (err) { toast("Could not switch the project.", err.message, true); }
+}
+
+// The pull requests opened lately, for the Go menu.
+const RECENT_KEY = "prdesk.pr.recent.v1";
+function recentPrs() { try { const r = JSON.parse(localStorage.getItem(RECENT_KEY)); return Array.isArray(r) ? r : []; } catch { return []; } }
+function rememberPr(pr) {
+  const slim = { repo: pr.repo, id: pr.id, title: pr.title, state: pr.state, updated_on: pr.updated_on, author: { uuid: pr.author?.uuid, name: pr.author?.name } };
+  try { localStorage.setItem(RECENT_KEY, JSON.stringify([slim, ...recentPrs().filter((x) => prKey(x) !== prKey(pr))].slice(0, 12))); } catch { /* storage blocked */ }
 }
 
 function renderAll() {
@@ -2318,7 +2313,7 @@ function onKey(e) {
   }
   if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
   const k = e.key;
-  if (k === "/") { e.preventDefault(); $("#filter").focus(); }
+  if (k === "/") { e.preventDefault(); if (state.pr) closePr(); Layout.activate("queue"); requestAnimationFrame(() => $("#filter")?.focus()); }
   else if (k === "r") refreshNow();
   else if (k === "?") $("#help-dialog").showModal();
   else if (k === "j") moveCursor(1);
@@ -2407,14 +2402,6 @@ function bind() {
     if (action === "edit-team") return openTeamDialog();
     if (action === "show-all") { state.showAll = true; return renderQueue(); }
     if (action === "reload-pr" && state.pr) return openPr(state.pr.pr, { force: true });
-    const copyPanel = t.closest("[data-panel-copy]");
-    if (copyPanel) { Layout.duplicate(copyPanel.dataset.panelCopy); return; }
-    const removePanel = t.closest("[data-panel-remove]");
-    if (removePanel) { Layout.remove(removePanel.dataset.panelRemove); return; }
-    const showPanel = t.closest("[data-panel-show]");
-    if (showPanel) { Layout.activate(showPanel.dataset.panelShow); return; }
-    if (action === "preset-split") { Layout.preset("split"); return; }
-    if (action === "preset-compact") { Layout.preset("compact"); return; }
     if (action === "close-help") return $("#help-dialog").close();
     if (action === "open-keys") { $("#settings-dialog").close(); return $("#help-dialog").showModal(); }
     if (action === "pr-fold") return applyFold(!state.prFolded);
@@ -2426,22 +2413,6 @@ function bind() {
     if (t.matches("[data-date-from]")) return setDates({ from: t.value });
     if (t.matches("[data-date-to]")) return setDates({ to: t.value });
     if (t.matches("[data-copy-who]")) return setCopyWho(t.dataset.copyWho, t.value);
-    if (t.matches("[data-panel-toggle]")) { if (t.checked) Layout.show(t.dataset.panelToggle); else Layout.hide(t.dataset.panelToggle); renderBar(); return; }
-    if (t.id === "person") {
-      const v = t.value;
-      if (v === "edit-team") { t.value = state.route.who; return openTeamDialog(); }
-      return go({ who: v, section: state.route.section });
-    }
-    if (t.id === "project") {
-      try {
-        const res = await api("project", { method: "POST", body: { key: t.value } });
-        state.project = res.project; state.people = {}; state.teamData = null; state.loadedAt = {};
-        state.animate = {};
-        renderAll();
-        await loadView();
-        toast(res.project ? `Showing ${res.project.name} only.` : "Showing every project.");
-      } catch (err) { toast("Could not switch the project.", err.message, true); }
-    }
   });
   $("#refresh").addEventListener("click", refreshNow);
   // A late answer from Jira must never paint over another popup opened since.
@@ -2454,7 +2425,7 @@ function bind() {
     $("#team-count").textContent = `${candidates.filter((x) => x.picked).length} selected`;
   });
   $("#team-save").addEventListener("click", saveTeam);
-  $("#filter").addEventListener("input", (e) => { state.filter = e.target.value; renderQueue(); });
+  document.addEventListener("input", (e) => { if (e.target.id === "filter") { state.filter = e.target.value; renderQueue(); } });
   document.addEventListener("keydown", onKey);
 
   // A small target (an icon, a chip) gets its tip beside it, above or else below, so the tip
@@ -2649,8 +2620,11 @@ async function boot() {
   Repos.mount(Layout.body("repos"));
   Music.mount(Layout.body("music"));
   RetroSelect.enhanceAll();
-  Prefs.onChange((p, patch) => { paintLayoutMenu(); if ("theme" in patch) { Term.retheme(); for (const b of $$(".chart-box")) b.dataset.drawn = ""; paintCharts(); } });
+  Prefs.onChange((p, patch) => { if ("titlebar" in patch) PixelChrome.send("titlebar", { system: p.titlebar === "system" }); if ("theme" in patch) { Term.retheme(); for (const b of $$(".chart-box")) b.dataset.drawn = ""; paintCharts(); } });
   bind();
+  PixelChrome.mount($("#bar"));
+  MenuBar.mount();
+  Jump.mount();
   state.route = parseHash();
   renderAll();
   renderPr();

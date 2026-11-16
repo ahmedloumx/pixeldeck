@@ -20,6 +20,7 @@ from urllib.parse import urlsplit
 
 import gi
 
+import chrome
 import config
 
 gi.require_version("Gdk", "4.0")
@@ -99,6 +100,10 @@ class DeskApp(Gtk.Application):
             CACHE.mkdir(parents=True, exist_ok=True)
             self.session = WebKit.NetworkSession.new(str(DATA), str(CACHE))
         self.content = WebKit.UserContentManager()
+        # The page's top bar is the title bar: it asks here to move, maximize, minimize, close.
+        self.content.register_script_message_handler("pixeldeck", None)
+        self.content.connect("script-message-received::pixeldeck", self._on_chrome)
+        self.titlebar = chrome.titlebar_mode(STATE)
         if self.selftest:
             self.content.add_script(WebKit.UserScript.new(
                 CATCH_ERRORS, WebKit.UserContentInjectedFrames.TOP_FRAME,
@@ -109,8 +114,10 @@ class DeskApp(Gtk.Application):
         settings.set_javascript_can_open_windows_automatically(True)
         settings.set_enable_back_forward_navigation_gestures(False)
         _full_frames(settings)
-        self.main =self._window(view, *self._geometry())
+        self.main = self._window(view, *self._geometry())
         self.main.connect("close-request", self._save_geometry)
+        self.main.connect("notify::maximized", lambda *_: self._chrome_state())
+        self._apply_titlebar()
         if self.selftest:
             view.connect("load-changed", self._selftest_loaded)
             GLib.timeout_add_seconds(self.selftest["seconds"] + 90, self._selftest_timeout)
@@ -133,6 +140,54 @@ class DeskApp(Gtk.Application):
         view.connect("load-failed", self._on_load_failed)
         self._file_drops(view)
         return win
+
+    # ------------------------------------------------------------ title bar
+
+    def _apply_titlebar(self):
+        # The title bar slot holds an empty box, which hides the system title bar and keeps the
+        # window's edges for resizing. A header bar waits inside it, shown only when you choose
+        # the system's: GTK refuses a new title bar once the window is up, but showing or hiding
+        # a child is fine. Popped-out panels keep their usual title bar.
+        if getattr(self, "headerbar", None) is None:
+            self.headerbar = Gtk.HeaderBar(hexpand=True)
+            slot = Gtk.Box()
+            slot.append(self.headerbar)
+            self.main.set_titlebar(slot)
+            slot.remove_css_class("titlebar")  # the theme gives that class a height and a fill
+        self.headerbar.set_visible(self.titlebar == "system")
+
+    def _chrome_state(self):
+        if not self.main:
+            return
+        state = json.dumps({"maximized": bool(self.main.is_maximized()), "titlebar": self.titlebar})
+        self.main.get_child().evaluate_javascript(
+            f"typeof PixelChrome !== 'undefined' && PixelChrome.state({state})", -1, None, None, None, None, None)
+
+    def _on_chrome(self, _manager, value):
+        try:
+            request = chrome.parse(value.to_json(0))
+        except (TypeError, GLib.Error):
+            request = None
+        if not request or not self.main:
+            return
+        action, win = request["action"], self.main
+        if action == "move":
+            surface, seat = win.get_surface(), win.get_display().get_default_seat()
+            device = seat.get_pointer() if seat else None
+            if surface and device:
+                surface.begin_move(device, request["button"], request["x"], request["y"], Gdk.CURRENT_TIME)
+            return
+        if action == "maximize":
+            win.unmaximize() if win.is_maximized() else win.maximize()
+        elif action == "minimize":
+            win.minimize()
+        elif action == "close":
+            win.close()
+            return
+        elif action == "titlebar":
+            self.titlebar = "system" if request["system"] else "custom"
+            self._apply_titlebar()
+        self._chrome_state()
 
     def _file_drops(self, view):
         """Files dragged in from a file manager reach the page as their paths.

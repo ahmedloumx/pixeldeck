@@ -7,9 +7,6 @@
 html, body { height: 100%; }
 body { overflow: hidden; }
 .bar-inner { max-width: none; padding-inline: var(--space-md); gap: var(--space-sm); }
-.bar .field select { min-width: 0; width: 13rem; }
-.bar .search { margin-left: 0; flex: 1 1 14rem; max-width: 24rem; }
-.bar .search input { width: 100%; }
 .sync { margin-left: auto; }
 
 .workspace {
@@ -66,14 +63,7 @@ body { overflow: hidden; }
 .dropzone[data-zone="bottom"] { left: 20%; right: 20%; bottom: var(--space-xs); height: 18%; }
 .workspace.is-dragging .slot-head { outline: var(--pixel) dashed var(--color-rule-2); outline-offset: -4px; }
 
-.menu { position: relative; }
-.menu > summary { list-style: none; }
-.menu > summary::-webkit-details-marker { display: none; }
-.menu-pop { position: absolute; right: 0; top: calc(100% + var(--space-xs)); z-index: var(--z-dropdown); display: grid; gap: var(--space-xs); width: 17rem; padding: var(--space-md); background: var(--color-paper); border: var(--pixel) solid var(--color-rule-2); box-shadow: inset 0 0 0 var(--pixel) var(--color-paper-2), inset 0 0 0 4px var(--color-rule); }
 .menu-label { font-size: var(--text-sm); color: var(--color-muted); }
-.menu-row { display: flex; gap: var(--space-xs); }
-.menu-row .btn { flex: 1; }
-.menu-list { display: grid; gap: var(--space-2xs); }
 .menu-hint { font-size: var(--text-xs); color: var(--color-muted); }
 
 /* ---------- 8-bit numbers ---------- */
@@ -101,7 +91,7 @@ body { overflow: hidden; }
 /* A pull request open: it takes the list's place, edge to edge, and the side menu stays. */
 .panel-body[data-panel="queue"].has-pr { height: 100%; padding: 0; }
 .has-pr > .queue-split { height: 100%; gap: 0; align-items: stretch; }
-.has-pr > .queue-split > .queue-main { display: none; }
+.has-pr > .queue-split > .queue-col { display: none; }
 .has-pr > .queue-split > .queue-side { position: static; min-height: 0; overflow: auto; padding: var(--space-lg) var(--space-sm) var(--space-lg) var(--space-lg); }
 .queue-pr { min-width: 0; min-height: 0; height: 100%; }
 .queue-pr[hidden] { display: none; }
@@ -296,7 +286,6 @@ tr.is-cursor { box-shadow: inset 3px 0 0 var(--color-accent); background: var(--
   .slot.is-collapsed { min-height: 0; }
   .files { grid-template-columns: minmax(0, 1fr); }
   .file-list { position: static; max-height: 14rem; }
-  .bar .field select { width: 9rem; }
 }
 @media (prefers-reduced-motion: reduce) {
   .age-row, .age-fill { animation: none; }
