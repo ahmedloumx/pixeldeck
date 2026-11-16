@@ -78,7 +78,7 @@ class KeeperTest(unittest.TestCase):
     def test_finds_claude_codes_session_by_pid_and_checks_its_shape(self):
         (self.claude / "41.json").write_text(json.dumps({"sessionId": SID, "cwd": "/work"}))
         (self.claude / "42.json").write_text(json.dumps({"sessionId": "../../etc/passwd"}))
-        self.assertEqual(sessions._claude([7, 41], self.claude), {"session": SID, "cwd": "/work"})
+        self.assertEqual(sessions._claude([7, 41], self.claude), {"session": SID, "cwd": "/work", "pid": 41})
         self.assertIsNone(sessions._claude([42], self.claude), "an id that is not a uuid is ignored")
         self.assertIsNone(sessions._claude([43], self.claude))
 
@@ -88,6 +88,38 @@ class KeeperTest(unittest.TestCase):
         self.assertEqual(sessions.restore_argv({"kind": "claude", "claude_session": SID}, shell, claude), ["/usr/bin/claude", "--resume", SID])
         self.assertEqual(sessions.restore_argv({"kind": "claude", "claude_session": "--dangerous"}, shell, claude), ["/usr/bin/claude", "--continue"])
         self.assertEqual(sessions.restore_argv({"kind": "shell"}, shell, claude), ["/bin/bash", "-l"])
+
+    def test_claude_comes_back_with_its_permission_flags_and_nothing_else(self):
+        shell = lambda: ["/bin/bash", "-l"]  # noqa: E731
+        claude = lambda: "/usr/bin/claude"  # noqa: E731
+        skipped = {"kind": "claude", "claude_session": SID, "claude_flags": ["--dangerously-skip-permissions"]}
+        self.assertEqual(sessions.restore_argv(skipped, shell, claude), ["/usr/bin/claude", "--dangerously-skip-permissions", "--resume", SID])
+        # the saved file is only data: anything off the allowlist is dropped again at restore
+        odd = {"kind": "claude", "claude_flags": ["--permission-mode", "plan", "--mcp-config", "/tmp/x.json", "--permission-mode", "nope"]}
+        self.assertEqual(sessions.restore_argv(odd, shell, claude), ["/usr/bin/claude", "--permission-mode", "plan", "--continue"])
+        # the popup's choice wins, both ways
+        plain = {"kind": "claude", "claude_session": SID, "claude_flags": []}
+        self.assertEqual(sessions.restore_argv(plain, shell, claude, True), ["/usr/bin/claude", "--dangerously-skip-permissions", "--resume", SID])
+        self.assertEqual(sessions.restore_argv(skipped, shell, claude, False), ["/usr/bin/claude", "--resume", SID])
+        bypass = {"kind": "claude", "claude_session": SID, "claude_flags": ["--permission-mode", "bypassPermissions"]}
+        self.assertEqual(sessions.restore_argv(bypass, shell, claude, False), ["/usr/bin/claude", "--resume", SID])
+        self.assertEqual(sessions.restore_argv({"kind": "shell"}, shell, claude, True), ["/bin/bash", "-l"], "a shell takes no flag")
+
+    @unittest.skipUnless(Path("/proc/self/cmdline").exists(), "reads /proc")
+    def test_reads_the_flags_from_the_running_claude_only_by_exact_token(self):
+        import subprocess
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(10)", "--dangerously-skip-permissions",
+                                 "--permission-mode=auto", "--model", "x", "a whole prompt --dangerously-skip-permissions-not"])
+        self.addCleanup(proc.wait)
+        self.addCleanup(proc.kill)
+        (self.claude / f"{proc.pid}.json").write_text(json.dumps({"sessionId": SID, "cwd": "/work"}))
+        s = FakeSession("a1", "Claude Code", "/tmp")
+        s.proc = proc
+        saved = sessions.describe(s, self.claude)
+        self.assertEqual(saved["claude_flags"], ["--dangerously-skip-permissions", "--permission-mode", "auto"])
+        self.keeper(s).save()
+        offer = self.keeper().public_offer()
+        self.assertEqual((offer["terminals"][0]["kind"], offer["terminals"][0]["skips"]), ("claude", True))
 
     def test_kept_settings_take_only_known_keys_and_stay_safe_in_html(self):
         k = self.keeper()

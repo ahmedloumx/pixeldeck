@@ -44,7 +44,7 @@
 .pr-tools { display: flex; align-items: center; gap: var(--space-2xs); margin-left: auto; padding: var(--space-2xs) 0; }
 .tool.btn { min-height: 34px; min-width: 34px; padding: 0 var(--space-2xs); gap: var(--space-2xs); }
 .tool .tool-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.tool.btn--armed .tool-label, .tool.is-busy .tool-label { position: static; width: auto; height: auto; overflow: visible; clip-path: none; padding-right: var(--space-2xs); font-size: var(--text-sm); }
+.tool.btn--armed .tool-label, .tool.is-busy .tool-label, .tool.tool--text .tool-label { position: static; width: auto; height: auto; overflow: visible; clip-path: none; padding-right: var(--space-2xs); font-size: var(--text-sm); }
 .tool--agent.btn { padding-inline: var(--space-xs); border-color: color-mix(in oklch, var(--sprite-grass) 55%, var(--color-paper)); background: var(--color-paper-2); }
 .tool--agent.btn:hover, .tool--agent.btn:focus-visible { border-color: var(--sprite-grass); background: var(--color-paper-3); }
 .tool--agent .spr-sparkle { width: 0; opacity: 0; transition: opacity var(--dur-micro) var(--ease-out); }
@@ -53,9 +53,12 @@
 .tool--quiet.btn { background: transparent; border-color: transparent; color: var(--color-ink-2); }
 .tool--quiet.btn:hover { background: var(--color-paper-2); border-color: var(--color-rule); color: var(--color-ink); }
 .tool--push.btn { color: var(--color-accent); }
-.tool--merge.btn { background: transparent; border-color: transparent; color: var(--color-muted); }
-.tool--merge.btn.is-ready { color: var(--color-ok); }
-.tool--merge.btn:hover { background: var(--color-ok-soft); border-color: var(--color-ok); color: var(--color-ok); }
+/* Merge reads as a word, like Bitbucket's: green once nothing waits, yellow while a review or a sync does. */
+.tool--merge.btn { padding-inline: var(--space-xs) var(--space-sm); font-weight: 600; box-shadow: 0 2px 0 color-mix(in oklch, currentColor 30%, transparent); }
+.tool--merge.btn.is-ready { background: var(--color-ok); border-color: var(--color-ok); color: var(--color-on-ok); }
+.tool--merge.btn.is-waiting { background: var(--color-wait); border-color: var(--color-wait); color: var(--color-on-wait); }
+.tool--merge.btn:hover { filter: brightness(1.08); }
+.tool--merge.btn.btn--armed { background: var(--color-bad); border-color: var(--color-bad); color: var(--color-on-ok); }
 .tool--danger.btn { background: transparent; border-color: transparent; color: var(--color-bad); }
 .tool--danger.btn:hover { background: var(--color-bad-soft); border-color: var(--color-bad); }
 .tool--fold.btn { background: transparent; border-color: var(--color-rule); color: var(--color-ink-2); }
@@ -338,3 +341,33 @@
 .date-input input { min-height: 26px; padding: 0 var(--space-2xs); border: var(--rule-hair) solid var(--color-rule-2); border-radius: 2px; background: var(--color-paper-3); color: var(--color-ink); font: inherit; font-size: var(--text-sm); color-scheme: dark; }
 .date-to { color: var(--color-muted); }
 .date-count { margin-left: auto; color: var(--color-muted); font: 400 9px var(--font-num); }
+
+/* The Claude tools carry their words once the pull request has the width; narrow, icons only. */
+.pr-main { container: pr-main / inline-size; }
+@container pr-main (min-width: 68rem) {
+  .tool.tool--say .tool-label { position: static; width: auto; height: auto; overflow: visible; clip-path: none; padding-right: var(--space-2xs); font-size: var(--text-sm); }
+}
+/* Your verdict on a teammate's pull request: words, and pressed means given, filled. */
+.tool--approve.btn, .tool--changes.btn { border-color: var(--color-rule-2); }
+.tool--approve.is-on.btn { color: var(--color-on-ok); background: var(--color-ok); border-color: var(--color-ok); font-weight: 600; }
+.tool--changes.is-on.btn { color: var(--color-on-ok); background: var(--color-bad); border-color: var(--color-bad); font-weight: 600; }
+.tool--approve.is-on.btn:hover, .tool--changes.is-on.btn:hover { filter: brightness(1.08); }
+
+/* The line under the title: approvals, the branch against its target, open tasks. */
+.pr-checks { display: flex; flex-wrap: wrap; gap: var(--space-xs); margin-top: var(--space-xs); }
+.pr-checks:empty { display: none; }
+.check-pill { display: inline-flex; align-items: center; gap: var(--space-2xs); min-height: 26px; padding: 0 var(--space-sm) 0 var(--space-xs); border: var(--rule-hair) solid var(--tone); background: var(--tone-soft); color: var(--color-ink); font-size: var(--text-sm); white-space: nowrap; }
+.check-pill > svg, .check-pill > .spr { flex: none; width: 16px; height: 16px; color: var(--tone); }
+.check-pill b { font-weight: 600; }
+.check-pill.is-ok { --tone: var(--color-ok); --tone-soft: var(--color-ok-soft); }
+.check-pill.is-wait { --tone: var(--color-wait); --tone-soft: var(--color-wait-soft); }
+.check-pill.is-bad { --tone: var(--color-bad); --tone-soft: var(--color-bad-soft); }
+
+/* Synced from here: the bar turns green and stays, so you see it landed. */
+.sync-bar.is-ok { border-color: var(--color-ok); background: var(--color-ok-soft); animation: sync-landed 360ms steps(3, end); }
+.sync-bar.is-ok > svg { flex: none; width: 18px; height: 18px; color: var(--color-ok); }
+@keyframes sync-landed { from { transform: translateY(-4px); } }
+@media (prefers-reduced-motion: reduce) { .sync-bar.is-ok { animation: none; } }
+
+/* While Bitbucket merges, the popup's choices wait, dimmed. */
+#pr-dialog-body.is-merging .strategies, #pr-dialog-body.is-merging .pr-fields, #pr-dialog-body.is-merging #merge-ticket-slot { opacity: 0.55; }

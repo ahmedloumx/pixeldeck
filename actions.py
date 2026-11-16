@@ -10,6 +10,7 @@ import json
 import secrets
 import shutil
 import subprocess
+import threading
 import time
 
 import config
@@ -271,7 +272,9 @@ def merge(engine, body):
     merged = None
     if result.get("state") == "MERGED":
         merged = engine.file_merged(me, result)
-    _after_change(engine)
+    # The merge is done and filed: answer now. Reading your pull requests again takes several
+    # Bitbucket calls, and the popup used to wait for them with its button spinning.
+    _after_change(engine, wait=False)
     # A slow merge answers 202 with no body: Bitbucket finishes it, and the next refresh files it.
     return {"repo": repo, "id": pr_id, "state": result.get("state") or "PENDING", "strategy": strategy, "pr": merged}
 
@@ -404,7 +407,10 @@ def sync(engine, root, body):
     return {"state": "synced", "behind": 0, "merged": behind, "head": head[:12], "source": src, "dest": dest}
 
 
-def _after_change(engine):
+def _after_change(engine, wait=True):
+    if not wait:
+        threading.Thread(target=_after_change, args=(engine,), name="after-change", daemon=True).start()
+        return
     me = (engine.me() or {}).get("uuid")
     if me:
         try:

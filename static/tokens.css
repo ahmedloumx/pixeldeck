@@ -17,6 +17,8 @@
   --color-accent: oklch(82% 0.15 80); --color-accent-ink: oklch(18% 0.04 75); --color-accent-soft: oklch(29% 0.05 80); --color-focus: oklch(82% 0.15 80);
   --color-cool: oklch(78% 0.11 262); --color-cool-soft: oklch(29% 0.05 262);
   --color-ok: oklch(76% 0.15 150); --color-ok-soft: oklch(24.5% 0.03 150); --color-bad: oklch(70% 0.17 25); --color-bad-soft: oklch(24.5% 0.035 25);
+  /* waiting on someone (a review, a sync): the yellow of Bitbucket's waiting merge, whatever the accent */
+  --color-wait: oklch(83% 0.15 85); --color-wait-soft: oklch(28% 0.05 85); --color-on-ok: oklch(18% 0.03 150); --color-on-wait: oklch(20% 0.04 80);
   --font-display: "Host Grotesk", ui-sans-serif, system-ui, sans-serif; --font-body: var(--font-display);
   --font-outlier: "Adwaita Mono", "Noto Sans Mono", "Liberation Mono", ui-monospace, monospace;
   --radius-card: 10px; --radius-pill: 6px; --rule-hair: 1px;

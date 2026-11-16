@@ -126,6 +126,10 @@
 .set-tab:hover { color: var(--color-ink); background: var(--color-paper-2); }
 .set-tab[aria-selected="true"] { color: var(--color-accent-ink); background: var(--color-accent); box-shadow: 3px 3px 0 var(--color-accent-deep); }
 .set-body { overflow: auto; padding: var(--space-md) var(--space-lg) var(--space-xl); }
+/* A new section steps in under a list that stays put; nothing fades. */
+.set-body.is-switching > :not(.set-head) { animation: set-step 120ms steps(2, end); }
+@keyframes set-step { from { transform: translateY(4px); } }
+@media (prefers-reduced-motion: reduce) { .set-body.is-switching > :not(.set-head) { animation: none; } }
 .set-head { position: sticky; top: calc(var(--space-md) * -1); z-index: 1; display: flex; align-items: center; margin: calc(var(--space-md) * -1) calc(var(--space-lg) * -1) var(--space-md); padding: var(--space-md) var(--space-lg) var(--space-sm); background: var(--color-paper); border-bottom: var(--rule-hair) solid var(--color-rule); }
 .set-head h2 { margin: 0; font: 500 var(--text-lg) var(--font-pixel); letter-spacing: 0; }
 .set-head .btn { margin-left: auto; }
@@ -340,6 +344,7 @@
   --color-rule: #8e8e8e; --color-rule-2: #686868;
   --color-cool: #0d6a6a; --color-cool-soft: #a8cccc; --color-cool-deep: #084646;
   --color-ok: #166329; --color-ok-soft: #b5d6bb; --color-bad: #a01818; --color-bad-soft: #e2b5b5; --color-bad-deep: #6b0f0f;
+  --color-wait: #8a5c00; --color-wait-soft: #e6d29b; --color-on-ok: #ffffff; --color-on-wait: #ffffff;
   --color-success: #166329; --color-error: #a01818;
   --color-scan: rgb(0 0 0 / 0.035); --color-scrim: rgb(48 48 48 / 0.45);
   --heat-0: #ababab; --heat-1: #8d9fc6; --heat-2: #5e7bbd; --heat-3: #34509b; --heat-4: #1b3c9f;
@@ -389,43 +394,18 @@
 .restore-kind { font: 400 9px var(--font-num); color: var(--color-muted); white-space: nowrap; }
 .restore-kind.is-claude { color: var(--sprite-grass); }
 .restore-foot { display: flex; justify-content: flex-end; gap: var(--space-xs); }
+.restore-skip { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: var(--space-sm); margin: 0 0 var(--space-md); padding: var(--space-sm); border: var(--rule-hair) dashed var(--color-rule-2); cursor: pointer; }
+.restore-skip > input { position: absolute; opacity: 0; pointer-events: none; }
+.restore-skip code { font-family: var(--font-outlier); font-size: 0.92em; }
+.restore-skip small { display: block; color: var(--color-muted); font-size: var(--text-xs); white-space: normal; overflow: visible; }
+.restore-skip:has(input:checked) { border-style: solid; border-color: var(--color-bad); }
+.restore-skip { position: relative; }
+.restore-skip input:checked + .restore-box { background: var(--color-bad); border-color: var(--color-bad); box-shadow: inset 0 0 0 2px var(--color-paper); }
+.restore-skip:has(input:focus-visible) { outline: 2px solid var(--color-focus); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { .restore-dialog[open], .restore-row { animation: none; } }
 
-/* ---------------------------------------------------------------- the pull request panel's list */
-.pr-shell { display: grid; grid-template-columns: 17rem minmax(0, 1fr); height: 100%; min-height: 0; }
-.pr-shell.is-collapsed { grid-template-columns: 34px minmax(0, 1fr); }
+/* ---------------------------------------------------------------- the open pull request, inside the queue */
 .pr-main { position: relative; min-width: 0; min-height: 0; height: 100%; overflow: hidden; }
-.pr-main > .pr-empty { overflow: auto; height: 100%; }
-.pr-rail { display: flex; flex-direction: column; min-height: 0; border-right: var(--rule-hair) solid var(--color-rule); background: var(--color-paper-3); }
-.rail-head { display: flex; align-items: center; gap: var(--space-2xs); padding: var(--space-xs) var(--space-xs) var(--space-2xs); }
-.rail-head h3 { flex: 1; margin: 0; font: 500 var(--text-sm) var(--font-pixel); letter-spacing: 0; }
-.rail-count { font-size: 9px; color: var(--color-accent); }
-.rail-fold { flex: none; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: var(--rule-hair) solid var(--color-rule-2); background: none; color: var(--color-ink-2); cursor: pointer; }
-.rail-fold:hover { border-color: var(--color-accent); color: var(--color-accent); }
-.rail-fold-glyph { width: 8px; height: 10px; background: currentColor; clip-path: polygon(100% 0, 100% 100%, 0 50%); }
-.is-collapsed .rail-fold-glyph { clip-path: polygon(0 0, 0 100%, 100% 50%); }
-.rail-chips { display: flex; flex-wrap: wrap; gap: 3px; padding: 0 var(--space-xs) var(--space-xs); }
-.rail-chips .date-chip { min-height: 24px; padding: 0 6px; font-size: var(--text-xs); }
-.rail-n { margin-left: 5px; font-size: 8px; color: var(--color-muted); }
-.rail-search { display: block; padding: 0 var(--space-xs) var(--space-xs); }
-.rail-search input { width: 100%; min-height: 28px; padding: 0 var(--space-xs); border: var(--rule-hair) solid var(--color-rule-2); background: var(--color-paper); color: var(--color-ink); font: inherit; font-size: var(--text-sm); }
-.rail-search input:focus-visible { outline: var(--pixel) solid var(--color-focus); outline-offset: 0; }
-.rail-list { flex: 1; min-height: 0; overflow: auto; padding-bottom: var(--space-sm); }
-.rail-row { display: grid; grid-template-columns: 8px minmax(0, 1fr); gap: var(--space-xs); width: 100%; padding: var(--space-xs); border: 0; border-left: 3px solid transparent; background: none; color: var(--color-ink-2); text-align: left; cursor: pointer; }
-.rail-row:hover { background: var(--color-paper-2); color: var(--color-ink); }
-.rail-row.is-current { border-left-color: var(--color-accent); background: var(--color-paper); color: var(--color-ink); }
-.rail-dot { width: 8px; height: 8px; margin-top: 5px; background: var(--color-muted); }
-.rail-dot.is-bad { background: var(--color-bad); } .rail-dot.is-ok { background: var(--color-ok); } .rail-dot.is-due { background: var(--color-accent); }
-.rail-dot.is-merged { background: var(--color-cool); } .rail-dot.is-closed { background: var(--color-rule-2); }
-.rail-text { display: grid; gap: 1px; min-width: 0; }
-.rail-top { display: flex; gap: var(--space-xs); justify-content: space-between; font-size: var(--text-xs); color: var(--color-muted); }
-.rail-id { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-outlier); }
-.rail-text b { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-weight: 500; font-size: var(--text-sm); }
-.rail-text small { color: var(--color-muted); font-size: var(--text-xs); }
-.rail-empty { padding: var(--space-md) var(--space-sm); color: var(--color-muted); font-size: var(--text-sm); }
-.is-collapsed .pr-rail > :not(.rail-head), .is-collapsed .rail-head h3, .is-collapsed .rail-count { display: none; }
-.is-collapsed .rail-head { flex-direction: column; padding: var(--space-xs) 5px; }
-.pr-empty .spr { display: block; margin: 0 auto var(--space-sm); }
 
 /* ---------------------------------------------------------------- the + beside the terminal tabs */
 .term-bar > .term-tabs { flex: 0 1 auto; }
@@ -442,8 +422,6 @@
 .link-ask-url { margin: 0 0 var(--space-md); padding: var(--space-xs) var(--space-sm); max-height: 8rem; overflow: auto; background: var(--color-paper-3); border: var(--rule-hair) solid var(--color-rule); font: 400 var(--text-sm)/1.5 var(--font-outlier); color: var(--color-ink-2); overflow-wrap: anywhere; }
 .link-ask-foot { display: flex; justify-content: flex-end; gap: var(--space-xs); }
 @media (prefers-reduced-motion: reduce) { .link-ask[open] { animation: none; } }
-.rail-top time { flex: none; white-space: nowrap; }
-.rail-top .rail-id { min-width: 0; }
 
 /* ---------------------------------------------------------------- the queue's sections
    Each section has a pixel glyph and a quiet colour of its own; the chosen one is tinted with it
@@ -478,4 +456,4 @@
 .sb-tool.sb-sync.btn--armed { background: var(--color-bad); border-color: var(--color-bad); }
 .bell-list > li { position: relative; }
 .bell-sync { position: absolute; right: var(--space-md); bottom: var(--space-xs); min-height: 24px; padding: 0 var(--space-xs); font-size: var(--text-xs); }
-.rail-behind, .q-behind { margin-left: 4px; padding: 0 4px; font: 400 8px/14px var(--font-num); color: var(--color-accent); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-accent) 45%, transparent); white-space: nowrap; }
+.q-behind { margin-left: 4px; padding: 0 4px; font: 400 8px/14px var(--font-num); color: var(--color-accent); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-accent) 45%, transparent); white-space: nowrap; }

@@ -26,6 +26,7 @@ try { state.prFolded = localStorage.getItem(FOLD_KEY) === "1"; } catch { /* priv
 
 const ICON = {
   check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
+  wait: '<circle cx="12" cy="12" r="7.5"/><path d="M12 8v4.5l3 2"/>',
   x: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
   reply: '<path d="M10 8 5 12.5l5 4.5"/><path d="M5.5 12.5H14a5 5 0 0 1 5 5V19"/>',
   task: '<rect x="5" y="5" width="14" height="14" rx="3"/>',
@@ -339,6 +340,62 @@ function threadsCell(pr) {
   return "none";
 }
 // Your branch is behind its target (a teammate merged there): the server's last look, every 3 min.
+// How far your branch is behind its target: the clone's own look when the pull request is open
+// here (fresh, and zero right after a sync), else the server's look every 3 minutes.
+// Synced from here this session: key to { at (seconds), pulled }. Kept until the branch falls
+// behind again, so reopening the pull request still says it was synced.
+const justSynced = new Map();
+function behindOf(pr) {
+  const sync = state.pr && prKey(state.pr.pr) === prKey(pr) ? state.pr.sync : null;
+  const done = justSynced.get(prKey(pr)) || null;
+  if (sync?.available) return { n: sync.behind || 0, more: false, known: true, synced: sync.behind ? null : done };
+  const seen = pr.behind || findPr(prKey(pr))?.behind;  // a detail read from Bitbucket has no look of its own
+  if (seen) return { n: seen.behind || 0, more: !!seen.more, known: true, synced: seen.behind ? null : done };
+  return { n: 0, more: false, known: !!done, synced: done };
+}
+// Bitbucket's merge button: green once nothing waits, yellow while a review or a sync is due.
+function mergeReadiness(pr) {
+  const s = signals(pr);
+  const b = behindOf(pr);
+  const waits = [];
+  if (s.changes.length) waits.push(`${listNames(s.changes.map((r) => r.name))} asked for changes`);
+  else if (!s.approvals.length) waits.push("it waits for an approval");
+  if (b.n) waits.push(`it is ${b.n}${b.more ? "+" : ""} ${b.n === 1 && !b.more ? "commit" : "commits"} behind ${pr.dest}: sync it first`);
+  if (s.tasks) waits.push(`${plural(s.tasks, "task")} still open`);
+  return { ready: !waits.length, waits, s, b };
+}
+function mergeButton(pr) {
+  const r = mergeReadiness(pr);
+  const who = r.s.approvals.length ? `approved by ${listNames(r.s.approvals.map((x) => x.name))}` : "";
+  const tip = r.ready
+    ? `Ready: ${who}${r.b.known ? ` and up to date with ${pr.dest}` : ""}. Pick the strategy, the message and the ticket's next status first.`
+    : `Not ready: ${r.waits.join("; ")}. Bitbucket's merge checks decide; the popup lets you try.`;
+  return `<button class="btn tool tool--merge tool--text ${r.ready ? "is-ready" : "is-waiting"}" type="button" data-merge data-tip="${esc(tip)}">${Sprites.svg("merge", { scale: 2 })}<span class="tool-label">Merge</span></button>`;
+}
+// The line under the title: who approved, whether the branch is up to date, what is still open.
+function prChecks(pr) {
+  if (pr.state !== "OPEN") return "";
+  const s = signals(pr);
+  const reviewers = (pr.reviews || []).filter((r) => r.reviewer);
+  const pill = (tone, icon, text, tip = "") => `<span class="check-pill is-${tone}"${tip ? ` data-tip="${esc(tip)}"` : ""}>${icon}<span>${text}</span></span>`;
+  const out = [];
+  if (s.changes.length) out.push(pill("bad", svg("x"), `Changes requested by <b>${esc(listNames(s.changes.map((r) => r.name)))}</b>`));
+  if (s.approvals.length) {
+    const mine = s.approvals.some((r) => isMeUuid(r.uuid));
+    out.push(pill("ok", svg("check", "2.6"), `Approved by <b>${esc(listNames(s.approvals.map((r) => (isMeUuid(r.uuid) ? "you" : r.name))))}</b>`,
+      reviewers.length ? `${s.approvals.length} of ${reviewers.length} reviewers approved${mine ? ", you among them" : ""}` : ""));
+  } else if (!s.changes.length) {
+    out.push(pill("wait", svg("wait"), reviewers.length ? `Waiting for review: <b>0 of ${reviewers.length}</b> approved` : "No reviewer yet"));
+  }
+  const b = behindOf(pr);
+  if (b.known) {
+    out.push(b.n
+      ? pill("wait", Sprites.svg("sync", { scale: 1 }), `<b>${b.n}${b.more ? "+" : ""}</b> behind ${esc(pr.dest)}`, "The target moved on: sync this branch before it merges")
+      : pill("ok", svg("check", "2.6"), `${b.synced ? "Synced: up" : "Up"} to date with ${esc(pr.dest)}`, b.synced ? `Synced at ${clock(b.synced.at)}` : ""));
+  }
+  if (s.tasks) out.push(pill("wait", svg("task"), plural(s.tasks, "open task")));
+  return out.join("");
+}
 const behindTag = (pr, cls) => (pr.behind?.behind ? `<span class="${cls}" data-tip="The target moved on: sync this branch before it merges">${pr.behind.behind}${pr.behind.more ? "+" : ""} behind</span>` : "");
 function prRow(pr, opts = {}) {
   const current = state.pr && prKey(state.pr.pr) === prKey(pr) ? " is-open" : "";
@@ -613,16 +670,23 @@ function renderQueueIn(id) {
   el.classList.toggle("calm", state.animate[id] === false);
   const title = copy ? `${whoPicker(id, view.who)}` : `<h2 class="panel-title">${esc(who)}</h2>`;
   // The sections sit in a rail beside the list; a narrow panel wraps them above it instead.
-  el.innerHTML = `<div class="queue-split">
-    <nav class="sec-chips" role="tablist" aria-label="Sections" aria-orientation="vertical">${chips}</nav>
-    <div class="queue-main">${authNotice()}
+  // The frame is drawn once and kept: the open pull request beside the list must survive the
+  // list being redrawn on every refresh.
+  let split = el.querySelector(":scope > .queue-split");
+  if (!split) {
+    el.innerHTML = `<div class="queue-split">
+      <aside class="queue-side"><h2 class="queue-side-head">Queue</h2><nav class="sec-chips" role="tablist" aria-label="Sections" aria-orientation="vertical"></nav></aside>
+      <div class="queue-main"></div>${copy ? "" : `<div class="queue-pr" hidden></div>`}</div>`;
+    split = el.firstElementChild;
+  }
+  split.querySelector(".sec-chips").innerHTML = chips;
+  split.querySelector(".queue-main").innerHTML = `${authNotice()}
       <header class="panel-head-row">${title}<span class="note">${esc(projectNote())}</span></header>
       ${data ? dateBar(sec.id, sec.id === "pushed" ? b.pushed.filter((x) => matches({ repo: x.repo, title: x.subject, source: x.branch, dest: x.dest, pushed_at: x.pushed_at })).length : b[sec.id].filter(matches).length, b[sec.id].length) : ""}
       ${visual ? `<figure class="section-visual"><figcaption>${esc(VISUAL_TITLE[sec.id] || "")}</figcaption>${visual}</figure>` : ""}
-      <section class="block">${body}</section>
-    </div></div>`;
+      <section class="block">${body}</section>`;
   if (data) state.animate[id] = false;
-  if (copy) { RetroSelect.enhanceAll(el); Layout.setLabel(id, `Queue: ${shortWho(view)}`); return; }
+  if (copy) { RetroSelect.enhanceAll(el); Layout.setLabel(id, `Pull Requests: ${shortWho(view)}`); return; }
   Layout.setBadge("queue", data && kind === "me" ? b.needs.length || "" : "");
   const needs = state.me && state.people[state.me.uuid] ? buckets(state.people[state.me.uuid], "me").needs.length : 0;
   document.title = needs ? `(${needs}) PixelDeck` : "PixelDeck";
@@ -959,24 +1023,21 @@ function prLaunches(pr) {
 // moves while hovered; the label is there for screen readers and shows when a click arms it.
 function prTools(pr) {
   const tool = (cls, attrs, sprite, label, tip) =>
-    `<button class="btn tool ${cls}" type="button" ${attrs} data-tip="${esc(tip)}"${cls.includes("agent") ? " data-spr-hover" : ""}>${sprite}<span class="tool-label">${esc(label)}</span></button>`;
+    `<button class="btn tool tool--say ${cls}" type="button" ${attrs} data-tip="${esc(tip)}"${cls.includes("agent") ? " data-spr-hover" : ""}>${sprite}<span class="tool-label">${esc(label)}</span></button>`;
   const buddy = `${Sprites.svg("buddy", { scale: 2 })}${Sprites.svg("sparkle", { scale: 2 })}`;
   const fold = `<button class="btn tool tool--fold" type="button" data-action="pr-fold" aria-expanded="${!state.prFolded}" data-tip="${state.prFolded ? "Show the header (f)" : "Hide the header (f)"}">${Sprites.svg(state.prFolded ? "down" : "up", { scale: 2 })}<span class="tool-label">${state.prFolded ? "Show the header" : "Hide the header"}</span></button>`;
   if (pr.state !== "OPEN") return fold;
   const shift = "Shift-click opens it in its own window.";
   const mine = isMeUuid(pr.author.uuid);
   const tools = mine
-    ? tool("tool--agent", 'data-launch="fix"', buddy, "Fix with Claude", `Fix with Claude: runs in the Terminal panel, briefed with the open threads. ${shift}`)
+    ? tool("tool--agent", 'data-launch="fix"', buddy, "Fix", `Fix with Claude: runs in the Terminal panel, briefed with the open threads. ${shift}`)
       + tool("tool--quiet tool--push", 'data-launch="fix_push"', Sprites.svg("push", { scale: 2 }), "Fix and push", "Fix and push: Claude fixes, commits and pushes with a lease. Asks you to confirm.")
-      + tool("tool--quiet", 'data-launch="summarize"', Sprites.svg("read", { scale: 2 }), "Read and summarize", `Read and summarize: Claude reads the threads and edits nothing. ${shift}`)
+      + tool("tool--quiet", 'data-launch="summarize"', Sprites.svg("read", { scale: 2 }), "Summarize", `Read and summarize: Claude reads the threads and edits nothing. ${shift}`)
       + `<span class="tool-sep" aria-hidden="true"></span>`
-      + tool(`tool--merge${signals(pr).approved ? " is-ready" : ""}`, "data-merge", Sprites.svg("merge", { scale: 2 }), "Merge",
-        signals(pr).approved
-          ? `Merge into ${pr.dest}: pick the strategy, the message and the ticket's next status first.`
-          : `Not approved yet. Bitbucket's merge checks decide whether it can merge into ${pr.dest}. Asks you to confirm.`)
+      + mergeButton(pr)
       + tool("tool--danger", "data-decline", Sprites.svg("decline", { scale: 2 }), "Decline", "Decline this pull request. Asks you to confirm.")
-    : tool("tool--agent", 'data-launch="review"', buddy, "Review with the rubric", `Review with the rubric: Claude reviews it in the Terminal panel. ${shift}`)
-      + tool("tool--quiet", 'data-launch="summarize"', Sprites.svg("read", { scale: 2 }), "Summarize the threads", `Summarize the threads, edit nothing. ${shift}`)
+    : tool("tool--agent", 'data-launch="review"', buddy, "Review", `Review with the rubric: Claude reviews it in the Terminal panel. ${shift}`)
+      + tool("tool--quiet", 'data-launch="summarize"', Sprites.svg("read", { scale: 2 }), "Summarize", `Summarize the threads, edit nothing. ${shift}`)
       + reviewTools(pr);
   return `${tools}<span class="tool-sep" aria-hidden="true"></span>${fold}`;
 }
@@ -988,12 +1049,13 @@ function reviewTools(pr) {
   const mine = (pr.reviews || []).find((r) => isMeUuid(r.uuid))?.state;
   const approved = mine === "approved", asked = mine === "changes_requested";
   const btn = (cls, action, sprite, label, tip, on) =>
-    `<button class="btn tool ${cls}${on ? " is-on" : ""}" type="button" data-review="${action}" aria-pressed="${on}" data-tip="${esc(tip)}">${Sprites.svg(sprite, { scale: 2 })}<span class="tool-label">${esc(label)}</span></button>`;
+    `<button class="btn tool tool--text ${cls}${on ? " is-on" : ""}" type="button" data-review="${action}" aria-pressed="${on}" data-tip="${esc(tip)}">${Sprites.svg(sprite, { scale: 2 })}<span class="tool-label">${esc(label)}</span></button>`;
+  // Pressed, a button names the verdict you gave, as Bitbucket's own does.
   return `<span class="tool-sep" aria-hidden="true"></span>`
-    + btn("tool--approve", approved ? "unapprove" : "approve", "check", approved ? "Remove your approval" : "Approve",
-      approved ? "You approved it. Click to take your approval back." : "Approve this pull request. Asks you to confirm.", approved)
-    + btn("tool--changes", asked ? "unrequest_changes" : "request_changes", "changes", asked ? "Withdraw your change request" : "Request changes",
-      asked ? "You asked for changes. Click to withdraw the request." : "Request changes on this pull request. Asks you to confirm.", asked);
+    + btn("tool--approve", approved ? "unapprove" : "approve", "check", approved ? "Approved" : "Approve",
+      approved ? "You approved it. Click to take your approval back. Asks you to confirm." : "Approve this pull request. Asks you to confirm.", approved)
+    + btn("tool--changes", asked ? "unrequest_changes" : "request_changes", "changes", asked ? "Changes requested" : "Request changes",
+      asked ? "You asked for changes. Click to withdraw the request. Asks you to confirm." : "Request changes on this pull request. Asks you to confirm.", asked);
 }
 const REVIEW_CONFIRM = { approve: "Confirm: approve", unapprove: "Confirm: remove your approval", request_changes: "Confirm: request changes", unrequest_changes: "Confirm: withdraw your request" };
 const REVIEW_DONE = { approve: "Approved", unapprove: "Approval removed on", request_changes: "Changes requested on", unrequest_changes: "Change request withdrawn on" };
@@ -1241,86 +1303,21 @@ function tabTasks() {
   return `<ul class="task-list">${tasks.map((t) => `<li class="task${t.state === "RESOLVED" ? " is-done" : ""}">${svg(t.state === "RESOLVED" ? "taskdone" : "task")}<div>${md(t.raw)}<div class="entry-meta"><span class="person">${esc(t.creator.name)}</span></div></div></li>`).join("")}</ul>`;
 }
 
-/* The pull request panel's own list: what needs you, what waits for your review, yours, and
-   the ones opened lately, with a search. A pull request can be picked and switched here
-   without the queue; the rail folds to a strip when the panel needs the room. */
-const RAIL_KEY = "prdesk.pr.rail.v1", RECENT_KEY = "prdesk.pr.recent.v1";
-const RAIL_TABS = [["needs", "Needs you"], ["review", "Review"], ["mine", "Mine"], ["recent", "Recent"]];
-let rail = (() => { try { return { tab: "needs", collapsed: null, q: "", ...(JSON.parse(localStorage.getItem(RAIL_KEY)) || {}) }; } catch { return { tab: "needs", collapsed: null, q: "" }; } })();
-const saveRail = () => { try { localStorage.setItem(RAIL_KEY, JSON.stringify({ tab: rail.tab, collapsed: rail.collapsed })); } catch { /* storage blocked */ } };
-function recentPrs() { try { const r = JSON.parse(localStorage.getItem(RECENT_KEY)); return Array.isArray(r) ? r : []; } catch { return []; } }
-function rememberPr(pr) {
-  const slim = { repo: pr.repo, id: pr.id, title: pr.title, state: pr.state, updated_on: pr.updated_on, author: { uuid: pr.author?.uuid, name: pr.author?.name } };
-  const list = [slim, ...recentPrs().filter((p) => prKey(p) !== prKey(pr))].slice(0, 20);
-  try { localStorage.setItem(RECENT_KEY, JSON.stringify(list)); } catch { /* storage blocked */ }
-}
-function railLists() {
-  const mine = state.me && state.people[state.me.uuid];
-  const b = mine ? buckets(mine, "me") : null;
-  return {
-    needs: b ? b.needs : [], review: b ? b.requests : [], mine: mine ? [...(mine.open || [])].sort((x, y) => (y.updated_on || "").localeCompare(x.updated_on || "")) : [],
-    recent: recentPrs().map((p) => findPr(prKey(p)) || p),
-  };
-}
-function railRow(pr) {
-  const s = signals(pr);
-  const tone = pr.state && pr.state !== "OPEN" ? (pr.state === "MERGED" ? "merged" : "closed") : s.changes.length ? "bad" : s.approved ? "ok" : s.needs ? "due" : "wait";
-  const on = state.pr && prKey(state.pr.pr) === prKey(pr);
-  return `<button class="rail-row${on ? " is-current" : ""}" type="button" data-rail-open="${esc(prKey(pr))}" aria-current="${on}">
-    <span class="rail-dot is-${tone}" aria-hidden="true"></span>
-    <span class="rail-text"><span class="rail-top"><span class="rail-id">${esc(pr.repo)} #${esc(pr.id)}</span>${behindTag(findPr(prKey(pr)) || pr, "rail-behind")}<time>${esc(pr.updated_on ? ago(pr.updated_on) : "")}</time></span>
-      <b>${esc(pr.title || "")}</b>${pr.author?.name && !isMeUuid(pr.author.uuid) ? `<small>${esc(pr.author.name)}</small>` : ""}</span></button>`;
-}
-// Folded unless you chose otherwise when the queue is on screen too: two lists side by side
-// only take room from the pull request.
-const railFolded = () => (typeof rail.collapsed === "boolean" ? rail.collapsed : Layout.isShown("queue"));
-function paintPrRail() {
-  const box = Layout.body("pr")?.querySelector(".pr-rail");
-  if (!box) return;
-  box.closest(".pr-shell")?.classList.toggle("is-collapsed", railFolded());
-  const lists = railLists();
-  const q = rail.q.trim().toLowerCase();
-  const pick = (lists[rail.tab] || []).filter((pr) => !q || `${pr.repo} #${pr.id} ${pr.title} ${pr.ticket?.key || ""} ${pr.author?.name || ""}`.toLowerCase().includes(q));
-  const empty = { needs: "Nothing needs you.", review: "No review waits for you.", mine: "You have no open pull request.", recent: "Pull requests you open land here." }[rail.tab];
-  const chips = RAIL_TABS.map(([id, label]) => `<button class="date-chip" type="button" data-rail-tab="${id}" aria-pressed="${rail.tab === id}">${label}<span class="rail-n num8">${lists[id].length}</span></button>`).join("");
-  const list = box.querySelector(".rail-list");
-  box.querySelector(".rail-chips").innerHTML = chips;
-  list.innerHTML = pick.length ? pick.slice(0, 80).map(railRow).join("") : `<p class="rail-empty">${esc(q ? "Nothing matches." : empty)}</p>`;
-  box.querySelector(".rail-count").textContent = String(lists.needs.length + lists.review.length || "");
-}
-function prShell(el) {
-  let shell = el.querySelector(":scope > .pr-shell");
-  if (shell) return shell.querySelector(".pr-main");
-  el.innerHTML = `<div class="pr-shell${railFolded() ? " is-collapsed" : ""}">
-    <aside class="pr-rail" aria-label="Pull requests">
-      <header class="rail-head"><button class="rail-fold" type="button" data-rail-fold aria-label="Fold the list" data-tip="Fold or open the list"><span class="rail-fold-glyph" aria-hidden="true"></span></button>
-        <h3>Pull requests</h3><span class="rail-count num8"></span></header>
-      <div class="rail-chips" role="group" aria-label="Which pull requests"></div>
-      <label class="rail-search"><span class="visually-hidden">Search pull requests</span><input type="search" data-rail-search placeholder="Search: repo, title, ticket" value="${esc(rail.q)}" autocomplete="off"></label>
-      <div class="rail-list"></div>
-    </aside>
-    <div class="pr-main"></div></div>`;
-  return el.querySelector(".pr-main");
-}
-async function openByKey(key) {
-  let pr = findPr(key);
-  if (!pr) {
-    const [repo, id] = key.split("#");
-    try { pr = (await api(`pr?repo=${encodeURIComponent(repo)}&id=${Number(id)}`)).pr; } catch (err) { toast(`Could not open ${key}.`, err.message, true); return; }
-  }
-  openPr(pr);
+/* A pull request opens inside the queue panel, beside its section list: the list hides and
+   the pull request takes its place until you go back. Copies of the queue only list. */
+function prHost() {
+  const q = Layout.body("queue");
+  return q ? q.querySelector(":scope > .queue-split > .queue-pr") : null;
 }
 
 function renderPr() {
-  const host = Layout.body("pr");
+  const host = prHost();
   if (!host) return;
-  const el = prShell(host);
-  paintPrRail();
-  if (!state.pr) {
-    el.innerHTML = `<div class="pr-empty">${Sprites.svg("bot", { scale: 3 })}<p class="pr-empty-title">Pick a pull request</p><p>From the list on the left, or from the queue. Press <kbd>?</kbd> for every key.</p></div>`;
-    Layout.setBadge("pr", "");
-    return;
-  }
+  Layout.body("queue").classList.toggle("has-pr", !!state.pr);
+  host.hidden = !state.pr;
+  if (!state.pr) { headObserver?.disconnect(); host.replaceChildren(); return; }
+  let el = host.querySelector(":scope > .pr-main");
+  if (!el) { host.innerHTML = `<div class="pr-main"></div>`; el = host.firstElementChild; }
   const { pr, detail, extra, diff, tab } = state.pr;
   const full = detail?.pr || pr;
   const threads = detail?.threads || [];
@@ -1334,9 +1331,10 @@ function renderPr() {
       <header class="pr-head"${state.prFolded ? " inert" : ""}>
         <div class="pr-top"><span class="id">${esc(full.repo)} #${full.id}</span>${stateChip(full)}<span>${esc(full.author.name)}</span><time class="when">${esc(ago(full.updated_on))}</time>
           <span class="spacer"></span><button class="link" type="button" data-external="${esc(full.url)}">Bitbucket</button><button class="link copy-link" type="button" data-copy-link="${esc(full.url)}" title="Copy the link to this pull request">Copy link</button>${ticket}
-          <button class="link" type="button" data-action="reload-pr">Reload</button><button class="btn btn--quiet" type="button" data-action="close-pr">Close</button></div>
+          <button class="link" type="button" data-action="reload-pr">Reload</button><button class="btn btn--quiet" type="button" data-action="close-pr" data-tip="Back to the list">Back to the queue</button></div>
         <h2>${esc(full.title)}</h2>
         <div class="branch">${esc(full.source)} into ${esc(full.dest)}</div>
+        <div class="pr-checks" id="pr-checks" role="status">${prChecks(full)}</div>
         ${prLaunches(full)}
       </header>
       <div class="pr-stage">
@@ -1354,7 +1352,6 @@ function renderPr() {
     </div>`;
   measureHead(el);
   if (tab === "files" && diff) hydrateFiles($("#pr-body"));
-  Layout.setBadge("pr", `#${full.id}`);
 }
 
 // The header folds away under the tab row so the diff gets the height. The flag lives in
@@ -1380,7 +1377,7 @@ function applyFold(folded) {
   if (folded === state.prFolded && $(".pr-view")?.classList.contains("is-folded") === folded) return;
   state.prFolded = folded;
   try { localStorage.setItem(FOLD_KEY, folded ? "1" : "0"); } catch { /* private window */ }
-  const view = Layout.body("pr")?.querySelector(".pr-view");
+  const view = prHost()?.querySelector(".pr-view");
   if (!view) return;
   view.classList.toggle("is-folded", folded);
   view.querySelector(".pr-head").toggleAttribute("inert", folded);
@@ -1405,10 +1402,9 @@ async function openPr(pr, { force = false, tab } = {}) {
   state.pr = same && !force ? state.pr : { pr, detail: null, extra: null, diff: null, tab: tab || state.pr?.tab || "overview" };
   if (tab) state.pr.tab = tab;
   markSeen(pr);
-  rememberPr(pr);
   for (const row of $$("tr[data-pr]")) row.classList.toggle("is-open", row.dataset.pr === prKey(pr));
   if (state.route.pr !== prKey(pr)) { state.route.pr = prKey(pr); history.replaceState(null, "", hashFor(state.route)); }
-  Layout.activate("pr");
+  Layout.activate("queue");
   renderPr();
   if (same && !force && state.pr.detail) return;
   const key = prKey(pr);
@@ -1431,15 +1427,45 @@ function loadSync(pr) {
 }
 function syncBar() {
   const s = state.pr?.sync;
-  if (!s?.available || !s.behind) return "";
+  const done = state.pr && justSynced.get(prKey(state.pr.pr));
+  if (s?.behind && done) justSynced.delete(prKey(state.pr.pr));  // behind again since
+  // Right after a sync from here the bar stays, green, so you see it landed.
+  if (!s?.behind && done) {
+    return `<div class="sync-bar is-ok" role="status">${svg("check", "2.6")}
+      <span>Up to date with <code>${esc(s?.dest || state.pr.pr.dest)}</code>: ${done.pulled ? `${plural(done.pulled, "commit")} merged in and pushed` : "nothing to bring in"} at ${esc(clock(done.at))}.</span></div>`;
+  }
+  if (!s?.available) return "";
+  if (!s.behind) return "";
   const n = `${s.behind} ${s.behind === 1 ? "commit" : "commits"}`;
   return `<div class="sync-bar" role="status">${Sprites.svg("sync", { scale: 2 })}
     <span>This branch is <b>${n}</b> behind <code>${esc(s.dest)}</code>.</span>
     <button class="btn sync-now" type="button" data-sync>Sync now</button></div>`;
 }
+// The bar, the line under the title and the merge button all follow the branch: a sync, or the
+// clone's answer arriving, repaints the three without redrawing the diff being read.
 function paintSync() {
   const slot = $("#sync-slot");
   if (slot) slot.innerHTML = syncBar();
+  const pr = state.pr?.detail?.pr || state.pr?.pr;
+  if (!pr) return;
+  const checks = $("#pr-checks");
+  if (checks) checks.innerHTML = prChecks(pr);
+  const merge = $(".pr-tools [data-merge]");
+  if (merge && !merge.classList.contains("is-busy") && !merge.classList.contains("btn--armed")) merge.outerHTML = mergeButton(pr);
+}
+// A sync done from here clears "behind" everywhere at once, not at the next look.
+function markSynced(repo, id, pulled) {
+  const key = `${repo}#${id}`;
+  for (const person of Object.values(state.people || {})) {
+    for (const pr of person?.open || []) if (prKey(pr) === key) pr.behind = { behind: 0, more: false };
+  }
+  justSynced.set(key, { at: Date.now() / 1000, pulled: pulled || 0 });
+  if (state.pr && prKey(state.pr.pr) === key) {
+    state.pr.pr.behind = { behind: 0, more: false };
+    if (state.pr.sync) state.pr.sync = { ...state.pr.sync, behind: 0 };
+  }
+  renderAll();
+  paintSync();
 }
 const NEEDS_RESTART = "Restart PixelDeck once: close the window, run run.sh --stop in a terminal, then click the dock icon.";
 async function syncPr(button) {
@@ -1448,10 +1474,10 @@ async function syncPr(button) {
   if (!pr || !s || !armed(button, `Confirm: merge ${s.dest} into this branch and push`)) return;
   try {
     const res = await busy(button, () => api("sync", { method: "POST", body: { repo: pr.repo, id: pr.id } }));
-    state.pr.sync = { ...s, behind: 0 };
-    paintSync();
+    markSynced(pr.repo, pr.id, res.state === "synced" ? res.merged : 0);
     toast(res.state === "synced" ? `Synced: ${res.merged} ${res.merged === 1 ? "commit" : "commits"} from ${s.dest} merged into ${s.source}.` : "Already up to date.",
       res.state === "synced" ? "Pushed to Bitbucket. You can merge now." : "");
+    reloadMine().catch(() => {});
     openPr(pr, { force: true });
   } catch (err) {
     if (err.status === 409) {
@@ -1769,7 +1795,14 @@ async function mergeGo(button) {
   const body = { repo: m.pr.repo, id: m.pr.id, strategy, message: $("#merge-message").value, close_source_branch: $("#merge-close").checked };
   const err = $("#merge-error");
   err.hidden = true;
+  // While Bitbucket merges, the choices are locked and the popup says what it waits for.
+  const dialogBody = $("#pr-dialog-body");
+  const locked = [...dialogBody.querySelectorAll(".strategies, .pr-fields, #merge-ticket-slot, [data-action='close-preview']")];
+  for (const el of locked) el.inert = true;
+  dialogBody.classList.add("is-merging");
   const merged = await doMerge(m.pr, body, button, (message) => { err.textContent = message; err.hidden = false; });
+  for (const el of locked) el.inert = false;
+  dialogBody.classList.remove("is-merging");
   if (!merged) return;
   $("#pr-dialog").close();
   mergeBox = null;
@@ -1794,7 +1827,12 @@ async function mergePr(button) {
   if (!armed(button, `Confirm: merge #${pr.id} into ${pr.dest}`)) return;
   await doMerge(pr, { repo: pr.repo, id: pr.id }, button);
 }
+// Pull requests being merged from here. A refresh that lands while Bitbucket merges sees the
+// pull request merged before the merge call answers; it must not play the merge moment too.
+const merging = new Set();
 async function doMerge(pr, body, button, inline = null) {
+  const key = prKey(pr);
+  merging.add(key);
   try {
     const res = await busy(button, () => api("merge", { method: "POST", body }));
     const how = res.strategy ? `Strategy: ${res.strategy.replace(/_/g, " ")}.` : "";
@@ -1804,12 +1842,18 @@ async function doMerge(pr, body, button, inline = null) {
       Sprites.celebrate(pr);
       toast(`Merged #${pr.id} into ${pr.dest}.`, how);
     } else {
+      // Bitbucket finishes it on its own: the refresh that finds it merged plays the moment.
+      merging.delete(key);
       toast(`Merging #${pr.id}: Bitbucket is finishing it.`, `${how} It moves to Merged on the next refresh.`);
     }
-    await reloadMine();
-    if (state.pr && prKey(state.pr.pr) === prKey(pr)) openPr(findPr(prKey(pr)) || state.pr.pr, { force: true });
+    // The popup closes now; the lists catch up behind it.
+    reloadMine().catch(() => {}).finally(() => {
+      if (res.state === "MERGED") { forgetOpen(pr); merging.delete(key); }
+      if (state.pr && prKey(state.pr.pr) === key) openPr(findPr(key) || state.pr.pr, { force: true });
+    });
     return res.state || "PENDING";
   } catch (err) {
+    merging.delete(key);
     const behind = state.pr?.sync?.behind;
     let message = `Could not merge: ${err.message}`;
     if (/no route/.test(err.message)) message = "Merge needs the newer PixelDeck server.";
@@ -1912,7 +1956,6 @@ function renderAll() {
   renderBar();
   renderQueue();
   renderInsights();
-  paintPrRail();
   if (state.pr) {
     const fresh = findPr(prKey(state.pr.pr));
     if (fresh && fresh.updated_on !== state.pr.pr.updated_on) openPr(fresh, { force: true });
@@ -2074,7 +2117,7 @@ function watchMerges(data) {
   let before = null;
   try { before = JSON.parse(localStorage.getItem(MINE_OPEN_KEY)); } catch { /* none yet */ }
   if (Array.isArray(before)) {
-    const merged = (data.merged || []).filter((pr) => before.includes(prKey(pr)));
+    const merged = (data.merged || []).filter((pr) => before.includes(prKey(pr)) && !merging.has(prKey(pr)));
     merged.slice(0, 3).forEach((pr, i) => setTimeout(() => {
       Sprites.celebrate(pr);
       toast(`Merged: #${pr.id} on ${pr.repo}.`, pr.title);
@@ -2125,6 +2168,7 @@ async function syncFromEvent(ev, button) {
   if (!armed(button, "Sure?")) return;
   try {
     const res = await busy(button, () => api("sync", { method: "POST", body: { repo: ev.repo, id: Number(ev.pr_id) } }));
+    markSynced(ev.repo, Number(ev.pr_id), res.state === "synced" ? res.merged : 0);
     toast(res.state === "synced" ? `Synced #${ev.pr_id}: ${plural(res.merged, "commit")} from ${ev.dest || "the target"} merged in and pushed.` : `#${ev.pr_id} is already up to date.`,
       res.state === "synced" ? "Its pull request can merge now." : "");
     reloadMine();
@@ -2268,7 +2312,6 @@ function onKey(e) {
   else if (k === "t") { Layout.activate("terminal"); setTimeout(() => Term.fit(), 50); }
   else if (k === "q") Layout.activate("queue");
   else if (k === "i") Layout.activate("insights");
-  else if (k === "p" && state.pr) Layout.activate("pr");
   else if (state.pr && "12345".includes(k)) setPrTab(["overview", "files", "threads", "commits", "tasks"][Number(k) - 1]);
   else if (state.pr && k === "f") applyFold(!state.prFolded);
   else if (state.pr?.tab === "files" && state.pr.diff && (k === "n" || k === "b")) { const i = currentFileIndex(); gotoFile(Math.max(0, Math.min(state.pr.diff.files.length - 1, i + (k === "n" ? 1 : -1)))); }
@@ -2305,15 +2348,6 @@ function bind() {
     if (refuse) return decideProposal(refuse, refuse.dataset.proposalDecline, "decline", !!refuse.closest("#pr-dialog"));
     const review = t.closest("[data-proposal-review]");
     if (review) { const p = review.closest(".proposal-banner")?._proposal; if (p) openPreview(p.repo, p.branch, p); return; }
-    const railOpen = t.closest("[data-rail-open]");
-    if (railOpen) return openByKey(railOpen.dataset.railOpen);
-    const railTab = t.closest("[data-rail-tab]");
-    if (railTab) { rail.tab = railTab.dataset.railTab; saveRail(); return paintPrRail(); }
-    if (t.closest("[data-rail-fold]")) {
-      rail.collapsed = !railFolded(); saveRail();
-      Layout.body("pr")?.querySelector(".pr-shell")?.classList.toggle("is-collapsed", rail.collapsed);
-      return;
-    }
     const linkBtn = t.closest("[data-copy-link]");
     if (linkBtn) return copyLink(linkBtn);
     const copyBtn = t.closest("[data-copy-threads]");
@@ -2342,7 +2376,7 @@ function bind() {
       return;
     }
     const chip = t.closest(".sec-chip");
-    if (chip) { e.preventDefault(); const r = parseHashFrom(chip.getAttribute("href")); go({ ...state.route, section: r.section }); return; }
+    if (chip) { e.preventDefault(); if (state.pr) closePr(); const r = parseHashFrom(chip.getAttribute("href")); go({ ...state.route, section: r.section }); return; }
     const tab = t.closest(".pr-view [data-tab]");
     if (tab && state.pr) { setPrTab(tab.dataset.tab); return; }
     const goto = t.closest("[data-goto]");
@@ -2406,7 +2440,6 @@ function bind() {
   });
   $("#team-save").addEventListener("click", saveTeam);
   $("#filter").addEventListener("input", (e) => { state.filter = e.target.value; renderQueue(); });
-  document.addEventListener("input", (e) => { if (e.target.matches("[data-rail-search]")) { rail.q = e.target.value; paintPrRail(); } });
   document.addEventListener("keydown", onKey);
 
   // A small target (an icon, a chip) gets its tip beside it, above or else below, so the tip
@@ -2460,18 +2493,31 @@ function offerRestore() {
   const rows = r.terminals.map((t, i) => `<label class="restore-row" style="--k:${Math.min(i, 10)}"><input type="checkbox" data-restore-id="${esc(t.id)}" checked>
       <span class="restore-box" aria-hidden="true"></span>
       <span class="restore-what"><b>${esc(names[t.id] || titles[t.id] || t.title || "Shell")}</b><small>${esc(shortPath(t.cwd || ""))}</small></span>
-      <span class="restore-kind is-${t.kind === "claude" ? "claude" : "shell"}">${t.kind === "claude" ? (t.resumes ? "Claude Code: resumes its session" : "Claude Code: newest session there") : "Shell: old screen kept"}</span></label>`).join("");
+      <span class="restore-kind is-${t.kind === "claude" ? "claude" : "shell"}">${t.kind === "claude" ? `${t.resumes ? "Claude Code: resumes its session" : "Claude Code: newest session there"}${t.skips ? ", skipped permissions" : ""}` : "Shell: old screen kept"}</span></label>`).join("");
+  // How Claude Code comes back: as it ran (a terminal started with --dangerously-skip-permissions
+  // ticks this), or as you chose last time. A session brought back without the flag lost it,
+  // so the box is the way to put it back.
+  const claudes = r.terminals.filter((t) => t.kind === "claude");
+  const RESTORE_KEY = "prdesk.restore.v1";
+  let last = null;
+  try { last = JSON.parse(localStorage.getItem(RESTORE_KEY))?.skip; } catch { /* none yet */ }
+  const skipOn = claudes.some((t) => t.skips) || last === true;
+  const skipBox = claudes.length ? `<label class="restore-skip"><input type="checkbox" data-restore-skip${skipOn ? " checked" : ""}>
+      <span class="restore-box" aria-hidden="true"></span>
+      <span class="restore-what"><b>Resume Claude Code with <code>--dangerously-skip-permissions</code></b>
+      <small>Every tool runs without asking, as when you start it that way. Untick and it asks.</small></span></label>` : "";
   let d = $("#restore-dialog");
   if (!d) { d = document.createElement("dialog"); d.id = "restore-dialog"; d.className = "restore-dialog"; d.setAttribute("aria-labelledby", "restore-title"); document.body.append(d); }
   d.innerHTML = `<header class="restore-head"><span class="restore-mascots" aria-hidden="true">${Sprites.svg("buddy", { scale: 3 })}${Sprites.svg("bot", { scale: 3 })}</span>
       <div><h2 id="restore-title">Pick up where you left off?</h2>
       <p>${esc(`PixelDeck stopped${when ? ` on ${when}` : ""} with ${plural(r.terminals.length, "terminal")} open. Your layout and settings are already back.`)}</p></div></header>
-    <div class="restore-list">${rows}</div>
+    <div class="restore-list">${rows}</div>${skipBox}
     <footer class="restore-foot"><button class="btn btn--quiet" type="button" data-restore="skip">Start fresh</button>
       <button class="btn btn--primary" type="button" data-restore="go">Bring them back</button></footer>`;
   const count = () => { const n = $$("[data-restore-id]:checked", d).length; d.querySelector('[data-restore="go"]').textContent = n ? `Bring ${n === r.terminals.length ? "them" : plural(n, "terminal")} back` : "Bring them back"; d.querySelector('[data-restore="go"]').disabled = !n; };
-  d.addEventListener("change", count);
-  d.addEventListener("click", async (e) => {
+  // Handlers set, not added: the dialog is reused, and a second offer must not restore twice.
+  d.onchange = count;
+  d.onclick = async (e) => {
     const b = e.target.closest("[data-restore]");
     if (!b) return;
     if (b.dataset.restore === "skip") {
@@ -2481,8 +2527,14 @@ function offerRestore() {
       return;
     }
     const ids = $$("[data-restore-id]:checked", d).map((x) => x.dataset.restoreId);
+    const skipEl = d.querySelector("[data-restore-skip]");
+    const body = { ids };
+    if (skipEl) {
+      body.skip_permissions = skipEl.checked;
+      try { localStorage.setItem(RESTORE_KEY, JSON.stringify({ skip: skipEl.checked })); } catch { /* storage blocked */ }
+    }
     try {
-      const res = await busy(b, () => api("term-restore", { method: "POST", body: { ids } }));
+      const res = await busy(b, () => api("term-restore", { method: "POST", body }));
       Keep.carryTerminals(res.moved);
       Term.reload();
       setTimeout(() => Term.reload(), 1500);  // a terminal the stream brings in late
@@ -2492,8 +2544,8 @@ function offerRestore() {
       const failed = res.moved.filter((m) => !m.new);
       toast(`${plural(res.moved.length - failed.length, "terminal")} back where you left them.`, failed.length ? `${plural(failed.length, "terminal")} could not start: ${failed[0].error}` : "", !!failed.length);
     } catch (err) { toast("Could not bring the terminals back.", err.message, true); }
-  });
-  d.addEventListener("cancel", () => { state.restore = null; });
+  };
+  d.oncancel = () => { state.restore = null; };
   d.showModal();
   count();
   return true;
@@ -2568,11 +2620,11 @@ const BootScreen = (() => {
 async function boot() {
   Layout.init({
     panels: [
-      { id: "queue", title: "Queue", copyable: true }, { id: "pr", title: "Pull request" },
+      { id: "queue", title: "Pull Requests", copyable: true },
       { id: "insights", title: "Insights", copyable: true }, { id: "terminal", title: "Terminal" },
       { id: "repos", title: "Repos", place: "left" }, { id: "music", title: "Music", place: "hidden" },
     ],
-    onChange: () => { for (const b of $$(".chart-box")) b.dataset.drawn = ""; paintCharts(); Term.fit(); paintPrRail(); },
+    onChange: () => { for (const b of $$(".chart-box")) b.dataset.drawn = ""; paintCharts(); Term.fit(); },
     paramsFor: (id) => { const v = viewOf(id); return { who: v.who, section: v.section, range: v.range }; },
     onCreate: (id) => { state.animate[id] = true; renderPanel(id); renderBar(); loadView({ silent: true }); },
     onRemove: (id) => { delete state.animate[id]; renderBar(); },

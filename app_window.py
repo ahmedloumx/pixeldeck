@@ -54,6 +54,23 @@ return JSON.stringify({
 });
 """
 
+# Swapping one panel for another (Music for Terminal) has left the old panel's pixels on
+# screen, flickering against the new ones. The suspected cause is WebKitGTK composing only
+# the parts of a frame it believes changed; with this off it composes every frame whole.
+# Not reproduced off the real display, so the cause is unconfirmed and the cost unmeasured.
+DAMAGE_FEATURES = ("UseDamagingInformationForCompositing",)
+
+
+def _full_frames(settings):
+    try:
+        features = WebKit.Settings.get_all_features()
+    except AttributeError:  # WebKitGTK older than 2.42: no feature list, nothing to turn off
+        return
+    for i in range(features.get_length()):
+        feature = features.get(i)
+        if feature.get_identifier() in DAMAGE_FEATURES:
+            settings.set_feature_enabled(feature, False)
+
 
 class DeskApp(Gtk.Application):
     def __init__(self, url, selftest=None):
@@ -91,7 +108,8 @@ class DeskApp(Gtk.Application):
         settings.set_enable_developer_extras(True)
         settings.set_javascript_can_open_windows_automatically(True)
         settings.set_enable_back_forward_navigation_gestures(False)
-        self.main = self._window(view, *self._geometry())
+        _full_frames(settings)
+        self.main =self._window(view, *self._geometry())
         self.main.connect("close-request", self._save_geometry)
         if self.selftest:
             view.connect("load-changed", self._selftest_loaded)

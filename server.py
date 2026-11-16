@@ -263,7 +263,11 @@ class Desk(BaseHTTPRequestHandler):
                 session = TERMS.spawn("Shell", shell_argv(), WORKSPACE_ROOT)
                 return self._send(200, session.info())
             if method == "POST" and route == "term-restore":
-                return self._send(200, {"moved": self.keeper.take(body.get("ids"), self._restore_one), "terms": TERMS.list()})
+                skip = body.get("skip_permissions")
+                if skip is not None and not isinstance(skip, bool):
+                    raise ValueError("skip_permissions must be true or false")
+                spawn = lambda entry: self._restore_one(entry, skip)  # noqa: E731
+                return self._send(200, {"moved": self.keeper.take(body.get("ids"), spawn), "terms": TERMS.list()})
             if method == "POST" and route == "term-restore-skip":
                 self.keeper.decline()
                 return self._send(200, {"ok": True})
@@ -429,11 +433,11 @@ class Desk(BaseHTTPRequestHandler):
             "events_last": engine.events.last(), "now": time.time(),
         }
 
-    def _restore_one(self, entry):
+    def _restore_one(self, entry, skip_permissions=None):
         """One terminal back: a shell in its folder with its last screen above the new prompt,
         or Claude Code resumed (it shows its own history, so no old screen there)."""
         cwd = entry.get("cwd") if isinstance(entry.get("cwd"), str) and os.path.isdir(entry.get("cwd")) else str(WORKSPACE_ROOT)
-        argv = sessions.restore_argv(entry, shell_argv, launcher.claude_binary)
+        argv = sessions.restore_argv(entry, shell_argv, launcher.claude_binary, skip_permissions)
         title = entry.get("title") if isinstance(entry.get("title"), str) and entry.get("title") else "Shell"
         session = TERMS.spawn(title[:80], argv, cwd)
         screen = entry.get("screen") if entry.get("kind") != "claude" else ""
