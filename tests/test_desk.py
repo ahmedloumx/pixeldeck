@@ -383,17 +383,30 @@ class ServerErrorTest(unittest.TestCase):
 class _FakeClient:
     workspace = "acme"
 
-    def __init__(self, live_state="OPEN", strategy="squash", open_lists=()):
+    def __init__(self, live_state="OPEN", strategy="squash", open_lists=(), merge_answer=None, task_answers=()):
         self.calls, self.live_state, self.strategy = [], live_state, strategy
         self.open_lists = list(open_lists)
+        # what the merge answers (body, headers) and, in turn, each look at its merge task
+        self.merge_answer = merge_answer or ({"state": "MERGED"}, {})
+        self.params = []
+        self.task_answers = list(task_answers)
 
     def get(self, path, params=None):
         self.calls.append(("GET", path, None))
+        if "/merge/task-status/" in path:
+            answer = self.task_answers.pop(0)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
         return {"state": self.live_state, "destination": {"branch": {"name": "develop", "default_merge_strategy": self.strategy}}}
 
-    def send(self, method, path, body=None, params=None):
+    def send(self, method, path, body=None, params=None, headers_out=None):
         self.calls.append((method, path, body))
-        return {"state": "MERGED"}
+        self.params.append(params)
+        answer, headers = self.merge_answer
+        if headers_out is not None:
+            headers_out.update(headers)
+        return answer
 
     def user_prs(self, uuid, state, **kw):
         return self.open_lists.pop(0)
@@ -436,6 +449,77 @@ class MergeTest(unittest.TestCase):
         self.assertFalse(refreshed.is_set(), "the merge answered while the refresh still ran")
         release.set()
         self.assertTrue(refreshed.wait(5), "the refresh still happens, after the answer")
+
+    TASK = "https://api.bitbucket.org/2.0/repositories/acme/shop-api/pullrequests/42/merge/task-status/%7Babc-123%7D"
+
+    def _follow(self, **client):
+        import actions
+        actions_mod, engine, pr = self._engine(**client)
+        self.addCleanup(setattr, actions, "MERGE_POLL", actions.MERGE_POLL)
+        actions.MERGE_POLL = 0
+        return actions_mod, engine, pr
+
+    def test_a_merge_bitbucket_finishes_on_its_own_is_followed_to_the_end(self):
+        # Bitbucket answers a merge it runs in the background with a link to its task, as a
+        # JSON string; that answer used to crash the merge with a 500.
+        merged = {"state": "MERGED", "id": 42}
+        for answer, headers in ((self.TASK, {}), ("", {"location": self.TASK})):
+            actions, engine, pr = self._follow(merge_answer=(answer, headers), task_answers=[
+                {"task_status": "PENDING"}, {"task_status": "SUCCESS", "merge_result": merged}])
+            out = actions.merge(engine, {"repo": pr["repo"], "id": pr["id"]})
+            self.assertEqual(out["state"], "MERGED")
+            self.assertEqual(engine.filed[0][1], merged)
+            looks = [c[1] for c in engine.client.calls if "task-status" in c[1]]
+            self.assertEqual(looks, ["/repositories/acme/shop-api/pullrequests/42/merge/task-status/%7Babc-123%7D"] * 2)
+
+    def test_a_failed_merge_task_answers_with_bitbucket_reason(self):
+        from bitbucket import BitbucketError
+        for failure in ({"type": "error", "error": {"message": "Merge conflict in a.py"}}, BitbucketError(400, "Merge conflict in a.py")):
+            actions, engine, pr = self._follow(merge_answer=(self.TASK, {}), task_answers=[failure])
+            with self.assertRaises(BitbucketError) as caught:
+                actions.merge(engine, {"repo": pr["repo"], "id": pr["id"]})
+            self.assertIn("Merge conflict", caught.exception.message)
+            self.assertEqual(engine.filed, [])
+
+    def test_a_task_link_anywhere_else_is_never_followed(self):
+        from bitbucket import BitbucketError
+        for link in ("https://evil.example/2.0/repositories/acme/shop-api/pullrequests/42/merge/task-status/1",
+                     "http://api.bitbucket.org/2.0/repositories/acme/shop-api/pullrequests/42/merge/task-status/1",
+                     "https://api.bitbucket.org/2.0/repositories/acme/other/pullrequests/42/merge/task-status/1",
+                     "https://api.bitbucket.org/2.0/repositories/acme/shop-api/pullrequests/42/merge/task-status/1/../../x"):
+            actions, engine, pr = self._follow(merge_answer=(link, {}))
+            with self.assertRaises(BitbucketError, msg=link):
+                actions.merge(engine, {"repo": pr["repo"], "id": pr["id"]})
+            self.assertEqual([c for c in engine.client.calls if "task-status" in c[1]], [], link)
+
+    def test_an_answer_without_a_result_or_a_task_is_an_error_not_a_quiet_wait(self):
+        from bitbucket import BitbucketError
+        for answer in ("", "Merge started", {}):
+            actions, engine, pr = self._follow(merge_answer=(answer, {}))
+            with self.assertRaises(BitbucketError):
+                actions.merge(engine, {"repo": pr["repo"], "id": pr["id"]})
+            self.assertEqual(engine.filed, [])
+
+    def test_a_relative_or_differently_cased_task_link_is_followed(self):
+        merged = {"state": "MERGED", "id": 42}
+        for location in ("/2.0/repositories/acme/shop-api/pullrequests/42/merge/task-status/7",
+                         "/repositories/ACME/Shop-API/pullrequests/42/merge/task-status/7"):
+            actions, engine, pr = self._follow(merge_answer=("", {"location": location}), task_answers=[{"task_status": "SUCCESS", "merge_result": merged}])
+            self.assertEqual(actions.merge(engine, {"repo": pr["repo"], "id": pr["id"]})["state"], "MERGED", location)
+            self.assertEqual([c[1] for c in engine.client.calls if "task-status" in c[1]], ["/repositories/acme/shop-api/pullrequests/42/merge/task-status/7"])
+
+    def test_the_merge_asks_bitbucket_to_run_in_the_background(self):
+        actions, engine, pr = self._engine()
+        actions.merge(engine, {"repo": pr["repo"], "id": pr["id"]})
+        self.assertEqual(engine.client.params[-1], {"async": "true"})
+
+    def test_still_going_after_the_wait_answers_pending(self):
+        import actions as actions_mod
+        actions, engine, pr = self._follow(merge_answer=(self.TASK, {}), task_answers=[{"task_status": "PENDING"}] * 3)
+        self.addCleanup(setattr, actions_mod, "MERGE_WAIT", actions_mod.MERGE_WAIT)
+        actions_mod.MERGE_WAIT = 0
+        out = actions.merge(engine, {"repo": pr["repo"], "id": pr["id"]})
+        self.assertEqual((out["state"], engine.filed), ("PENDING", []))
 
     def test_refuses_someone_elses_pull_request(self):
         actions, engine, pr = self._engine(author="{other}")

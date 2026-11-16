@@ -1770,8 +1770,7 @@ function paintMerge() {
       <label class="field-block field-wide"><span>Commit message</span><textarea id="merge-message" rows="5">${esc(o.message)}</textarea></label>
       <label class="check"><input id="merge-close" type="checkbox"${o.close_source_branch ? " checked" : ""}> Close ${esc(o.source)} after the merge</label></div>
     <div id="merge-ticket-slot">${mergeTicketHtml()}</div>
-    <p class="set-error" id="merge-error" hidden></p>
-    <footer class="pr-dialog-foot"><span class="spacer"></span>
+    <footer class="pr-dialog-foot"><p class="set-error merge-note" id="merge-error" role="alert" hidden></p><p class="merge-note merge-wait" id="merge-wait" aria-live="polite" hidden></p><span class="spacer"></span>
       <button class="btn btn--quiet" type="button" data-action="close-preview">Cancel</button>
       <button class="btn btn--primary" type="button" data-merge-go>${svg("merge")} Merge</button></footer>`;
 }
@@ -1800,9 +1799,25 @@ async function mergeGo(button) {
   const locked = [...dialogBody.querySelectorAll(".strategies, .pr-fields, #merge-ticket-slot, [data-action='close-preview']")];
   for (const el of locked) el.inert = true;
   dialogBody.classList.add("is-merging");
-  const merged = await doMerge(m.pr, body, button, (message) => { err.textContent = message; err.hidden = false; });
-  for (const el of locked) el.inert = false;
-  dialogBody.classList.remove("is-merging");
+  // A long merge runs on Bitbucket's side; the footer counts it, so a wait never reads as stuck.
+  const wait = $("#merge-wait");
+  const started = Date.now();
+  const tick = () => {
+    const s = Math.round((Date.now() - started) / 1000);
+    wait.textContent = s < 3 ? "Merging on Bitbucket." : s < 20 ? `Merging on Bitbucket: ${s} s.` : `Bitbucket is still merging: ${s} s. PixelDeck follows it to the end.`;
+  };
+  tick();
+  wait.hidden = false;
+  const timer = setInterval(tick, 1000);
+  let merged;
+  try {
+    merged = await doMerge(m.pr, body, button, (message) => { err.textContent = message; err.hidden = false; });
+  } finally {
+    clearInterval(timer);
+    wait.hidden = true;
+    for (const el of locked) el.inert = false;
+    dialogBody.classList.remove("is-merging");
+  }
   if (!merged) return;
   $("#pr-dialog").close();
   mergeBox = null;

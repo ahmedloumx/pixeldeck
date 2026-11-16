@@ -84,7 +84,8 @@ class Client:
     def get(self, path, params=None):
         return self.send("GET", path, params=params)
 
-    def send(self, method, path, body=None, params=None):
+    def send(self, method, path, body=None, params=None, headers_out=None):
+        """headers_out, a dict when given, receives the answer's headers (lower-case names)."""
         url = path if path.startswith("http") else API + path
         if params:
             url += ("&" if "?" in url else "?") + urllib.parse.urlencode(params, doseq=True)
@@ -103,6 +104,8 @@ class Client:
         try:
             with urllib.request.urlopen(request, timeout=30) as response:
                 raw = response.read()
+                if headers_out is not None:
+                    headers_out.update({k.lower(): v for k, v in response.headers.items()})
                 body = json.loads(raw) if raw.strip() else {}
         except urllib.error.HTTPError as exc:
             raw = exc.read().decode("utf-8", "replace")
