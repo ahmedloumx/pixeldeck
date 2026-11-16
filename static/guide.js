@@ -7,16 +7,17 @@
 const Guide = (() => {
   const KEY = "prdesk.guide.v1";
   const STOPS = [
-    { title: "Welcome to PixelDeck", who: "both", text: "Your pull requests, your team's, and the terminals and agents that work on them, in one window. A quick tour: nine stops, about a minute." },
-    { target: ".bar .field:has(#person)", who: "bot", title: "Whose pull requests", text: "Pick yourself, a teammate or the whole team. The picker on its left keeps one Bitbucket project, or all of them." },
+    { title: "Welcome to PixelDeck", who: "both", text: "Your pull requests, your team's, and the terminals and agents that work on them, in one window. A quick tour: ten stops, about a minute." },
+    { target: "#menubar", who: "buddy", title: "The menus", text: "Everything PixelDeck does, in one place: panels and look under View, the queue under Go, merge and the Claude actions under Pull request. Alt and the underlined letter opens one." },
+    { target: "#scope", who: "bot", title: "Whose pull requests", text: "One chip for the project and the person: yourself, a teammate or the whole team, in one Bitbucket project or all of them." },
+    { target: "#jump-btn", who: "bot", title: "Jump", text: "Ctrl K: type a pull request number, a title, a ticket or a branch, a teammate, or any menu command." },
     { target: '[data-panel="queue"] .sec-chips', panel: "queue", who: "bot", title: "The queue", text: "Sorted by what needs you: changes asked, threads to answer, tasks. Then what waits on reviewers, what is approved, what merged. j and k move, Enter opens." },
     { target: '.slot-tab[data-tab="insights"]', panel: "insights", who: "buddy", title: "Your numbers", text: "Merges per week, time to merge, who reviews you, when merges land. Pick a range from 7 days to 120 at the top of the panel." },
     { target: '.slot-tool[data-act="duplicate"]', who: "buddy", title: "Copies", text: "Copy the Queue or Insights to put two people, or two ranges, side by side. Each copy keeps its own view." },
     { target: ".term-bar", panel: "terminal", who: "buddy", title: "Terminals and Claude", text: "The Claude buttons on a pull request start Claude Code here with a brief, and I come along. Drop files on a terminal to paste their paths." },
     { target: "#status .st-api", who: "bot", title: "The status bar", text: "API calls used this hour, when your pull requests were read and the next read, and whether Bitbucket answers." },
     { target: "#bell", who: "bot", title: "Notifications", text: "Approvals, changes asked, new pull requests: they spin in like a slot machine and land behind the bell. Silence them any time." },
-    { target: "#layout-menu", who: "buddy", title: "Layout and arcade", text: "Arrange the panels, copy them, and switch on the games beside the terminal. Waiting on a merge is more fun with Tetris." },
-    { target: "#settings-btn", who: "bot", title: "Settings", text: "What PixelDeck is connected to, what notifies you, and your look. The ? next to it brings this tour back." },
+    { target: '.mb-title[data-menu="desk"]', who: "bot", title: "Settings", text: "Under Desk: what PixelDeck is connected to, what notifies you, and your look. Help brings this tour back." },
   ];
   let el = null, i = 0, stops = [];
   const visible = (sel) => { const t = sel && document.querySelector(sel); if (!t) return null; const r = t.getBoundingClientRect(); return r.width && r.height && !t.closest("[hidden]") ? t : null; };

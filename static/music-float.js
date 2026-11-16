@@ -118,12 +118,17 @@ const MusicFloat = (() => {
       rows.innerHTML = `<li class="mc-empty">${esc(err.message)}</li>`;
     }
   }
+  // Dropped from the status bar, the list stays short: the next few songs, then a way to the rest.
+  const DROP_ROWS = 6;
   function paintList(el) {
-    const items = el._list.items || [], current = core.player?.item?.id;
+    const all = el._list.items || [], current = core.player?.item?.id;
+    const items = el === drop ? all.slice(0, DROP_ROWS) : all;
+    const more = all.length - items.length;
     el._r.rows.innerHTML = items.length ? items.map((t, i) => `<li class="mc-row${t.id && t.id === current ? " is-current" : ""}">
         <button class="mc-row-btn" type="button" data-mc="row" data-i="${i}"${el._list.kind === "queue" ? " disabled" : ""}>
           <span class="mc-n num8">${String(i + 1).padStart(2, "0")}</span><span class="mc-row-text"><b>${esc(t.name)}</b><small>${esc((t.artists || []).join(", "))}</small></span>
           <span class="mc-row-dur num8">${core.fmt(t.duration_ms)}</span></button></li>`).join("")
+      + (more > 0 ? `<li class="mc-more"><button class="mc-more-btn" type="button" data-mc="more">+${more} more, open in Music</button></li>` : "")
       : `<li class="mc-empty">${el._list.kind === "queue" ? "The queue is empty." : "Nothing here."}</li>`;
   }
   function setList(el, kind) {
@@ -270,6 +275,7 @@ const MusicFloat = (() => {
     if (what === "tab") return setList(el, t.dataset.tab);
     if (what === "close") return closeFloat();
     if (what === "dock") return dock();
+    if (what === "more") { closeDropdown(true); return Layout.activate("music"); }
     if (what === "float") {
       const r = drop.getBoundingClientRect();
       st.expanded = !drop._r.list.hidden;

@@ -37,7 +37,7 @@
 @keyframes st-blink { 50% { opacity: 0.25; } }
 .st-next { font-family: var(--font-outlier); font-size: var(--text-xs); color: var(--color-muted); font-variant-numeric: tabular-nums; min-width: 6.5ch; }
 .st-icon { position: relative; display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: var(--rule-hair) solid transparent; background: none; color: var(--color-ink-2); cursor: pointer; }
-.st-icon:hover, .st-icon[aria-expanded="true"], .menu[open] > .st-icon { color: var(--color-ink); background: var(--color-paper-2); border-color: var(--color-rule); }
+.st-icon:hover, .st-icon[aria-expanded="true"] { color: var(--color-ink); background: var(--color-paper-2); border-color: var(--color-rule); }
 .st-icon:focus-visible { outline: var(--pixel) solid var(--color-focus); outline-offset: 1px; }
 .st-icon.is-snoozed { color: var(--color-muted); }
 .st-icon.is-snoozed::after { content: "z"; position: absolute; top: 0; right: 3px; font: 400 8px var(--font-num); color: var(--color-muted); }
@@ -213,26 +213,6 @@
 @media (max-width: 1100px) { .bar .rs-button { width: 9rem; } }
 
 /* ---------------------------------------------------------------- the layout menu */
-.layout-pop { width: 20rem; }
-.layout-pop .menu-label { margin: var(--space-2xs) 0 0; font: 400 9px var(--font-num); letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-accent); }
-.preset-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-xs); }
-.preset-card { display: grid; justify-items: center; gap: var(--space-2xs); padding: var(--space-xs); border: var(--pixel) solid var(--color-rule-2); background: var(--color-paper-3); color: var(--color-ink-2); font: 500 var(--text-sm) var(--font-pixel); cursor: pointer; box-shadow: 0 3px 0 var(--color-paper-3); }
-.preset-card:hover { color: var(--color-ink); border-color: var(--color-accent); box-shadow: 0 3px 0 var(--color-accent-deep); }
-.preset-card:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--color-accent-deep); }
-.preset-pic { position: relative; width: 64px; height: 40px; border: var(--pixel) solid var(--color-muted); background: var(--color-paper); }
-.preset-pic i { position: absolute; background: var(--color-cool-soft); border: 1px solid var(--color-cool); }
-.preset-pic.is-split i:nth-child(1) { left: 2px; top: 2px; width: 18px; bottom: 14px; }
-.preset-pic.is-split i:nth-child(2) { left: 23px; top: 2px; right: 2px; bottom: 14px; }
-.preset-pic.is-split i:nth-child(3) { left: 2px; right: 2px; bottom: 2px; height: 9px; background: var(--color-accent-soft); border-color: var(--color-accent); }
-.preset-pic.is-tabs i { inset: 8px 2px 2px; }
-.preset-pic.is-tabs::before { content: ""; position: absolute; left: 2px; top: 2px; width: 18px; height: 5px; background: var(--color-cool); }
-.panel-row { display: flex; align-items: center; gap: var(--space-2xs); min-height: 28px; }
-.panel-row .switch { flex: 1; }
-.panel-row.is-copy { padding-left: 38px; font-size: var(--text-sm); color: var(--color-ink-2); }
-.panel-row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.panel-row-name::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; background: var(--color-cool); }
-.mini-btn { min-height: 22px; padding: 0 6px; border: var(--rule-hair) solid var(--color-rule-2); background: var(--color-paper-2); color: var(--color-ink-2); font: 400 var(--text-xs) var(--font-body); cursor: pointer; }
-.mini-btn:hover { color: var(--color-ink); border-color: var(--color-accent); }
 
 /* ---------------------------------------------------------------- the arcade dock */
 .term-split { display: flex; flex: 1; min-height: 0; }
@@ -307,11 +287,6 @@
 .rs-pop .rs-item { animation: px-item 160ms steps(3, end) both; animation-delay: calc(var(--k, 0) * 18ms + 60ms); }
 .bell-panel.is-opening { animation: px-unfold 220ms steps(5, end); }
 .bell-panel.is-opening .bell-list > li { animation: px-item 160ms steps(3, end) both; animation-delay: calc(var(--k, 0) * 22ms + 90ms); }
-.menu[open] > .menu-pop { animation: px-unfold 220ms steps(5, end); }
-.menu[open] > .layout-pop > * { animation: px-item 160ms steps(3, end) both; }
-.menu[open] > .layout-pop > :nth-child(2) { animation-delay: 30ms; } .menu[open] > .layout-pop > :nth-child(3) { animation-delay: 60ms; }
-.menu[open] > .layout-pop > :nth-child(4) { animation-delay: 90ms; } .menu[open] > .layout-pop > :nth-child(5) { animation-delay: 120ms; }
-.menu[open] > .layout-pop > :nth-child(6) { animation-delay: 150ms; } .menu[open] > .layout-pop > :nth-child(n+7) { animation-delay: 180ms; }
 .settings-dialog[open], .help-dialog[open], .team-dialog[open], .pr-dialog[open] { animation: px-pop 220ms steps(4, end) both; }
 .settings-dialog[open]::backdrop, .help-dialog[open]::backdrop, .team-dialog[open]::backdrop, .pr-dialog[open]::backdrop { animation: px-fade 200ms steps(3, end); }
 .team-dialog[open] .team-list .pick { animation: px-item 160ms steps(3, end) both; animation-delay: calc(var(--k, 0) * 20ms + 120ms); }
@@ -319,7 +294,7 @@
 .settings-dialog[open] .set-tab:nth-child(2) { animation-delay: 40ms; } .settings-dialog[open] .set-tab:nth-child(3) { animation-delay: 80ms; } .settings-dialog[open] .set-tab:nth-child(4) { animation-delay: 120ms; }
 .tooltip:not([hidden]) { animation: px-fade 120ms steps(2, end); }
 @media (prefers-reduced-motion: reduce) {
-  .rs-pop, .rs-pop .rs-item, .bell-panel.is-opening, .bell-panel.is-opening .bell-list > li, .menu[open] > .menu-pop, .menu[open] > .layout-pop > *,
+  .rs-pop, .rs-pop .rs-item, .bell-panel.is-opening, .bell-panel.is-opening .bell-list > li,
   .settings-dialog[open], .help-dialog[open], .team-dialog[open], .pr-dialog[open], .team-dialog[open] .team-list .pick, .settings-dialog[open] .set-tab,
   .tooltip:not([hidden]) { animation: none; }
 }
