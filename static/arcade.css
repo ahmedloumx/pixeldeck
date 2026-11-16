@@ -371,3 +371,18 @@
 
 /* While Bitbucket merges, the popup's choices wait, dimmed. */
 #pr-dialog-body.is-merging .strategies, #pr-dialog-body.is-merging .pr-fields, #pr-dialog-body.is-merging #merge-ticket-slot { opacity: 0.55; }
+
+/* The merge popup's footer carries the wait and a refusal, beside the buttons, always in view. */
+.pr-dialog-foot .merge-note { flex: 1 1 16rem; min-width: 0; margin: 0; font-size: var(--text-sm); }
+.pr-dialog-foot .merge-note[hidden] { display: none; }
+.merge-wait { color: var(--color-muted); font-variant-numeric: tabular-nums; }
+
+/* Busy: a spinner that turns on the compositor and a light sweeping under the label, both
+   smooth (not stepped), so a wait reads as work going on. */
+:where(.btn.is-busy) { position: relative; overflow: hidden; }
+.btn.is-busy .spin { will-change: transform; animation: turn 0.75s linear infinite; }
+.btn.is-busy::after {
+  content: ""; position: absolute; left: 0; bottom: 0; width: 45%; height: 2px; background: currentColor; opacity: 0.6;
+  will-change: transform; animation: busy-sweep 1.2s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+@keyframes busy-sweep { from { transform: translateX(-110%); } to { transform: translateX(240%); } }

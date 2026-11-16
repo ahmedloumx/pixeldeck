@@ -7,15 +7,18 @@ tip), so a stale page cannot delete or decline the wrong thing.
 """
 
 import json
+import re
 import secrets
 import shutil
 import subprocess
 import threading
 import time
+import urllib.parse
 
 import config
 import gitscan
 import model
+from bitbucket import BitbucketError
 
 STATE_DIR = config.folder("state")
 DELETED_LOG = STATE_DIR / "deleted-branches.jsonl"
@@ -268,15 +271,75 @@ def merge(engine, body):
             payload["message"] = message.strip()
     if "close_source_branch" in body:
         payload["close_source_branch"] = bool(body["close_source_branch"])
-    result = engine.client.send("POST", f"{base}/merge", payload)
+    # Bitbucket merges in the background and answers at once with a link to its merge task;
+    # PixelDeck follows that task, so the answer says merged, refused (and why), or still going.
+    headers = {}
+    result = engine.client.send("POST", f"{base}/merge", payload, params={"async": "true"}, headers_out=headers)
+    if not (isinstance(result, dict) and result.get("state")):
+        result = _follow_merge_task(engine, base, result, headers.get("location"))
     merged = None
     if result.get("state") == "MERGED":
         merged = engine.file_merged(me, result)
     # The merge is done and filed: answer now. Reading your pull requests again takes several
     # Bitbucket calls, and the popup used to wait for them with its button spinning.
     _after_change(engine, wait=False)
-    # A slow merge answers 202 with no body: Bitbucket finishes it, and the next refresh files it.
+    # Still going when PixelDeck stops following: Bitbucket finishes it, and a refresh files it.
     return {"repo": repo, "id": pr_id, "state": result.get("state") or "PENDING", "strategy": strategy, "pr": merged}
+
+
+MERGE_WAIT = 90   # seconds a merge from here follows Bitbucket's merge task before answering
+MERGE_POLL = 2
+TASK_ID = re.compile(r"[A-Za-z0-9._~%{}-]{1,120}")
+
+
+def _task_path(base, answer, location):
+    """The merge task to follow, from the Location header or the answer's body. Only a task of
+    this pull request's own merge on api.bitbucket.org is followed: the token goes nowhere else.
+    The path is compared without case (Bitbucket may write the slug its own way); a path
+    without a host is taken as one on api.bitbucket.org."""
+    want = f"/2.0{base}/merge/task-status/".lower()
+    links = [location]
+    if isinstance(answer, str):
+        links.append(answer)
+    elif isinstance(answer, dict):
+        links.append(((answer.get("links") or {}).get("self") or {}).get("href"))
+    for link in links:
+        if not isinstance(link, str):
+            continue
+        parts = urllib.parse.urlsplit(link.strip())
+        relative = not parts.scheme and not parts.netloc
+        if not relative and (parts.scheme != "https" or parts.netloc != "api.bitbucket.org"):
+            continue
+        path = parts.path if not relative or parts.path.startswith("/2.0/") else f"/2.0{parts.path}"
+        if parts.query or not path.lower().startswith(want):
+            continue
+        task = path[len(want):]
+        if TASK_ID.fullmatch(task):
+            return f"{base}/merge/task-status/{task}"
+    return None
+
+
+def _follow_merge_task(engine, base, answer, location, sleep=time.sleep):
+    path = _task_path(base, answer, location)
+    if not path:
+        # Not a merge, not a task of this pull request to follow: say so, never "finishing".
+        shown = answer if isinstance(answer, str) else json.dumps(answer)[:200]
+        print(f"merge: no task to follow; answer {type(answer).__name__} {str(shown)[:200]!r}, location {location!r}", flush=True)
+        raise BitbucketError(502, f"Bitbucket answered the merge without its result ({str(shown)[:120]}). "
+                                  "Check the pull request on Bitbucket before trying again.")
+    end = time.monotonic() + MERGE_WAIT
+    while True:
+        status = engine.client.get(path)
+        if not isinstance(status, dict):
+            status = {}
+        if status.get("type") == "error":
+            raise BitbucketError(409, (status.get("error") or {}).get("message") or "Bitbucket could not merge it")
+        if status.get("task_status") == "SUCCESS":
+            merged = status.get("merge_result")
+            return merged if isinstance(merged, dict) and merged.get("state") else engine.client.get(base)
+        if time.monotonic() >= end:
+            return {"state": "PENDING"}
+        sleep(MERGE_POLL)
 
 
 # Your review of someone else's pull request: the Bitbucket route and the method for each choice.
