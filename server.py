@@ -46,8 +46,10 @@ from bitbucket import BitbucketError  # noqa: E402
 from engine import Engine  # noqa: E402
 
 import config  # noqa: E402
+import version  # noqa: E402
 
 STATIC = HERE / "static"
+BUILD = version.build()  # the code this server runs; the files on disk can move on after a pull
 WORKSPACE_ROOT = config.workspace_root()
 SECRET = secrets.token_urlsafe(32)
 # A second key, for an agent proposing a pull request from a terminal: it can ask and read the
@@ -159,7 +161,8 @@ class Desk(BaseHTTPRequestHandler):
             return self._error(HTTPStatus.FORBIDDEN, "bad host")
         url = urlparse(self.path)
         if url.path == "/healthz":
-            return self._send(200, {"ok": True, "pid": os.getpid()})
+            return self._send(200, {"ok": True, "pid": os.getpid(), "version": version.VERSION, "build": BUILD,
+                                    "terminals": sum(1 for t in TERMS.list() if t["alive"])})
         if url.path == "/spotify/callback":  # the browser comes back here from Spotify; no page token
             status, page = spotify.callback(parse_qs(url.query))
             return self._send(status, page.encode("utf-8"), "text/html; charset=utf-8")
@@ -422,6 +425,8 @@ class Desk(BaseHTTPRequestHandler):
             "terminal": terminals.UNAVAILABLE or "",
             "features": FEATURES,
             "restore": self.keeper.public_offer() if self.keeper else None,
+            "version": version.VERSION,
+            "stale": code_changed(),
             "now": time.time(),
         }
 
@@ -635,6 +640,11 @@ def write_agent_key(port):
         fh.write(json.dumps({"port": port, "key": AGENT_KEY}))
     if os.name != "nt":
         os.chmod(path, 0o600)
+
+
+def code_changed():
+    """Whether the Python files on disk differ from the ones this server started with."""
+    return version.build() != BUILD
 
 
 class DeskServer(ThreadingHTTPServer):

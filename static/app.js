@@ -1982,6 +1982,10 @@ function applyBoot(b) {
   state.platform = b.platform || "";
   state.features = b.features || []; // an older server has none: the page skips what it lacks
   if (b.restore !== undefined && state.restore === undefined) state.restore = b.restore;
+  if (b.stale && !state.staleSaid) {
+    state.staleSaid = true;
+    toast("PixelDeck was updated.", "The server still runs the code from before. Start PixelDeck again to restart it; with terminals open, run pixeldeck.py --stop first.");
+  }
 }
 const signature = (d) => JSON.stringify([d.open, d.merged, d.declined, d.review_requests, d.pushed, d.synced_at, d.members, d.project]);
 async function loadPerson(uuid) {

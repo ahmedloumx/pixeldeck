@@ -30,6 +30,7 @@ import webbrowser
 from pathlib import Path
 
 import config
+import version
 
 HERE = config.APP_DIR
 WINDOWS = sys.platform == "win32"
@@ -270,8 +271,20 @@ def main():
         import server
         server.main()
         return
-    if not alive():
+    info = health(timeout=3)
+    if info is None:
         start_server()
+    elif info.get("build") != version.build():
+        # After an update the page comes from disk while the server still runs the old code,
+        # and routes the new page needs are missing. Restart, but never under open terminals:
+        # a stop ends them, and a Claude run in one would be cut off.
+        if info.get("terminals") == 0:
+            print("PixelDeck changed since its server started; restarting the server")
+            stop_server()
+            start_server()
+        else:
+            print("PixelDeck changed since its server started, and it has open terminals. "
+                  "When they are done, run  pixeldeck.py --stop  and start PixelDeck again.")
     print(f"PixelDeck on {url()} in the {open_window()}")
 
 

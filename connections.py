@@ -15,6 +15,7 @@ import time
 import config
 import gitscan
 import launcher
+import version
 
 VERSION_TTL = 600
 _versions = {}
@@ -74,7 +75,7 @@ def report(engine, port, workspace_root, terminal_problem):
         "claude": claude(),
         "git": git(),
         "app": {
-            "port": port, "workspace_root": str(workspace_root), "python": platform.python_version(),
+            "port": port, "version": version.VERSION, "workspace_root": str(workspace_root), "python": platform.python_version(),
             "platform": sys.platform, "app_dir": str(config.APP_DIR),
             "briefs_dir": str(config.briefs_dir() or ""), "terminal": terminal_problem or None,
         },
