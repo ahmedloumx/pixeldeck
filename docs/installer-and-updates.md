@@ -1,8 +1,8 @@
 # Installers and updates
 
-Status: proposal. Nothing here is built yet. This document describes what we want a
-colleague to experience, what has to change in the code to get there, and the order we
-build it in. Merging it means we agree on the plan; the work comes in follow-up pull requests.
+Status: proposal. Code changes 6 to 9 below are built; nothing else is yet. This document
+describes what we want a colleague to experience, what has to change in the code to get there,
+and the order we build it in.
 
 Decided:
 
@@ -74,20 +74,22 @@ These are needed before any executable works. Each one is based on how the code 
    fallback where no store exists.
 5. **The clones folder.** `PIXELDECK_WORKSPACE_ROOT` defaults to the folder above the code,
    which means nothing for an installed app. The setup screen asks for it.
-6. **A version number.** There is none today (the User-Agent says `pixeldeck/1.0` everywhere,
-   `/healthz` answers a bare `ok`). Add one version, set from the git tag at build time, shown in
-   Settings, sent in the User-Agent, and returned by `/healthz`.
-7. **No stale server.** The launcher compares the running server's version with its own and
-   restarts the server when they differ, with the existing terminal restore. This also helps
-   source installs: after `git pull` the browser loads the new page from disk while the old
-   server keeps running, until someone restarts it by hand.
-8. **Windows: no console windows.** The server runs without a console, so every
-   `subprocess.run` of a console program (git, `claude --version`) opens a console window.
-   Pass `CREATE_NO_WINDOW` on Windows.
-9. **Windows: one server per port.** Python's `HTTPServer` sets `SO_REUSEADDR`, which on
-   Windows lets a second PixelDeck server bind the same port while the first runs; `--stop`
-   then stops only one of them. Bind exclusively on Windows, and let the launcher reuse the
-   server that answers.
+6. **A version number.** Done: `version.py` holds it (`0.1.0` for now), Settings shows it and
+   `/healthz` returns it. Still to do: set it from the git tag at build time, and send it in the
+   User-Agent, which still says `pixeldeck/1.0`.
+7. **No stale server.** Done. After `git pull` the browser loads the new page from disk while
+   the old server keeps running. The launcher now compares a fingerprint of the Python files the
+   server started with against the files on disk, and restarts the server when they differ. It
+   never does while a terminal is open or an agent waits on a proposal, since a stop cuts them
+   off; then the launcher and the page say how to finish. A packaged app gets the same check
+   from its version.
+8. **Windows: no console windows.** Done. The server runs without a console, so every
+   `subprocess.run` of a console program (git, `claude --version`) opened a console window.
+   They pass `CREATE_NO_WINDOW` on Windows.
+9. **Windows: one server per port.** Done. Python's `HTTPServer` sets `SO_REUSEADDR`, which on
+   Windows let a second PixelDeck server bind the same port while the first ran; `--stop` then
+   stopped only one of them. The server no longer sets it on Windows and takes the port before
+   anything else, and the launcher writes the pid file for the server that answers.
 
 ## Packaging (proposal, to be tried)
 
@@ -164,8 +166,8 @@ writing our own.
 
 ## Order of work
 
-1. **Ready to package.** Code changes 1 to 9, and a Windows build made by hand and shared by
-   link with two or three colleagues.
+1. **Ready to package.** Code changes 1 to 5 (6 to 9 are done), and a Windows build made by
+   hand and shared by link with two or three colleagues.
 2. **All three systems.** The release workflow builds Windows, macOS and Linux on a tag.
 3. **Updates.** The website, the signed update list, and the in-app check and install.
 4. **Signing.** Windows signing and macOS notarization, once we know who pays for and owns
