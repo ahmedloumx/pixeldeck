@@ -19,6 +19,7 @@ The window, best first:
 import argparse
 import json
 import os
+import secrets
 import shutil
 import signal
 import subprocess
@@ -71,13 +72,17 @@ def start_server():
         flags = {"creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW}
     else:
         flags = {"start_new_session": True}
+    # The server echoes this back, so we know it is ours. Its pid is not enough: a venv's
+    # python.exe on Windows runs the real interpreter as a child, with a pid of its own.
+    start = secrets.token_hex(8)
     with log:  # the server has its own handle on it
         proc = subprocess.Popen([sys.executable, str(HERE / "server.py"), "--port", str(config.port())],
-                                cwd=str(HERE), stdin=subprocess.DEVNULL, stdout=log, stderr=log, **flags)
+                                cwd=str(HERE), env={**os.environ, "PIXELDECK_START_ID": start},
+                                stdin=subprocess.DEVNULL, stdout=log, stderr=log, **flags)
     for _ in range(80):
         info = health()
-        if info and info.get("pid") == proc.pid:
-            state_file("server.pid").write_text(str(proc.pid))
+        if info and info.get("start") == start:
+            state_file("server.pid").write_text(str(info["pid"]))
             return
         if proc.poll() is not None:
             break
@@ -276,14 +281,18 @@ def main():
         start_server()
     elif info.get("build") != version.build():
         # After an update the page comes from disk while the server still runs the old code,
-        # and routes the new page needs are missing. Restart, but never under open terminals:
-        # a stop ends them, and a Claude run in one would be cut off.
-        if info.get("terminals") == 0:
+        # and routes the new page needs are missing. Restart, but never under open terminals or
+        # a pending proposal: a stop ends a Claude run, and the waiting agent loses its answer.
+        busy = (info.get("terminals"), info.get("proposals"))
+        if busy == (0, 0):
             print("PixelDeck changed since its server started; restarting the server")
             stop_server()
             start_server()
+        elif None in busy:  # a server from before /healthz said what a stop would cut off
+            print("PixelDeck changed since its server started. To load the new code, run  pixeldeck.py --stop "
+                  "(it also closes PixelDeck's terminals)  and start PixelDeck again.")
         else:
-            print("PixelDeck changed since its server started, and it has open terminals. "
+            print("PixelDeck changed since its server started, and it has open terminals or a pending proposal. "
                   "When they are done, run  pixeldeck.py --stop  and start PixelDeck again.")
     print(f"PixelDeck on {url()} in the {open_window()}")
 

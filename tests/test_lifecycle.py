@@ -96,7 +96,8 @@ class OneServerPerPortTest(unittest.TestCase):
         self.assertEqual(status, 200)
         info = json.loads(body)
         self.assertEqual((info["ok"], info["pid"]), (True, os.getpid()))
-        self.assertEqual((info["version"], info["build"], info["terminals"]), (version.VERSION, server.BUILD, 0))
+        self.assertEqual((info["version"], info["build"]), (version.VERSION, server.BUILD))
+        self.assertEqual((info["terminals"], info["proposals"]), (0, 0))
 
 
 class BuildTest(unittest.TestCase):
@@ -163,14 +164,27 @@ class LauncherTest(unittest.TestCase):
         self.assertNotEqual(self.pd.health()["pid"], before)
         self.assertEqual(self.pid_file().read_text(), str(self.pd.health()["pid"]))
 
-    def test_open_terminals_hold_the_restart(self):
-        running = {"ok": True, "pid": 4242, "build": "before-a-pull", "terminals": 2}
+    def held(self, running):
+        """Start PixelDeck against a server that says `running`; it must not be stopped."""
         with mock.patch.object(self.pd, "health", lambda timeout=1.0: running), \
                 mock.patch.object(self.pd, "stop_server") as stop, mock.patch.object(self.pd, "start_server") as start:
             said = self.start_pixeldeck()
         stop.assert_not_called()
         start.assert_not_called()
+        return said
+
+    def test_open_terminals_hold_the_restart(self):
+        said = self.held({"ok": True, "pid": 4242, "build": "before-a-pull", "terminals": 2, "proposals": 0})
         self.assertIn("open terminals", said)
+
+    def test_an_agent_waiting_on_a_proposal_holds_the_restart(self):
+        said = self.held({"ok": True, "pid": 4242, "build": "before-a-pull", "terminals": 0, "proposals": 1})
+        self.assertIn("pending proposal", said)
+
+    def test_a_server_from_before_this_check_is_not_stopped_blindly(self):
+        said = self.held({"ok": True})  # what an older server's bare "ok" reads as
+        self.assertIn("--stop", said)
+        self.assertNotIn("has open terminals", said)
 
     def test_an_up_to_date_server_is_left_alone(self):
         self.pd.start_server()

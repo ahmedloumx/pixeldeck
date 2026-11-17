@@ -1586,7 +1586,7 @@ function replay(action, button) {
 
 /* -------------------------------------------------------------- toasts */
 
-function toast(title, detail = "", bad = false, link = null) {
+function toast(title, detail = "", bad = false, link = null, stay = false) {
   const box = document.createElement("div");
   box.className = `toast${bad ? " is-bad" : ""}`;
   box.setAttribute("role", bad ? "alert" : "status");
@@ -1595,7 +1595,7 @@ function toast(title, detail = "", bad = false, link = null) {
   $("#toasts").append(box);
   const kill = () => box.remove();
   box.querySelector("[data-dismiss]").addEventListener("click", kill);
-  setTimeout(kill, bad ? 12000 : link ? 15000 : 7000);
+  if (!stay) setTimeout(kill, bad ? 12000 : link ? 15000 : 7000);
 }
 // Icon tools keep their sprite: only the label changes when a click arms or runs them.
 function getLabel(button) { const l = button.querySelector(".tool-label"); return l ? l.innerHTML : button.innerHTML; }
@@ -1984,7 +1984,8 @@ function applyBoot(b) {
   if (b.restore !== undefined && state.restore === undefined) state.restore = b.restore;
   if (b.stale && !state.staleSaid) {
     state.staleSaid = true;
-    toast("PixelDeck was updated.", "The server still runs the code from before. Start PixelDeck again to restart it; with terminals open, run pixeldeck.py --stop first.");
+    // It stays until dismissed: started by a double-click, the launcher's own words are never seen.
+    toast("PixelDeck was updated.", "The server still runs the code from before. Start PixelDeck again to restart it; with terminals open, run pixeldeck.py --stop first.", false, null, true);
   }
 }
 const signature = (d) => JSON.stringify([d.open, d.merged, d.declined, d.review_requests, d.pushed, d.synced_at, d.members, d.project]);

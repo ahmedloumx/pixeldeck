@@ -161,8 +161,13 @@ class Desk(BaseHTTPRequestHandler):
             return self._error(HTTPStatus.FORBIDDEN, "bad host")
         url = urlparse(self.path)
         if url.path == "/healthz":
-            return self._send(200, {"ok": True, "pid": os.getpid(), "version": version.VERSION, "build": BUILD,
-                                    "terminals": sum(1 for t in TERMS.list() if t["alive"])})
+            return self._send(200, {
+                "ok": True, "pid": os.getpid(), "start": os.environ.get("PIXELDECK_START_ID", ""),
+                "version": version.VERSION, "build": BUILD,
+                # what a stop would cut off: open terminals, and agents waiting on a proposal
+                "terminals": sum(1 for t in TERMS.list() if t["alive"]),
+                "proposals": sum(1 for p in PROPOSALS.list() if p["status"] in ("pending", "opening")),
+            })
         if url.path == "/spotify/callback":  # the browser comes back here from Spotify; no page token
             status, page = spotify.callback(parse_qs(url.query))
             return self._send(status, page.encode("utf-8"), "text/html; charset=utf-8")
