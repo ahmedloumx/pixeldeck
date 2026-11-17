@@ -13,6 +13,7 @@ import threading
 import time
 
 import config
+import gitscan
 import launcher
 
 VERSION_TTL = 600
@@ -27,7 +28,8 @@ def _version(argv):
         if hit and time.time() - hit[0] < VERSION_TTL:
             return hit[1]
     try:
-        run = subprocess.run(argv, capture_output=True, text=True, timeout=8, stdin=subprocess.DEVNULL)
+        run = subprocess.run(argv, capture_output=True, text=True, timeout=8, stdin=subprocess.DEVNULL,
+                             creationflags=gitscan.NO_WINDOW)
         text = (run.stdout or run.stderr or "").strip().splitlines()
         value = text[0][:120] if run.returncode == 0 and text else None
     except (OSError, subprocess.SubprocessError):

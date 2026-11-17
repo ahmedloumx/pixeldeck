@@ -17,12 +17,15 @@ SKIP_BRANCHES = {"HEAD", "develop", "main", "master"}
 # Never wait on a prompt: the server has no terminal, so a missing key must fail, not hang.
 GIT_ENV = {**os.environ, "GIT_TERMINAL_PROMPT": "0",
            "GIT_SSH_COMMAND": os.environ.get("GIT_SSH_COMMAND", "ssh -o BatchMode=yes -o ConnectTimeout=15")}
+# On Windows the server runs without a console, so each console program it runs (git, a
+# --version check) would open a console window of its own. 0 elsewhere.
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 def git(repo_dir, *args, timeout=20):
     result = subprocess.run(
         ["git", "-C", str(repo_dir), *args],
-        capture_output=True, text=True, timeout=timeout, env=GIT_ENV,
+        capture_output=True, text=True, timeout=timeout, env=GIT_ENV, creationflags=NO_WINDOW,
     )
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or f"git {' '.join(args)} failed")

@@ -159,7 +159,7 @@ class Desk(BaseHTTPRequestHandler):
             return self._error(HTTPStatus.FORBIDDEN, "bad host")
         url = urlparse(self.path)
         if url.path == "/healthz":
-            return self._send(200, b"ok", "text/plain")
+            return self._send(200, {"ok": True, "pid": os.getpid()})
         if url.path == "/spotify/callback":  # the browser comes back here from Spotify; no page token
             status, page = spotify.callback(parse_qs(url.query))
             return self._send(status, page.encode("utf-8"), "text/html; charset=utf-8")
@@ -637,12 +637,25 @@ def write_agent_key(port):
         os.chmod(path, 0o600)
 
 
+class DeskServer(ThreadingHTTPServer):
+    """One PixelDeck per port. HTTPServer sets SO_REUSEADDR, and on Windows that lets a second
+    socket bind a port another one listens on, so a second server would start next to the first."""
+    daemon_threads = True
+    allow_reuse_address = sys.platform != "win32"
+
+
 def main():
     parser = argparse.ArgumentParser(description="PixelDeck local server")
     parser.add_argument("--port", type=int, default=config.port())
     parser.add_argument("--no-refresh", action="store_true", help="serve the cache only")
     args = parser.parse_args()
 
+    # Take the port before anything else: a server that loses it must leave the running one's
+    # kept terminals and agent key alone.
+    try:
+        httpd = DeskServer(("127.0.0.1", args.port), Desk)
+    except OSError as exc:
+        sys.exit(f"PixelDeck cannot listen on 127.0.0.1:{args.port} ({exc.strerror or exc}); is it running already?")
     Desk.engine = Engine(WORKSPACE_ROOT)
     Desk.port = args.port
     # Keep the terminals as they are every few seconds, and once more on the way out: atexit
@@ -655,8 +668,6 @@ def main():
     write_agent_key(args.port)
     if not args.no_refresh:
         Desk.engine.run_forever()
-    httpd = ThreadingHTTPServer(("127.0.0.1", args.port), Desk)
-    httpd.daemon_threads = True
     print(f"PixelDeck on http://127.0.0.1:{args.port}/", flush=True)
     try:
         httpd.serve_forever()

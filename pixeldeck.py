@@ -40,12 +40,22 @@ def url():
     return f"http://127.0.0.1:{config.port()}/"
 
 
-def alive():
+def health(timeout=1.0):
+    """What the running server says about itself, or None when nothing answers."""
     try:
-        with urllib.request.urlopen(url() + "healthz", timeout=1) as res:
-            return res.status == 200
+        with urllib.request.urlopen(url() + "healthz", timeout=timeout) as res:
+            raw = res.read()
     except OSError:
-        return False
+        return None
+    try:
+        info = json.loads(raw)
+    except ValueError:
+        info = None
+    return info if isinstance(info, dict) else {"ok": True}  # an older server answers a bare "ok"
+
+
+def alive(timeout=1.0):
+    return health(timeout) is not None
 
 
 def state_file(name):
@@ -60,31 +70,47 @@ def start_server():
         flags = {"creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW}
     else:
         flags = {"start_new_session": True}
-    proc = subprocess.Popen([sys.executable, str(HERE / "server.py"), "--port", str(config.port())],
-                            cwd=str(HERE), stdin=subprocess.DEVNULL, stdout=log, stderr=log, **flags)
-    state_file("server.pid").write_text(str(proc.pid))
+    with log:  # the server has its own handle on it
+        proc = subprocess.Popen([sys.executable, str(HERE / "server.py"), "--port", str(config.port())],
+                                cwd=str(HERE), stdin=subprocess.DEVNULL, stdout=log, stderr=log, **flags)
     for _ in range(80):
-        if alive():
+        info = health()
+        if info and info.get("pid") == proc.pid:
+            state_file("server.pid").write_text(str(proc.pid))
             return
         if proc.poll() is not None:
             break
         time.sleep(0.1)
+    # Ours lost the port to a server that was already there (too busy to answer the first
+    # check, or started a moment earlier): that one is PixelDeck, and the pid file names it.
+    info = health(timeout=3)
+    if info:
+        if info.get("pid"):
+            state_file("server.pid").write_text(str(info["pid"]))
+        return
     sys.exit(f"PixelDeck did not start; see {state_file('server.log')}")
 
 
 def stop_server():
     pid_file = state_file("server.pid")
-    # A pid file outlives a crash, and the system reuses numbers: signal only a server that answers.
-    if not alive():
+    # A pid file outlives a crash, and the system reuses numbers: signal only a server that
+    # answers, and believe what it says its pid is over the file.
+    info = health(timeout=3)
+    if info is None:
         pid_file.unlink(missing_ok=True)
         print("PixelDeck was not running")
         return
     try:
-        os.kill(int(pid_file.read_text().strip()), signal.SIGTERM)
+        pid = int(info.get("pid") or pid_file.read_text().strip())
+        os.kill(pid, signal.SIGTERM)
     except (OSError, ValueError):
         print(f"PixelDeck answers on {url()} but its pid file is missing or stale; stop it from its own console")
         return
     pid_file.unlink(missing_ok=True)
+    for _ in range(100):  # a start right after must find the port free
+        if not alive(timeout=0.5):
+            break
+        time.sleep(0.1)
     print("PixelDeck stopped")
 
 
