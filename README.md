@@ -178,6 +178,10 @@ On Linux, `./install-desktop.sh` adds PixelDeck to the app grid and pins it to t
 Closing the window leaves the server and its terminals running, so a Claude run is never cut
 off. `--status` tells you whether it runs; `--server` runs the server in the console for debugging.
 
+After an update (`git pull`), start PixelDeck again: the server still runs the code from before,
+and the launcher restarts it. It does not while terminals are open, since a stop ends them; the
+page then says the server is out of date, and `--stop` followed by a start finishes the update.
+
 ### The API token
 
 Create an Atlassian API token with Bitbucket scopes at

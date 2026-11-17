@@ -215,7 +215,7 @@ const Settings = (() => {
     const app = report?.app;
     return `<div class="set-about">${typeof Sprites !== "undefined" ? `<span class="set-mascots">${Sprites.svg("buddy", { scale: 3 })}${Sprites.svg("bot", { scale: 3 })}</span>` : ""}
       <h3>PixelDeck</h3><p>Your pull requests, your team's, and the terminals and agents that work on them, in one window.</p>
-      <dl class="set-rows">${row("Server", app ? `127.0.0.1:${app.port}` : "")}${row("Python", app?.python)}${row("Installed in", app?.app_dir, { code: true })}</dl>
+      <dl class="set-rows">${row("Version", app?.version)}${row("Server", app ? `127.0.0.1:${app.port}` : "")}${row("Python", app?.python)}${row("Installed in", app?.app_dir, { code: true })}</dl>
       <p><button class="link" type="button" data-external="https://github.com/ahmedloumx/pixeldeck">github.com/ahmedloumx/pixeldeck</button></p>
       <p><button class="btn btn--quiet" type="button" data-action="open-keys">Keyboard keys</button></p></div>`;
   }

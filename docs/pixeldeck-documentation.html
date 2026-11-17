@@ -465,7 +465,8 @@ cp .env.example .env        # Windows: copy .env.example .env</code></pre>
   <table>
     <thead><tr><th>File</th><th>Lines</th><th>Role</th></tr></thead>
     <tbody>
-      <tr><td><code>pixeldeck.py</code></td><td class="n">253</td><td>Start, stop, status; picks the best window for the system; <code>--propose</code> for agents.</td></tr>
+      <tr><td><code>pixeldeck.py</code></td><td class="n">253</td><td>Start, stop, status; restarts a server that runs older code when no terminal is open; picks the best window for the system; <code>--propose</code> for agents.</td></tr>
+      <tr><td><code>version.py</code></td><td class="n">19</td><td>The version, and a fingerprint of the Python files that tells the launcher a server started before an update.</td></tr>
       <tr><td><code>proposals.py</code></td><td class="n">132</td><td>Pull requests an agent asks to open, waiting for your answer.</td></tr>
       <tr><td><code>config.py</code></td><td class="n">167</td><td>The <code>.env</code>, and each system's folders.</td></tr>
       <tr><td><code>server.py</code></td><td class="n">600</td><td>Routes, Host and token checks, CSP, the terminal stream, file drops.</td></tr>
