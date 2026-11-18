@@ -189,6 +189,34 @@ class AppImage(unittest.TestCase):
         self.assertEqual(argv, [str(Path("/home/me/PixelDeck.AppImage")), "--server"])
 
 
+class FrozenEnvironment(unittest.TestCase):
+    """What the packaged app hands the programs it starts."""
+
+    def prepare(self, env, cafile=None, bundles=()):
+        paths = mock.Mock(cafile=cafile, capath=None)
+        with mock.patch.object(config, "FROZEN", True), mock.patch.object(pixeldeck, "WINDOWS", False):
+            pixeldeck.prepare_environment(env, verify_paths=lambda: paths, isfile=lambda p: p in bundles)
+        return env
+
+    def test_the_library_path_from_before_comes_back(self):
+        env = self.prepare({"LD_LIBRARY_PATH": "/tmp/.mount_x/usr/lib/pixeldeck/_internal", "LD_LIBRARY_PATH_ORIG": "/opt/lib"})
+        self.assertEqual(env, {"LD_LIBRARY_PATH": "/opt/lib"})
+
+    def test_the_bundle_library_path_goes_when_there_was_none(self):
+        self.assertEqual(self.prepare({"LD_LIBRARY_PATH": "/tmp/.mount_x/_internal"}), {})
+
+    def test_certificates_from_this_system_when_the_built_in_place_is_missing(self):
+        fedora = "/etc/pki/tls/certs/ca-bundle.crt"
+        self.assertEqual(self.prepare({}, bundles=(fedora,)), {"SSL_CERT_FILE": fedora})
+        self.assertEqual(self.prepare({}, cafile="/usr/lib/ssl/cert.pem", bundles=(fedora,)), {})
+        self.assertEqual(self.prepare({"SSL_CERT_FILE": "/mine.pem"}, bundles=(fedora,)), {"SSL_CERT_FILE": "/mine.pem"})
+
+    def test_a_git_clone_is_left_alone(self):
+        env = {"LD_LIBRARY_PATH": "/opt/lib"}
+        pixeldeck.prepare_environment(env)
+        self.assertEqual(env, {"LD_LIBRARY_PATH": "/opt/lib"})
+
+
 class Desktop(unittest.TestCase):
     def setUp(self):
         self.home = Path(tempfile.mkdtemp(dir=_HOME))

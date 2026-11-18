@@ -40,6 +40,17 @@ gets checked.
   clone under the same name, is only replaced on "Replace", and never removed.
 - **Uninstall:** "Remove" next to each, then delete the file.
 
+### What the packaged app hands to the programs it starts
+
+- **Libraries.** On Linux, PyInstaller points `LD_LIBRARY_PATH` at the bundle. Every program
+  PixelDeck starts (git, ssh, `claude`, the terminals' shells) would load the bundled libraries,
+  OpenSSL included. The launcher puts back the value from before (`LD_LIBRARY_PATH_ORIG`), or
+  removes it. To verify on Fedora: `git fetch` and `claude` work in a PixelDeck terminal.
+- **Certificates.** The bundled OpenSSL looks for certificates where the build machine keeps
+  them (Ubuntu's place, for the CI build). When that place is missing, the launcher sets
+  `SSL_CERT_FILE` to this system's bundle (Debian/Ubuntu, Fedora/RHEL, macOS). To verify:
+  Bitbucket answers from an AppImage built on Ubuntu and run on Fedora, and from the `.app`.
+
 ### The AppImage and its server
 
 An AppImage runs from a mount that goes away when the program that started it exits. The
