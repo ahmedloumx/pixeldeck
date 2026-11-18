@@ -256,7 +256,7 @@
 .term-panes { position: relative; }
 .term-panes.is-drop::after {
   content: "DROP TO PASTE THE PATH"; position: absolute; inset: var(--space-xs); z-index: 5; display: grid; place-items: center; pointer-events: none;
-  border: var(--pixel) dashed var(--color-accent); background: oklch(29% 0.05 80 / 0.55); color: var(--color-accent); font: 400 11px var(--font-num);
+  border: var(--pixel) dashed var(--color-accent); background: oklch(29% 0.05 80 / 0.55); color: var(--color-accent); font: 400 var(--num-11) var(--font-num);
 }
 
 /* ------------------------------------------------- review banners: drop in from the top */
@@ -271,11 +271,11 @@
 .review-banner.is-leaving { animation: rb-rise 400ms steps(4, end) forwards; }
 .rb-open { display: flex; flex: 1; align-items: center; gap: var(--space-sm); min-width: 0; padding: var(--space-sm) var(--space-md); border: 0; background: none; color: var(--color-ink); text-align: left; cursor: pointer; }
 .rb-open:hover .rb-pr { color: var(--color-ink); text-decoration: underline; text-decoration-color: var(--tone); }
-.rb-face { flex: none; display: grid; place-items: center; width: 40px; height: 40px; background: var(--color-paper-3); border: var(--pixel) solid var(--tone); color: var(--tone); font: 400 12px var(--font-num); }
-.rb-bang { position: absolute; top: -14px; left: 26px; color: var(--color-accent); font: 400 14px var(--font-num); animation: rb-bang 900ms steps(2, jump-none) infinite; }
+.rb-face { flex: none; display: grid; place-items: center; width: 40px; height: 40px; background: var(--color-paper-3); border: var(--pixel) solid var(--tone); color: var(--tone); font: 400 var(--num-12) var(--font-num); }
+.rb-bang { position: absolute; top: -14px; left: 26px; color: var(--color-accent); font: 400 var(--num-14) var(--font-num); animation: rb-bang 900ms steps(2, jump-none) infinite; }
 .rb-text { display: grid; gap: 2px; min-width: 0; }
 .rb-who { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rb-what { color: var(--tone); font: 400 10px/1.6 var(--font-num); }
+.rb-what { color: var(--tone); font: 400 var(--num-10)/1.6 var(--font-num); }
 .rb-pr { overflow: hidden; color: var(--color-ink-2); font-size: var(--text-sm); text-overflow: ellipsis; white-space: nowrap; }
 .rb-x { flex: none; width: 34px; border: 0; border-left: var(--rule-hair) solid var(--color-rule); background: none; color: var(--color-muted); cursor: pointer; font-size: 18px; }
 .rb-x:hover { color: var(--color-ink); background: var(--color-paper-2); }
@@ -297,7 +297,7 @@
 
 /* closing a live terminal: the first click arms the x */
 .term-tab.is-armed { border-color: var(--color-bad); box-shadow: 0 2px 0 var(--color-bad-deep); }
-.term-tab.is-armed .term-tab-close { color: var(--color-bad); font: 400 8px var(--font-num); padding-inline: var(--space-xs); }
+.term-tab.is-armed .term-tab-close { color: var(--color-bad); font: 400 var(--num-8) var(--font-num); padding-inline: var(--space-xs); }
 
 /* ------------------------------------------------- behind its destination: sync bar */
 .sync-bar {
@@ -334,13 +334,13 @@
 
 /* ------------------------------------------------- the date filter over a queue list */
 .date-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3xs) var(--space-2xs); margin: 0 0 var(--space-md); font-size: var(--text-sm); }
-.date-basis { margin-right: var(--space-2xs); color: var(--color-muted); font: 400 9px var(--font-num); text-transform: uppercase; }
+.date-basis { margin-right: var(--space-2xs); color: var(--color-muted); font: 400 var(--num-9) var(--font-num); text-transform: uppercase; }
 .date-chip { min-height: 26px; padding: 0 var(--space-xs); border: var(--rule-hair) solid var(--color-rule); border-radius: 2px; background: none; color: var(--color-ink-2); cursor: pointer; font: inherit; font-size: var(--text-sm); }
 .date-chip:hover { color: var(--color-ink); border-color: var(--color-rule-2); }
 .date-chip[aria-pressed="true"] { color: var(--color-ink); background: var(--color-paper-2); border-color: var(--color-accent); box-shadow: 0 2px 0 var(--color-accent-deep); }
 .date-input input { min-height: 26px; padding: 0 var(--space-2xs); border: var(--rule-hair) solid var(--color-rule-2); border-radius: 2px; background: var(--color-paper-3); color: var(--color-ink); font: inherit; font-size: var(--text-sm); color-scheme: dark; }
 .date-to { color: var(--color-muted); }
-.date-count { margin-left: auto; color: var(--color-muted); font: 400 9px var(--font-num); }
+.date-count { margin-left: auto; color: var(--color-muted); font: 400 var(--num-9) var(--font-num); }
 
 /* The Claude tools carry their words once the pull request has the width; narrow, icons only. */
 .pr-main { container: pr-main / inline-size; }

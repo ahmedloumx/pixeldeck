@@ -194,7 +194,7 @@ kbd { font-family: var(--font-outlier); font-size: var(--text-xs); padding: 0 va
 /* team table */
 .team .who { display: flex; align-items: center; gap: var(--space-sm); }
 .team .you-tag { font-size: var(--text-sm); color: var(--color-accent); }
-.team .reading { font-family: var(--font-outlier); font-size: var(--text-lg); color: var(--color-ink); font-variant-numeric: tabular-nums slashed-zero; }
+.team .reading { font-family: var(--font-num); font-size: 0.9rem; color: var(--color-ink); font-variant-numeric: tabular-nums slashed-zero; }
 .team .reading.is-zero { color: var(--color-muted); }
 .team .reading.is-bad { color: var(--color-bad); }
 .team .reading.is-you { color: var(--color-accent); }
@@ -352,7 +352,7 @@ kbd { font-family: var(--font-outlier); font-size: var(--text-xs); padding: 0 va
    Retro layer: a pixel display face, 8-bit presses and stepped motion.
    The user asked for it; reading text stays in Host Grotesk.
    ====================================================================== */
-h1, .block-head h2, .brand span, .stat--reading dd, .reading-s, .team .reading, .drawer h2, .team-head h2 {
+h1, .block-head h2, .brand span, .stat--reading dd, .reading-s, .drawer h2, .team-head h2 {
   font-family: var(--font-pixel); font-weight: 500; letter-spacing: 0;
 }
 h1 { font-size: 2.25rem; line-height: 1.1; }
@@ -459,7 +459,7 @@ h1 { font-size: 2.25rem; line-height: 1.1; }
 .pr-dialog-head p { display: flex; flex-wrap: wrap; gap: var(--space-sm); margin-top: var(--space-2xs); }
 .pr-facts { display: flex; flex-wrap: wrap; gap: var(--space-lg); margin: 0; padding: var(--space-sm) 0; border-block: var(--rule-hair) solid var(--color-rule); }
 .pr-facts dt { font-size: var(--text-sm); color: var(--color-muted); }
-.pr-facts dd { margin: var(--space-3xs) 0 0; font-family: var(--font-pixel); font-size: var(--text-xl); line-height: 1; font-variant-numeric: tabular-nums; }
+.pr-facts dd { margin: var(--space-3xs) 0 0; font-family: var(--font-num); font-size: 1.1rem; line-height: 1; font-variant-numeric: tabular-nums; }
 .plus { color: var(--color-ok); }
 .minus { color: var(--color-bad); }
 .warn-line { padding: var(--space-xs) var(--space-sm); border: var(--rule-hair) solid var(--color-accent); background: var(--color-accent-soft); color: var(--color-ink); font-size: var(--text-sm); }
@@ -485,7 +485,7 @@ h1 { font-size: 2.25rem; line-height: 1.1; }
 @media (max-width: 40rem) { .pr-fields { grid-template-columns: minmax(0, 1fr); } .row-actions { flex-wrap: wrap; } }
 
 /* ---------- 8-bit block bars ---------- */
-.chart .tick { font-family: var(--font-pixel); font-size: 12px; }
+.chart .tick { font-family: var(--font-num); font-size: 9px; }
 .chart .px { shape-rendering: crispEdges; animation: pop-in 1ms steps(1, end) both; animation-delay: calc(180ms + var(--i, 0) * 28ms + var(--b, 0) * 26ms); }
 .chart .px-opened { fill: var(--color-rule-2); }
 .chart .px-opened.cap { fill: var(--color-muted); }
@@ -504,8 +504,8 @@ h1 { font-size: 2.25rem; line-height: 1.1; }
 .heat-cell[data-l="4"] { background: var(--heat-4); }
 .heat-row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--space-xl); }
 .heat-wrap { --cell: 18px; display: grid; grid-template-columns: auto auto; grid-template-rows: auto auto; column-gap: var(--space-xs); row-gap: var(--space-2xs); }
-.heat-months { grid-column: 2; display: grid; grid-auto-flow: column; grid-auto-columns: var(--cell); gap: var(--space-2xs); font-family: var(--font-pixel); font-size: 12px; color: var(--color-muted); white-space: nowrap; }
-.heat-days { grid-column: 1; grid-row: 2; display: grid; grid-template-rows: repeat(7, var(--cell)); gap: var(--space-2xs); font-family: var(--font-pixel); font-size: 12px; line-height: var(--cell); color: var(--color-muted); }
+.heat-months { grid-column: 2; display: grid; grid-auto-flow: column; grid-auto-columns: var(--cell); gap: var(--space-2xs); font-family: var(--font-num); font-size: 9px; color: var(--color-muted); white-space: nowrap; }
+.heat-days { grid-column: 1; grid-row: 2; display: grid; grid-template-rows: repeat(7, var(--cell)); gap: var(--space-2xs); font-family: var(--font-num); font-size: 9px; line-height: var(--cell); color: var(--color-muted); }
 .heat, .punch { display: grid; grid-template-rows: repeat(7, var(--cell)); grid-auto-flow: column; grid-auto-columns: var(--cell); gap: var(--space-2xs); }
 .punch { grid-auto-flow: row; grid-template-columns: repeat(24, var(--cell)); grid-template-rows: none; }
 .heat .heat-cell, .punch .heat-cell, .strip .heat-cell { animation: cell-in 260ms steps(3, end) both; animation-delay: calc(220ms + var(--c, 0) * 32ms); }
@@ -513,13 +513,13 @@ h1 { font-size: 2.25rem; line-height: 1.1; }
 .calm .heat .heat-cell, .calm .punch .heat-cell, .calm .strip .heat-cell { animation: none; }
 .heat-cell[data-tip]:hover { box-shadow: inset 0 0 0 2px var(--color-ink); }
 .punch-wrap { --cell: 22px; display: grid; grid-template-columns: auto auto; column-gap: var(--space-xs); row-gap: var(--space-2xs); overflow-x: auto; }
-.punch-hours { grid-column: 2; display: grid; grid-template-columns: repeat(24, var(--cell)); gap: var(--space-2xs); font-family: var(--font-pixel); font-size: 12px; color: var(--color-muted); }
+.punch-hours { grid-column: 2; display: grid; grid-template-columns: repeat(24, var(--cell)); gap: var(--space-2xs); font-family: var(--font-num); font-size: 9px; color: var(--color-muted); }
 .punch-wrap .heat-days { grid-row: 2; }
 .heat-legend { display: inline-flex; align-items: center; gap: var(--space-2xs); font-size: var(--text-sm); color: var(--color-muted); --cell: 12px; }
 .heat-facts { display: grid; gap: var(--space-md); margin: 0; }
 .heat-facts dt { font-size: var(--text-sm); color: var(--color-muted); }
 .heat-facts dd { margin: var(--space-3xs) 0 0; display: flex; align-items: baseline; gap: var(--space-xs); }
-.heat-facts dd span { font-family: var(--font-pixel); font-size: 2rem; line-height: 1; color: var(--color-ink); font-variant-numeric: tabular-nums; }
+.heat-facts dd span { font-family: var(--font-num); font-size: 1.5rem; line-height: 1; color: var(--color-ink); font-variant-numeric: tabular-nums; }
 .heat-facts dd small { font-size: var(--text-sm); color: var(--color-muted); }
 .strip { --cell: 12px; display: inline-grid; grid-auto-flow: column; grid-auto-columns: var(--cell); gap: var(--space-3xs); vertical-align: middle; }
 .side-project { display: grid; gap: var(--space-2xs); margin-bottom: var(--space-lg); }

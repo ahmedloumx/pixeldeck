@@ -33,7 +33,7 @@
 .rp-glyph--branch { color: var(--color-cool); margin-right: var(--space-2xs); }
 .rp-glyph--helm { color: var(--color-cool); }
 .rp-glyph--star { color: var(--color-muted); }
-.rp-lang { flex: none; padding: 2px var(--space-2xs); border: var(--rule-hair) solid var(--color-cool-soft); font: 400 8px/1.2 var(--font-num); letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-cool); white-space: nowrap; }
+.rp-lang { flex: none; padding: 2px var(--space-2xs); border: var(--rule-hair) solid var(--color-cool-soft); font: 400 var(--num-8)/1.2 var(--font-num); letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-cool); white-space: nowrap; }
 .rp-on { font-family: var(--font-outlier); color: var(--color-ink-2); overflow-wrap: anywhere; }
 
 /* ---------- waiting, empty, error ---------- */
@@ -61,14 +61,14 @@
 .rp-side .rp-search { margin-bottom: var(--space-xs); }
 .rp-kinds { display: flex; flex-wrap: wrap; gap: var(--space-3xs) var(--space-2xs); }
 .rp-kind { display: inline-flex; align-items: center; gap: var(--space-2xs); }
-.rp-kind-n { font: 400 8px var(--font-num); color: var(--color-muted); }
+.rp-kind-n { font: 400 var(--num-8) var(--font-num); color: var(--color-muted); }
 .rp-kind[aria-pressed="true"] .rp-kind-n { color: var(--color-accent); }
 .rp-kind-note { margin: var(--space-2xs) 0 var(--space-sm); font-size: var(--text-xs); color: var(--color-muted); }
 .rp-kind-note:empty { display: none; }
 .rp-nowrap { white-space: nowrap; }
 .rp-sec { margin-top: var(--space-sm); }
 .rp-sec + .rp-repos, .rp-sec + .rp-sec { margin-top: var(--space-sm); }
-.rp-sec-head { display: flex; align-items: center; gap: var(--space-xs); width: 100%; padding: var(--space-2xs) 0; border: 0; border-bottom: var(--rule-hair) solid var(--color-rule); background: none; color: var(--color-accent); font: 400 9px var(--font-num); letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; text-align: left; }
+.rp-sec-head { display: flex; align-items: center; gap: var(--space-xs); width: 100%; padding: var(--space-2xs) 0; border: 0; border-bottom: var(--rule-hair) solid var(--color-rule); background: none; color: var(--color-accent); font: 400 var(--num-9) var(--font-num); letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; text-align: left; }
 .rp-sec-head .sec-n { margin-left: auto; }
 .rp-caret { transition: transform var(--dur-micro) var(--ease-out); }
 [aria-expanded="true"] > .rp-caret { transform: rotate(90deg); }
@@ -97,7 +97,7 @@
 .rp-repo-foot { display: flex; align-items: center; gap: var(--space-xs); min-width: 0; }
 .rp-repo-foot:empty { display: none; }
 .rp-repo-main { display: inline-flex; align-items: center; min-width: 0; font: var(--text-sm) var(--font-outlier); color: var(--color-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.rp-uses { margin-left: auto; font: 400 8px var(--font-num); color: var(--color-accent); }
+.rp-uses { margin-left: auto; font: 400 var(--num-8) var(--font-num); color: var(--color-accent); }
 .rp-chart-badge { display: inline-flex; align-items: center; gap: var(--space-2xs); padding: 1px var(--space-2xs); border: var(--rule-hair) solid var(--color-cool-soft); font-size: var(--text-xs); color: var(--color-cool); white-space: nowrap; }
 .rp-pin { flex: none; display: grid; place-items: center; width: 26px; padding: 0; border: 0; background: none; color: var(--color-muted); cursor: pointer; opacity: 0; transition: opacity var(--dur-micro) var(--ease-out); }
 .rp-item:hover > .rp-pin, .rp-pin:focus-visible, .rp-pin.is-on { opacity: 1; }
@@ -140,7 +140,7 @@
 
 /* ---------- the right pane ---------- */
 .rp-welcome { display: grid; justify-items: start; gap: var(--space-sm); max-width: 40rem; }
-.rp-welcome-h { margin-top: var(--space-sm); font: 400 9px var(--font-num); letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-accent); }
+.rp-welcome-h { margin-top: var(--space-sm); font: 400 var(--num-9) var(--font-num); letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-accent); }
 .rp-quick { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: var(--space-xs); width: 100%; }
 .rp-quick-btn { display: flex; align-items: center; gap: var(--space-xs); width: 100%; min-height: 40px; padding: 0 var(--space-sm); border: var(--pixel) solid var(--color-rule-2); background: var(--color-paper-3); color: var(--color-ink); font: inherit; text-align: left; cursor: pointer; box-shadow: 0 3px 0 var(--color-paper-3); }
 .rp-quick-btn > span:not(.rp-uses) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -196,7 +196,7 @@
 .rp-size { margin-left: auto; padding-left: var(--space-sm); color: var(--color-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .rp-readme { margin-top: var(--space-lg); border: var(--rule-hair) solid var(--color-rule); }
 .rp-readme-name, .rp-file-head { background: var(--color-paper-2); border-bottom: var(--rule-hair) solid var(--color-rule); }
-.rp-readme-name { max-width: none; padding: var(--space-xs) var(--space-sm); font: 400 9px var(--font-num); letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-accent); }
+.rp-readme-name { max-width: none; padding: var(--space-xs) var(--space-sm); font: 400 var(--num-9) var(--font-num); letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-accent); }
 .rp-readme-text { margin: 0; max-height: 32rem; overflow: auto; padding: var(--space-sm); font: 13px/1.55 var(--font-term); color: var(--color-ink-2); white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 4; }
 .rp-file-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2xs) var(--space-sm); padding: var(--space-xs) var(--space-sm); border: var(--rule-hair) solid var(--color-rule); font-size: var(--text-sm); }
 .rp-file-head.is-editing { border-color: var(--color-accent-deep); background: var(--color-accent-soft); }
@@ -224,7 +224,7 @@
 .rp-ed-text:focus { outline: none; box-shadow: inset 0 0 0 var(--pixel) var(--color-focus); }
 .rp-editor.is-locked .rp-ed-text { color: var(--color-ink-2); }
 .rp-commit { display: grid; gap: var(--space-sm); margin-top: var(--space-md); padding: var(--space-md); border: var(--pixel) solid var(--color-rule-2); background: var(--color-paper); box-shadow: inset 0 0 0 var(--pixel) var(--color-paper-2), inset 0 0 0 4px var(--color-rule); }
-.rp-commit-title { font: 400 9px var(--font-num); letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-accent); }
+.rp-commit-title { font: 400 var(--num-9) var(--font-num); letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-accent); }
 .rp-field { display: grid; gap: var(--space-2xs); font-size: var(--text-sm); color: var(--color-ink-2); }
 .rp-field textarea, .rp-newname input { width: 100%; padding: var(--space-2xs) var(--space-sm); background: var(--color-paper-3); color: var(--color-ink); border: var(--rule-hair) solid var(--color-muted); border-radius: 0; font: 13px/1.5 var(--font-term); }
 .rp-field textarea:focus-visible, .rp-newname input:focus-visible { outline: var(--pixel) solid var(--color-focus); outline-offset: -1px; }
