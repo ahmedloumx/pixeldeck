@@ -78,7 +78,7 @@ function mergeTree(merged, open = [], { limit = 30, declined = [], pushed = [] }
     } else if (iD != null) {
       cast += Sprites.svg("tomb", { scale: 1.5, x: x - 6, y: yr(iD) - 7, tip: esc(`Declined #${pr.id} on ${shortDate(pr.updated_on)}: ${pr.title}`) });
     } else if (iM == null) {
-      cast += Sprites.svg("bot", { scale: 1, x: x - 6, y: yr(0) - 7, idle: "blink", tip: esc(`Open #${pr.id}: ${pr.title}`) });
+      cast += Sprites.svg("bot", { scale: 1, x: x - 6, y: yr(0) - 10, idle: "blink", tip: esc(`Open #${pr.id}: ${pr.title}`) });
     } else {
       g += `<rect class="node merge ${tone}" x="${x0 - 5}" y="${yr(iM) - 5}" width="10" height="10" data-tip="${esc(`Merged #${pr.id} on ${shortDate(pr.updated_on)}: ${pr.title}`)}"/>`;
     }

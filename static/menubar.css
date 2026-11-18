@@ -66,7 +66,7 @@
 .jump-btn { display: inline-flex; align-items: center; gap: 8px; height: 24px; width: 100%; min-width: 0; overflow: hidden; padding: 0 5px 0 8px; margin: 0;
   border: var(--rule-hair) dashed var(--color-rule-2); background: none; color: var(--color-muted); font: 400 13px var(--font-body); cursor: pointer; }
 .jump-btn:hover, .jump-btn:focus-visible { border-style: solid; border-color: var(--color-accent); color: var(--color-ink); outline: none; }
-.jump-btn kbd { margin-left: auto; padding: 1px 4px; border: var(--rule-hair) solid var(--color-rule-2); background: var(--color-paper-2); color: var(--color-ink-2); font: 400 var(--num-8) var(--font-num); }
+.jump-btn kbd { margin-left: auto; white-space: nowrap; flex: none; padding: 1px 4px; border: var(--rule-hair) solid var(--color-rule-2); background: var(--color-paper-2); color: var(--color-ink-2); font: 400 var(--num-8) var(--font-num); }
 .jump { width: min(660px, calc(100vw - 32px)); max-height: min(70dvh, 620px); margin-top: 12vh; padding: 0; border: var(--pixel) solid var(--color-accent); background: var(--color-paper); color: var(--color-ink);
   box-shadow: 4px 4px 0 oklch(8% 0 0 / 0.9); }
 /* It drops in quickly and settles, and leaves the same way: smooth, not stepped, so a box

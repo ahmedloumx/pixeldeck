@@ -6,6 +6,9 @@
    /api/status and /api/settings, which never call Bitbucket; an older server without them
    leaves the bar as it was. */
 
+// The themes and accents PixelDeck knows; anything else falls back to the first.
+const THEMES = [["night", "Night", "dark"], ["midnight", "Midnight", "dark"], ["daylight", "Daylight", "light"], ["grey", "Retro grey", "light"]];
+const ACCENTS = [["amber", "Amber"], ["cool", "Arcade blue"], ["slime", "Slime green"], ["pink", "Neon pink"], ["purple", "Purple"], ["turquoise", "Turquoise"]];
 const Prefs = (() => {
   const KEY = "prdesk.prefs.v1";
   const DEFAULTS = { theme: "night", accent: "amber", motion: "auto", numbers: "arcade", numSize: "small", mascots: true, bubbles: true, games: false, titlebar: "custom" };
@@ -13,8 +16,10 @@ const Prefs = (() => {
   const listeners = new Set();
   function apply() {
     const root = document.documentElement;
-    root.dataset.accent = prefs.accent;
-    root.dataset.theme = prefs.theme === "grey" ? "grey" : "night";
+    const theme = THEMES.find(([id]) => id === prefs.theme) || THEMES[0];
+    root.dataset.accent = ACCENTS.some(([id]) => id === prefs.accent) ? prefs.accent : ACCENTS[0][0];
+    root.dataset.theme = theme[0];
+    root.dataset.tone = theme[2];
     root.dataset.motion = prefs.motion === "calm" ? "calm" : "";
     root.dataset.numbers = prefs.numbers;
     root.dataset.numSize = prefs.numSize;
@@ -31,6 +36,58 @@ const Prefs = (() => {
 })();
 
 /* Pixel icons: each row is a string, # is a lit pixel. */
+/* The blob is an AI helper, and each theme repaints it. After a theme change, the next few
+   times you hover a blob it has something to say about its CSS. */
+const BlobTalk = (() => {
+  const COLOUR = { night: "green", midnight: "cyan", daylight: "orange", grey: "purple" };
+  const JOKES = [
+    (was) => `Someone changed my CSS again. I was ${was} five minutes ago.`,
+    () => "My colour got washed out by the last update. Classic cascade.",
+    () => "I asked for !important. Still overridden.",
+    () => "Felt cute, lost to a more specific selector.",
+    () => "They rotated my hue. Nobody asked the blob.",
+    () => "I'm an AI blob: my colour is a prompt, and you just rewrote it.",
+  ];
+  let left = 0, next = 0, was = "green", bubble = null, timer = 0;
+  Prefs.onChange((p, patch) => {
+    if (!("theme" in patch)) return;
+    left = 3;
+    bubble?.remove();
+    bubble = null;
+  });
+  // the colour it had before: remembered at each change, from the theme that was on
+  let current = document.documentElement.dataset.theme;
+  Prefs.onChange(() => { const now = document.documentElement.dataset.theme; if (now !== current) { was = COLOUR[current] || "green"; current = now; } });
+  function hide() { clearTimeout(timer); bubble?.remove(); bubble = null; }
+  function say(blob, text) {
+    hide();
+    const r = blob.getBoundingClientRect();
+    bubble = document.createElement("div");
+    bubble.className = "blob-say";
+    bubble.setAttribute("role", "status");
+    bubble.textContent = text;
+    bubble._for = blob;
+    document.body.append(bubble);
+    const w = bubble.offsetWidth, h = bubble.offsetHeight;
+    const above = r.top > h + 18;
+    bubble.classList.toggle("is-below", !above);
+    bubble.style.left = `${Math.round(Math.max(8, Math.min(innerWidth - w - 8, r.left + r.width / 2 - w / 2)))}px`;
+    bubble.style.top = `${Math.round(above ? r.top - h - 12 : r.bottom + 12)}px`;
+    timer = setTimeout(hide, 5000);
+  }
+  document.addEventListener("mouseover", (e) => {
+    const blob = e.target.closest?.("svg.spr-buddy");
+    if (!blob || !left || bubble?._for === blob) return;
+    left--;
+    say(blob, JOKES[next++ % JOKES.length](was));
+  });
+  document.addEventListener("mouseout", (e) => {
+    const blob = e.target.closest?.("svg.spr-buddy");
+    if (blob && bubble?._for === blob && !blob.contains(e.relatedTarget)) setTimeout(() => { if (bubble?._for === blob) hide(); }, 1200);
+  });
+  return { say };
+})();
+
 const PixelIcon = (() => {
   const ROWS = {
     bell: [".....#.....", "....###....", "...#####...", "..#######..", "..#######..", "..#######..", "..#######..", ".#########.", "###########", "...........", "....###...."],
@@ -282,7 +339,7 @@ const Settings = (() => {
   function lookHtml() {
     const p = Prefs.get();
     const choice = (key, value, label, extra = "") => `<button class="date-chip" type="button" data-pref="${key}" data-value="${value}" aria-pressed="${p[key] === value}"${extra}>${label}</button>`;
-    const swatches = [["amber", "Amber"], ["cool", "Arcade blue"], ["slime", "Slime green"], ["pink", "Neon pink"]]
+    const swatches = ACCENTS
       .map(([v, label]) => `<button class="swatch-btn" type="button" data-pref="accent" data-value="${v}" aria-pressed="${p.accent === v}" data-swatch="${v}"><span aria-hidden="true"></span>${label}</button>`).join("");
     const toggle = (key, label, hint) => `<label class="switch"><input type="checkbox" data-pref-toggle="${key}"${p[key] ? " checked" : ""}><span class="switch-knob" aria-hidden="true"></span><span>${esc(label)}${hint ? `<small>${esc(hint)}</small>` : ""}</span></label>`;
     // fonts.check() answers true for any font that is not a web font, installed or not; the
@@ -290,9 +347,11 @@ const Settings = (() => {
     const arcade = [...document.fonts].find((f) => f.family.replace(/"/g, "") === "Arcade Local");
     if (arcade?.status === "unloaded") arcade.load().catch(() => {});
     const arcadeHint = { loaded: " (it is)", error: " (it is not, so Press Start stands in)" }[arcade?.status] || "";
-    const themes = [["night", "Night"], ["grey", "Retro grey"]]
-      .map(([v, label]) => `<button class="swatch-btn theme-btn" type="button" data-pref="theme" data-value="${v}" aria-pressed="${p.theme === v}" data-theme-swatch="${v}"><span aria-hidden="true"></span>${label}</button>`).join("");
-    return `<div class="set-block"><h3>Theme</h3><div class="swatches">${themes}</div><p class="set-hint">Retro grey comes with its own mascots: an orange bot and a purple slime.</p></div>
+    const current = (THEMES.find(([id]) => id === p.theme) || THEMES[0])[0];
+    const themes = THEMES.map(([v, label, tone]) => `<button class="theme-card" type="button" data-pref="theme" data-value="${v}" aria-pressed="${current === v}" data-theme-card="${v}">
+        <span class="theme-shot" aria-hidden="true"><i></i><i></i></span><b>${label}</b><small>${tone.toUpperCase()}</small></button>`).join("");
+    return `<div class="set-block"><h3>Theme</h3><div class="themes">${themes}</div><div class="look-crew" aria-hidden="true">${Sprites.svg("bot", { scale: 4, idle: "blink" })}${Sprites.svg("buddy", { scale: 4 })}</div>
+        <p class="set-hint">The bot stays blue in every theme; the blob, the AI helper, takes each theme's colour. Hover it after a change.</p></div>
       <div class="set-block"><h3>Accent</h3><div class="swatches">${swatches}</div></div>
       <div class="set-block"><h3>Numbers</h3><div class="date-bar">${choice("numbers", "arcade", "Arcade")}${choice("numbers", "press", "Press Start")}${choice("numbers", "pixelify", "Pixelify")}${choice("numbers", "plain", "Plain")}</div>
         <div class="date-bar">${choice("numSize", "small", "Small")}${choice("numSize", "medium", "Medium")}${choice("numSize", "large", "Large")}</div>
