@@ -255,7 +255,37 @@ tr.is-cursor { box-shadow: inset 3px 0 0 var(--color-accent); background: var(--
 /* ---------- terminal panel ---------- */
 .term-root { display: flex; flex-direction: column; height: 100%; background: var(--color-paper-3); }
 .term-bar { display: flex; align-items: center; gap: var(--space-xs); padding: var(--space-2xs) var(--space-xs); border-bottom: var(--rule-hair) solid var(--color-rule); }
-.term-tabs { display: flex; gap: var(--space-2xs); flex: 1; min-width: 0; overflow-x: auto; }
+.term-tabs { display: flex; gap: var(--space-2xs); flex: 1; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; overscroll-behavior-x: contain; }
+/* No scrollbar over the names: the wheel, the arrows and the list move along the strip. */
+.term-tabs::-webkit-scrollbar { display: none; }
+.term-tabs.is-cut-right { mask-image: linear-gradient(90deg, #000 calc(100% - 36px), transparent); }
+.term-tabs.is-cut-left { mask-image: linear-gradient(90deg, transparent, #000 36px); }
+.term-tabs.is-cut-left.is-cut-right { mask-image: linear-gradient(90deg, transparent, #000 36px, #000 calc(100% - 36px), transparent); }
+.term-tab { flex: none; }
+/* A long name is cut so more tabs fit; the one shown gets more room, the tooltip the whole. */
+.term-tab-label { display: inline-block; max-width: 170px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+.term-tab.is-current .term-tab-label { max-width: 280px; }
+.term-scroll, .term-all { flex: none; display: grid; place-items: center; min-width: 24px; height: 24px; padding: 0 4px; border: var(--rule-hair) solid var(--color-rule); background: var(--color-paper); color: var(--color-ink-2); font: 400 9px var(--font-num); cursor: pointer; }
+.term-scroll[hidden], .term-all[hidden] { display: none; }
+.term-scroll:hover:not(:disabled), .term-all:hover, .term-all[aria-expanded="true"] { border-color: var(--color-accent); color: var(--color-ink); }
+.term-scroll:disabled { opacity: 0.35; cursor: default; }
+.term-all { display: inline-flex; gap: 4px; padding: 0 6px; }
+.term-all-n { font: 400 var(--num-8, 8px) var(--font-num); }
+.term-list { position: fixed; z-index: var(--z-dropdown, 60); width: 320px; max-height: min(60dvh, 460px); display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 6px; padding: 6px;
+  background: var(--color-paper); border: var(--pixel) solid var(--color-rule-2); box-shadow: 4px 4px 0 oklch(8% 0 0 / 0.85); animation: term-list-in 150ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@keyframes term-list-in { from { opacity: 0; transform: translateY(-6px); } }
+.term-list-find { height: 28px; padding: 0 8px; border: var(--rule-hair) solid var(--color-rule-2); background: var(--color-paper-2); color: var(--color-ink); font: inherit; font-size: 13px; }
+.term-list-rows { overflow: auto; display: grid; align-content: start; }
+.term-list-row { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 30px; padding: 0 8px; border: 0; border-left: 3px solid transparent;
+  background: none; color: var(--color-ink); font: 400 13px var(--font-body); text-align: left; cursor: pointer; }
+.term-list-row:hover, .term-list-row:focus-visible { background: var(--color-paper-2); outline: none; }
+.term-list-row.is-current { border-left-color: var(--color-accent); background: var(--color-paper-2); }
+.term-list-mark { color: var(--color-muted); font: 400 9px var(--font-num); }
+.term-list-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.term-list-st { font: 400 8px var(--font-num); color: var(--color-muted); }
+.term-list-row.is-busy .term-list-st { color: var(--color-accent); }
+.term-list-row.is-done .term-list-st { color: var(--color-ok); }
+.term-list-none { margin: 6px; color: var(--color-muted); font-size: 13px; }
 .term-tab { display: inline-flex; align-items: center; border: var(--rule-hair) solid var(--color-rule); border-radius: 2px; background: var(--color-paper); }
 .term-tab.is-current { border-color: var(--color-accent); box-shadow: 0 2px 0 var(--color-accent-deep); }
 .term-tab.is-ended { opacity: 0.6; }

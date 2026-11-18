@@ -75,7 +75,10 @@ const Term = (() => {
   function mount(el) {
     root = el;
     root.classList.add("term-root");
-    root.innerHTML = `<div class="term-bar"><div class="term-tabs" role="tablist" aria-label="Terminals"></div>
+    root.innerHTML = `<div class="term-bar"><button class="term-scroll" type="button" data-term-scroll="-1" aria-label="Earlier terminals" hidden>&#9664;</button>
+      <div class="term-tabs" role="tablist" aria-label="Terminals"></div>
+      <button class="term-scroll" type="button" data-term-scroll="1" aria-label="Later terminals" hidden>&#9654;</button>
+      <button class="term-all" type="button" data-term-all aria-haspopup="listbox" aria-expanded="false" data-tip="Every terminal, to find one" hidden>&#9662;<span class="term-all-n"></span></button>
       <button class="term-add" type="button" data-term-new aria-label="New shell" data-tip="New shell">+</button>
       <span class="term-mascot">${Sprites.svg("bot", { scale: 2, idle: "blink", follow: true })}</span>
       <button class="btn btn--quiet" type="button" data-term-new>New shell</button></div>
@@ -87,6 +90,9 @@ const Term = (() => {
     panesEl = root.querySelector(".term-panes");
     root.addEventListener("click", (e) => {
       if (swallowClick) { swallowClick = false; return; } // the end of a tab drag, not a click
+      const step = e.target.closest("[data-term-scroll]");
+      if (step) { tabsEl.scrollBy({ left: Number(step.dataset.termScroll) * tabsEl.clientWidth * 0.7, behavior: "smooth" }); return; }
+      if (e.target.closest("[data-term-all]")) return toggleAll();
       if (e.target.closest("[data-term-new]")) return newShell();
       const close = e.target.closest("[data-term-close]");
       if (close) { e.stopPropagation(); return closeSession(close.dataset.termClose, close); }
@@ -101,6 +107,14 @@ const Term = (() => {
       if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) { e.preventDefault(); moveTab(name.dataset.termTab, e.key === "ArrowLeft" ? -1 : 1); }
     });
     tabsEl.addEventListener("pointerdown", startDrag);
+    // A mouse wheel scrolls the strip sideways; a touchpad's sideways swipe already does.
+    tabsEl.addEventListener("wheel", (e) => {
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX) || tabsEl.scrollWidth <= tabsEl.clientWidth) return;
+      e.preventDefault();
+      tabsEl.scrollLeft += e.deltaY;
+    }, { passive: false });
+    tabsEl.addEventListener("scroll", () => paintOverflow(), { passive: true });
+    new ResizeObserver(() => paintOverflow()).observe(tabsEl);
     // Files dropped anywhere else must not open in the window; on a terminal they paste paths.
     document.addEventListener("dragover", (e) => { if (hasFiles(e)) e.preventDefault(); });
     document.addEventListener("drop", (e) => { if (hasFiles(e) && !panesEl.contains(e.target)) e.preventDefault(); });
@@ -399,8 +413,77 @@ const Term = (() => {
     const empty = panesEl.querySelector(".term-empty");
     if (empty) empty.hidden = true;
     paintTabs();
+    tabEl(id)?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
     requestAnimationFrame(() => { fitCurrent(); s.term.focus(); });
   }
+
+  /* Many terminals: the strip scrolls with no bar over the names, fades at a cut edge, shows
+     arrows, and a list of every terminal (with a filter past eight) finds one by name. */
+  function paintOverflow() {
+    if (!tabsEl) return;
+    const over = tabsEl.scrollWidth > tabsEl.clientWidth + 2;
+    const left = tabsEl.scrollLeft > 2, right = tabsEl.scrollLeft + tabsEl.clientWidth < tabsEl.scrollWidth - 2;
+    tabsEl.classList.toggle("is-cut-left", over && left);
+    tabsEl.classList.toggle("is-cut-right", over && right);
+    for (const b of root.querySelectorAll("[data-term-scroll]")) {
+      b.hidden = !over;
+      b.disabled = Number(b.dataset.termScroll) < 0 ? !left : !right;
+    }
+    const all = root.querySelector("[data-term-all]");
+    all.hidden = !over && sessions.size < 6;
+    all.querySelector(".term-all-n").textContent = String(sessions.size);
+    if (allPop) paintAll();
+  }
+  let allPop = null;
+  function toggleAll() {
+    if (allPop) return closeAll();
+    const btn = root.querySelector("[data-term-all]");
+    allPop = document.createElement("div");
+    allPop.className = "term-list";
+    allPop.setAttribute("role", "listbox");
+    allPop.setAttribute("aria-label", "Terminals");
+    allPop.innerHTML = `${sessions.size > 8 ? '<input class="term-list-find" type="search" placeholder="Find a terminal" autocomplete="off">' : ""}<div class="term-list-rows"></div>`;
+    document.body.append(allPop);
+    const r = btn.getBoundingClientRect();
+    allPop.style.top = `${r.bottom + 4}px`;
+    allPop.style.left = `${Math.max(8, Math.min(r.right - 320, innerWidth - 328))}px`;
+    btn.setAttribute("aria-expanded", "true");
+    paintAll();
+    const find = allPop.querySelector(".term-list-find");
+    if (find) { find.addEventListener("input", paintAll); find.focus(); }
+    else allPop.querySelector(".term-list-row.is-current, .term-list-row")?.focus();
+  }
+  function paintAll() {
+    const q = (allPop.querySelector(".term-list-find")?.value || "").trim().toLowerCase();
+    const rows = [...sessions.values()].filter((s) => !q || `${tabLabel(s)} ${s.title}`.toLowerCase().includes(q));
+    allPop.querySelector(".term-list-rows").innerHTML = rows.length ? rows.map((s) => {
+      const st = !s.alive ? "ENDED" : s.busy ? "WORKING" : s.done ? "DONE" : s.id === current ? "SHOWN" : "";
+      return `<button class="term-list-row${s.id === current ? " is-current" : ""}${s.busy ? " is-busy" : ""}${s.done ? " is-done" : ""}" type="button" role="option" aria-selected="${s.id === current}" data-term-pick="${esc(s.id)}">
+        <span class="term-list-mark" aria-hidden="true">${isShell(s) ? "$" : Sprites.svg("buddy", { scale: 1 })}</span><span class="term-list-name">${esc(tabLabel(s))}</span><span class="term-list-st">${st}</span></button>`;
+    }).join("") : '<p class="term-list-none">No terminal matches.</p>';
+  }
+  function closeAll() {
+    allPop?.remove();
+    allPop = null;
+    root?.querySelector("[data-term-all]")?.setAttribute("aria-expanded", "false");
+  }
+  document.addEventListener("click", (e) => {
+    const pick = e.target.closest?.("[data-term-pick]");
+    if (pick && allPop?.contains(pick)) { closeAll(); select(pick.dataset.termPick); return; }
+    if (allPop && !allPop.contains(e.target) && !e.target.closest?.("[data-term-all]")) closeAll();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (!allPop) return;
+    if (e.key === "Escape") { e.preventDefault(); closeAll(); return; }
+    if (e.key === "Enter" && e.target.classList?.contains("term-list-find")) { e.preventDefault(); allPop.querySelector(".term-list-row")?.click(); return; }
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const items = [...allPop.querySelectorAll(".term-list-row")];
+      if (!items.length) return;
+      const i = items.indexOf(document.activeElement);
+      items[(i + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length].focus();
+    }
+  });
 
   function fitCurrent() {
     const s = sessions.get(current);
@@ -454,6 +537,7 @@ const Term = (() => {
     const empty = panesEl.querySelector(".term-empty");
     if (empty) empty.hidden = sessions.size > 0;
     if (typeof Layout !== "undefined") Layout.setBadge("terminal", [...sessions.values()].filter((s) => s.alive).length || "");
+    paintOverflow();
   }
 
   function rename(id) {
@@ -691,7 +775,9 @@ const Term = (() => {
   // A theme switch repaints the open terminals with the new colours.
   function retheme() { for (const s of sessions.values()) if (s.term) s.term.options.theme = theme(); }
 
-  return { mount, attach, select, newShell, retheme, reload, showBuild, buildWith, fit: fitCurrent, saveSnapshots, count: () => sessions.size,
+  // For Jump and the tab list: every terminal with its label and state, in tab order.
+  const list = () => [...sessions.values()].map((s) => ({ id: s.id, label: tabLabel(s), title: s.title, alive: s.alive, busy: !!s.busy, done: !!s.done, current: s.id === current, claude: !isShell(s) }));
+  return { mount, attach, select, newShell, retheme, reload, showBuild, buildWith, fit: fitCurrent, saveSnapshots, count: () => sessions.size, list,
     renderers: () => [...sessions.values()].map((s) => s.renderer), order: () => [...sessions.keys()], dropPaths,
     // The last lines of the current terminal as text: with WebGL the screen is not in the DOM.
     lines: (n = 5) => {

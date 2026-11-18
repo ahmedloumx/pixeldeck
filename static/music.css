@@ -565,12 +565,12 @@
 /* opening: a CRT switching on (a line that opens to the full window); the dropdown unrolls from the bar */
 .mc.is-opening { animation: mc-on 300ms steps(6, end) both; }
 .mc.is-closing { animation: mc-off 240ms steps(5, end) both; }
-.mc.is-dropping { animation: mc-drop 200ms steps(5, end) both; }
-.mc.is-lifting { animation: mc-lift 160ms steps(4, end) both; }
+.mc.is-dropping { animation: mc-drop 180ms cubic-bezier(0.2, 0.8, 0.2, 1) both; transform-origin: top right; }
+.mc.is-lifting { animation: mc-lift 120ms ease-in both; transform-origin: top right; }
 @keyframes mc-on { 0% { clip-path: inset(50% 0 50% 0); filter: brightness(2.2); } 40% { clip-path: inset(48% 0 48% 0); } 100% { clip-path: inset(0); filter: none; } }
 @keyframes mc-off { 0% { clip-path: inset(0); } 60% { clip-path: inset(48% 0 48% 0); filter: brightness(2); } 100% { clip-path: inset(50% 50% 50% 50%); } }
-@keyframes mc-drop { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0); } }
-@keyframes mc-lift { from { clip-path: inset(0); } to { clip-path: inset(0 0 100% 0); } }
+@keyframes mc-drop { from { opacity: 0; transform: translateY(-8px) scale(0.97); } }
+@keyframes mc-lift { to { opacity: 0; transform: translateY(-6px) scale(0.98); } }
 
 /* ------------------------------------------------------------ the crew dances while it plays */
 /* A calm 100 beats a minute: the slime hops on one beat, the bot on the next. Each hop is a

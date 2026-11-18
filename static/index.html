@@ -60,13 +60,16 @@
 </div>
 <header class="bar" id="bar">
   <div class="bar-inner">
+    <div class="bar-left">
     <a class="brand" href="#/me/needs" aria-label="PixelDeck">
       <img src="/static/app-icon.svg" alt="" width="18" height="18">
       <span>PixelDeck</span>
     </a>
     <nav class="menubar" id="menubar" aria-label="Menu"></nav>
     <button class="scope" id="scope" type="button" aria-haspopup="dialog" aria-expanded="false" data-tip="Which project, whose pull requests"></button>
-    <button class="jump-btn" id="jump-btn" type="button" data-tip="Jump to a pull request, a person or a command"><span aria-hidden="true">&#8981;</span><span class="jump-text">Jump to&hellip;</span><kbd>CTRL K</kbd></button>
+    </div>
+    <button class="jump-btn" id="jump-btn" type="button" data-tip="Jump to a pull request, a terminal, a person, a command or a song"><span aria-hidden="true">&#8981;</span><span class="jump-text">Search pull requests, terminals, music&hellip;</span><kbd>CTRL K</kbd></button>
+    <div class="bar-right">
     <span class="bar-drag" aria-hidden="true"></span>
     <div class="sync statusbar" id="status" role="group" aria-label="Status">
       <span class="st-item st-api" id="st-api" tabindex="0">
@@ -82,6 +85,7 @@
       <button class="win-btn" type="button" data-win="minimize" aria-label="Minimize" data-tip="Minimize"></button>
       <button class="win-btn" type="button" data-win="maximize" aria-label="Maximize" data-tip="Maximize"></button>
       <button class="win-btn" type="button" data-win="close" aria-label="Close" data-tip="Close"></button>
+    </div>
     </div>
   </div>
 </header>

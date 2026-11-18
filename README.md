@@ -33,8 +33,10 @@ Full documentation, with the architecture, security model and measured performan
   replace with your own.
 - **A menu bar for a title bar.** Desk, View, Go, Pull request, Team and Help gather what
   PixelDeck does; Alt and the underlined letter opens one. One chip picks the project and the
-  person, and Jump (Ctrl K) finds any pull request by number, title, ticket or branch, any
-  teammate and any menu command. In the PixelDeck window the bar replaces the system title bar:
+  person, and Jump (Ctrl K), in the middle of the bar, finds any pull request by number, title,
+  ticket or branch, any terminal, repository, teammate or menu command, and songs, albums,
+  artists and playlists on Spotify (# $ @ > ! narrow it to one kind). In the PixelDeck window
+  the bar replaces the system title bar:
   drag its empty parts to move the window, double-click to maximize, and its own buttons
   minimize, maximize and close (Personalise brings the system title bar back).
 - **One Pull Requests panel.** The queue's side menu sits on the left; a pull request opens in
@@ -118,6 +120,9 @@ Full documentation, with the architecture, security model and measured performan
 - **Devices.** PLAY ON shows the device playing with a picture of its kind (computer, phone,
   speaker, TV, car, console) and lists the others; a pick moves the music there. The status
   bar names the device when the music plays somewhere other than this computer.
+- **Many terminals.** The tab strip scrolls with the wheel and its arrows, with no scrollbar over
+  the names; long names are cut (the tooltip has them whole), and the list beside the strip finds
+  any terminal by name.
 - **Guide.** A short tour on the first start, a spotlight on each part with a mascot telling it.
   The **?** in the status bar brings it back.
 

@@ -7,8 +7,15 @@
 .bar .brand { gap: 7px; margin-right: 4px; padding-right: 12px; height: 22px; border-right: var(--rule-hair) solid var(--color-rule); border-radius: 0; }
 .bar .brand img { width: 18px; height: 18px; }
 .bar .brand span { font: 600 15px var(--font-pixel); letter-spacing: 0; }
-.bar-inner > *, .statusbar > * { flex-shrink: 0; }
+.bar-inner > *, .statusbar > *, .bar-left > *, .bar-right > * { flex-shrink: 0; }
 .bar-drag { flex: 1 1 auto; min-width: 12px; align-self: stretch; }
+/* Three parts: the menus on the left, Jump in the middle of the window, the status on the
+   right. A side that grows pushes Jump off the middle rather than under it. */
+.bar-inner { display: grid; grid-template-columns: minmax(max-content, 1fr) minmax(84px, 460px) minmax(max-content, 1fr); align-items: center; column-gap: 12px; }
+.bar-left, .bar-right { display: flex; align-items: center; gap: 6px; align-self: stretch; min-width: 0; }
+.bar-right { justify-content: flex-end; }
+.bar-right > .bar-drag { flex: 1 1 auto; min-width: 24px; }
+.jump-btn .jump-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ------------------------------------------------------------------ the menus */
 .menubar { display: flex; align-self: stretch; }
@@ -56,14 +63,27 @@
 .scope-none { margin: 4px 6px; color: var(--color-muted); font-size: 13px; }
 
 /* ------------------------------------------------------------------- Jump */
-.jump-btn { display: inline-flex; align-items: center; gap: 8px; height: 24px; min-width: 150px; padding: 0 5px 0 8px; margin-left: 4px;
+.jump-btn { display: inline-flex; align-items: center; gap: 8px; height: 24px; width: 100%; min-width: 0; overflow: hidden; padding: 0 5px 0 8px; margin: 0;
   border: var(--rule-hair) dashed var(--color-rule-2); background: none; color: var(--color-muted); font: 400 13px var(--font-body); cursor: pointer; }
 .jump-btn:hover, .jump-btn:focus-visible { border-style: solid; border-color: var(--color-accent); color: var(--color-ink); outline: none; }
 .jump-btn kbd { margin-left: auto; padding: 1px 4px; border: var(--rule-hair) solid var(--color-rule-2); background: var(--color-paper-2); color: var(--color-ink-2); font: 400 var(--num-8) var(--font-num); }
 .jump { width: min(660px, calc(100vw - 32px)); max-height: min(70dvh, 620px); margin-top: 12vh; padding: 0; border: var(--pixel) solid var(--color-accent); background: var(--color-paper); color: var(--color-ink);
   box-shadow: 4px 4px 0 oklch(8% 0 0 / 0.9); }
-.jump[open] { display: flex; flex-direction: column; animation: mb-open 130ms steps(3, end); }
+/* It drops in quickly and settles, and leaves the same way: smooth, not stepped, so a box
+   opened forty times a day never feels slow. */
+.jump[open] { display: flex; flex-direction: column; animation: jump-in 170ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
 .jump::backdrop { background: var(--color-scrim); }
+.jump[open]::backdrop { animation: jump-fade 170ms ease-out both; }
+.jump.is-closing { animation: jump-out 110ms ease-in both; }
+.jump.is-closing::backdrop { animation: jump-fade 110ms ease-in reverse both; }
+@keyframes jump-in { from { opacity: 0; transform: translateY(-10px) scale(0.97); } }
+@keyframes jump-out { to { opacity: 0; transform: translateY(-6px) scale(0.98); } }
+@keyframes jump-fade { from { opacity: 0; } }
+.jump-spin { width: 10px; height: 10px; border: 2px solid var(--color-accent); border-right-color: transparent; border-radius: 50%; opacity: 0; transition: opacity 120ms; }
+.jump-field.is-busy .jump-spin { opacity: 1; animation: turn 0.7s linear infinite; }
+.jump-list > .mb-group:first-child { padding-top: 4px; }
+@media (prefers-reduced-motion: reduce) { .jump[open], .jump[open]::backdrop, .jump.is-closing, .jump.is-closing::backdrop { animation: none; } }
+:root[data-motion="calm"] .jump[open], :root[data-motion="calm"] .jump[open]::backdrop { animation: none; }
 .jump-field { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: var(--rule-hair) solid var(--color-rule); }
 .jump-prompt { color: var(--color-accent); font: 400 var(--num-11) var(--font-num); }
 .jump-input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; color: var(--color-ink); font: 400 15px var(--font-body); }
@@ -114,9 +134,11 @@
    API figures; the sync time and part of the song title; the API meter; the song. Each stays
    in its tooltip or menu. The bar keeps at least 56 px of bare bar to drag the window by. */
 .bar-drag { min-width: 56px; }
-@media (max-width: 1720px) { .bar .st-next, .bar .st-unit, .jump-btn .jump-text { display: none; } .jump-btn { min-width: 0; } }
+@media (max-width: 2100px) { .bar .st-next { display: none; } }
+@media (max-width: 1720px) { .bar .st-unit { display: none; } }
+@media (max-width: 1600px) { .jump-btn .jump-text { font-size: 0; } .jump-btn .jump-text::before { content: "Jump to\2026"; font-size: 13px; } }
 @media (max-width: 1440px) { .bar .brand span, .bar .st-api .st-label, .bar .st-num { display: none; } .bar .brand { padding-right: 8px; } }
 @media (max-width: 1320px) { .bar .sync-text { display: none; } .bar .st-music { max-width: 140px; } .scope-text { max-width: calc(120px * var(--num-scale)); } }
-@media (max-width: 1180px) { .bar .st-api { display: none; } .bar .st-music { max-width: 110px; } }
+@media (max-width: 1180px) { .bar .st-api { display: none; } .bar .st-music { max-width: 110px; } .jump-btn .jump-text { display: none; } }
 @media (max-width: 1060px) { .bar .st-music { display: none; } .scope-text { max-width: calc(80px * var(--num-scale)); } }
 @media (max-width: 940px) { .mb-title { padding: 0 6px; font-size: 13px; } .scope-part:first-child .scope-text { display: none; } }
