@@ -1,5 +1,6 @@
-"""PixelDeck's icon: an IDE window (title bar, line numbers, code) with the desk bot peeking
-over its corner, looking up at the code. Drawn on a 32x32 pixel grid, kept minimal so the bot leads, written as SVG rects.
+"""PixelDeck's icon: the blue desk bot with a joystick on its head (red ball, steel stick, a base
+with a fire button), standing on the brand tile. Drawn on a 32x32 pixel grid as SVG rects; the
+joystick is the same one the bot wears in the app, where someone plays it now and then.
 
 Run: python3 tools/make_icon.py static/app-icon.svg"""
 import sys
@@ -15,6 +16,8 @@ C = {
     "1": "#6ea8ff", "2": "#ffcf5c", "3": "#7ee08a", "4": "#ff7ab6", "5": "#8a93a6",  # code
     # the bot, from sprites.js (b blue, B deep blue, y yellow, r red, w white, k dark)
     "b": "#2f62ec", "B": "#1b3a9c", "y": "#f6c445", "r": "#ea4a4f", "w": "#f7f8fa", "k": "#141720",
+    "s": "#9aa3b2", "S": "#4a5262", "a": "#f6c445",  # the joystick: steel stick, dark base, fire button
+    "L": "#16203a",  # the glow behind the bot
 }
 grid = [["." for _ in range(N)] for _ in range(N)]
 
@@ -49,29 +52,27 @@ for y in range(N):
 for y, x in ((1, 1), (1, N - 2), (N - 2, 1), (N - 2, N - 2)):
     grid[y][x] = "E"
 
-# the IDE window, kept plain: a title bar with its dots and three lines of code
-rect(3, 5, 25, 23, "F")
-rect(4, 8, 24, 22, "D")
-for x, c in ((5, "R"), (7, "Y"), (9, "G")):
-    rect(x, 6, x, 6, c)
-for y, x0, x1, c in ((11, 6, 13, "1"), (14, 8, 16, "5"), (17, 6, 10, "2")):
-    rect(x0, y, x1, y, c)
-    rect(x0, y + 1, x1, y + 1, c)
+# a soft glow behind the bot and a floor line under its feet
+for y in range(6, 27):
+    for x in range(6, 26):
+        if grid[y][x] == "T" and (x - 15.5) ** 2 / 90 + (y - 15) ** 2 / 110 < 1:
+            grid[y][x] = "L"
+rect(8, 25, 23, 25, "F")
 
-# the bot, peeking over the window's bottom right corner, eyes up and to the left
-bot = [".....rr.....", ".....rr.....", "......B.....", "..bbbbbbbb..", ".ybbbbbbbbb.", ".ybkwbbbkwb.", ".ybwwbbbwwb.",
-       ".ybbbbbbbbb.", ".ybbwwwwwbb.", ".ybbbbbbbbb.", "..bbbbbbbb..", "...B....B...", "..BB....BB.."]
-BX, BY = 18, 17
-# a dark outline so the bot stands off the window behind it
+# the bot, joystick and all, from sprites.js (frame 0)
+bot = [".....rr.....", "....rwrr....", "....rrrr....", ".....rr.....", ".....ss.....", "....SSaS....",
+       "..bbbbbbbb..", ".ybbbbbbbbb.", ".ybwwbbbwwb.", ".ybwkbbbwkb.", ".ybbbbbbbbb.", ".ybbwwwwwbb.", ".ybbbbbbbbb.",
+       "..bbbbbbbb..", "...B....B...", "..BB....BB.."]
+BX, BY = 10, 9
+# a dark outline so it stands off the tile
 for y, row in enumerate(bot):
     for x, c in enumerate(row):
         if c != ".":
             for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-                nx, ny = BX + x + dx, BY + y + dy
                 ry, rx = y + dy, x + dx
                 inside = 0 <= ry < len(bot) and 0 <= rx < len(row) and bot[ry][rx] != "."
-                if not inside and grid[ny][nx] not in (".", "E"):
-                    grid[ny][nx] = "k"
+                if not inside and grid[BY + ry][BX + rx] not in (".", "E"):
+                    grid[BY + ry][BX + rx] = "k"
 for y, row in enumerate(bot):
     for x, c in enumerate(row):
         if c != ".":

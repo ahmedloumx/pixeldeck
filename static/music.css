@@ -17,7 +17,7 @@
   --mu-now-bg: color-mix(in oklch, var(--mu-lcd-bg) 60%, var(--color-paper-3)); --mu-now-ink: var(--mu-lcd-ink); --mu-now-bar: var(--mu-lcd-ink);
 }
 /* Retro grey: a silver boombox with light keys; the screens stay dark, as screens are */
-:root[data-theme="grey"] {
+:root[data-tone="light"] {
   --mu-box: #a4a4a4; --mu-box-hi: #c6c6c6; --mu-box-lo: #7b7b7b; --mu-metal: #8d8d8d;
   --mu-key-hi: #fbfbfb; --mu-key-a: #e6e6e6; --mu-key-b: #cbcbcb; --mu-key-lo: #9e9e9e;
   --mu-key-ink: #151515; --mu-deck-ink: #151515; --mu-deck-muted: #3a3a3a; --mu-brand: #262626;
@@ -75,15 +75,16 @@
 .mu-ribbon .btn { min-height: 30px; font-size: var(--text-sm); }
 
 /* ------------------------------------------------------------ the boombox */
-.mu-stage { position: relative; padding-top: 58px; }
-.mu-crew { position: absolute; inset: 0 0 auto 0; height: 58px; pointer-events: none; }
+.mu-stage { position: relative; padding-top: 70px; }
+.mu-crew { position: absolute; inset: 0 0 auto 0; height: 70px; pointer-events: none; }
 /* each sits in a fixed box, centred on its feet, so a squash or a stretch never slides it sideways */
 .mu-slime, .mu-bot { position: absolute; bottom: -2px; display: flex; align-items: flex-end; justify-content: center; line-height: 0; }
 .mu-slime { left: 7%; width: 72px; height: 48px; }
-.mu-bot { right: 7%; bottom: -1px; width: 56px; height: 60px; }
+.mu-bot { right: 7%; bottom: -1px; width: 56px; height: 72px; }
 .mu-slime svg { width: 64px; height: 40px; }
-.mu-bot svg { width: 48px; height: 52px; }
+.mu-bot svg { width: 48px; height: 64px; }  /* 12 by 16: the joystick on its head */
 :root.no-mascots .mu-crew { visibility: hidden; }
+.mu-crew .mu-slime svg { pointer-events: auto; }  /* hovered, the blob has a word after a theme change */
 
 .mu-box {
   position: relative; display: grid; gap: var(--space-md); padding: 34px 22px 22px;

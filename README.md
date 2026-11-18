@@ -70,8 +70,10 @@ Full documentation, with the architecture, security model and measured performan
   taken back and new tasks notify too, and every kind is on by default.
 - **Status bar.** Bitbucket API calls used this hour, when your pull requests were read and the
   next read, the connection, the bell, settings and the guide.
-- **Themes.** Night (the default) or an optional Retro grey, which brings its own mascots: the same
-  bot in orange and the slime in purple. Terminals stay dark in both.
+- **Themes and accents.** Two dark themes (Night, the default, and Midnight) and two light ones
+  (Daylight, a warm grey, and Retro grey), with six accent colours apart. The blue bot, joystick on
+  its head, is the same in every theme; the blob, the AI helper, takes each theme's colour, and has
+  a word about its CSS if you hover it after a change. Terminals stay dark in every theme.
 - **Settings.** What PixelDeck is connected to (Bitbucket, Jira, the Claude Code CLI, git and
   terminals), what notifies you, and your look: accent colour, number font and size, motion,
   mascots.
