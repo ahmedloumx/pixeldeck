@@ -27,6 +27,7 @@ from collections import OrderedDict
 from pathlib import Path
 
 import config
+import spotifyd
 import version
 import opener
 
@@ -531,6 +532,8 @@ def _status(port):
         "env_file": str(config.env_path()), "user": None, "error": None, "can_launch": _launcher() is not None,
         # Spotify's desktop app names its device after the computer: the page tells "here" apart
         "here": socket.gethostname(),
+        # and PixelDeck's own player, when spotifyd runs it: both are this computer
+        "here_devices": [socket.gethostname(), spotifyd.device_name()],
     }
     if not client.connected():
         return out

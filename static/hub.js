@@ -149,6 +149,7 @@ const Settings = (() => {
   let tab = "connections", report = null, loading = false, musicHooked = false;
   // The setup form is redrawn with the rest of the pane, so what you typed lives here until saved.
   let setup = null, draft = {}, checks = null;
+  let player = null, jiraOpen = false, playerPoll = 0;
   const TOKEN_PAGE = "https://id.atlassian.com/manage-profile/security/api-tokens";
   const dialog = () => document.getElementById("settings-dialog");
   const pill = (ok, yes, no) => `<span class="set-pill is-${ok === true ? "ok" : ok === false ? "bad" : "warn"}">${esc(ok === true ? yes : ok === false ? no : "Checking")}</span>`;
@@ -167,10 +168,7 @@ const Settings = (() => {
         <div class="set-meter" data-tip="${used} of ${limit} calls used in the last hour"><span style="--w:${Math.min(1, used / limit).toFixed(3)}"></span></div>
         <p class="set-hint">${used} of ${limit} API calls used in the last hour. Change the account or the token in <button class="link" type="button" data-settings-tab="setup">Setup</button>.</p>
         <p><button class="btn" type="button" data-settings-test>Test the connection</button></p></section>
-      ${jira ? `<section class="set-card"><header><h3>Jira</h3>${pill(jira.ok, jira.me ? `Connected as ${jira.me}` : "Connected", jira.site ? (jira.token_set ? "Token refused" : "No Jira token") : "Not set up")}</header>
-        ${jira.error ? `<p class="set-error">${esc(jira.error)}</p>` : ""}
-        <dl class="set-rows">${row("Site", jira.site)}${row("Token", jira.token_set ? "set (never shown)" : "missing")}</dl>
-        <p class="set-hint">Used to show and move a ticket's status when you merge. Set <code>JIRA_SITE</code> and <code>JIRA_TOKEN</code>, an API token with Jira access; the Bitbucket token is never sent to Jira.</p></section>` : ""}
+      ${jira ? jiraHtml(jira, bb) : ""}
       <section class="set-card"><header><h3>Claude Code</h3>${pill(cl.ok, "Ready", cl.path ? "Not answering" : "Not found")}</header>
         ${cl.error ? `<p class="set-error">${esc(cl.error)}</p>` : ""}
         <dl class="set-rows">${row("Program", cl.path, { code: true })}${row("Version", cl.version)}</dl>
@@ -223,6 +221,47 @@ const Settings = (() => {
       paint(); load();
     } catch (err) { toast("Not saved.", err.message, true); }
   }
+  // Jira: what is set, and a form to set it up or change it. The token is written, never read back.
+  function jiraHtml(jira, bb) {
+    const setUp = !!(jira.site && jira.token_set);
+    const form = `<form class="set-form" data-jira-form>
+        <label class="field-block"><span>Site</span><input type="url" name="site" data-keep="jira-site" placeholder="https://your-team.atlassian.net" value="${esc(jira.site || "")}" autocomplete="off" required></label>
+        <label class="field-block"><span>Email</span><input type="email" name="email" data-keep="jira-email" placeholder="${esc(bb?.email || "you@company.com")}" value="${esc(jira.email && jira.email !== bb?.email ? jira.email : "")}" autocomplete="off"></label>
+        <label class="field-block"><span>API token</span><input type="password" name="token" data-keep="jira-token" placeholder="${jira.token_set ? "Saved: leave empty to keep it" : "Paste the token"}" autocomplete="new-password"></label>
+        <p class="set-hint">Create a token at <button class="link" type="button" data-external="https://id.atlassian.com/manage-profile/security/api-tokens">id.atlassian.com, Security, API tokens</button>, signed in as the Atlassian account you use for Jira. Leave the email empty when it is the Bitbucket one${bb?.email ? ` (${esc(bb.email)})` : ""}.</p>
+        <p class="set-error" data-jira-error hidden></p>
+        <p class="set-actions"><button class="btn btn--primary" type="submit">Save and test</button>${setUp ? ' <button class="btn btn--quiet" type="button" data-jira-clear>Remove</button>' : ""}</p></form>`;
+    return `<section class="set-card"><header><h3>Jira</h3>${pill(jira.ok, jira.me ? `Connected as ${jira.me}` : "Connected", jira.site ? (jira.token_set ? "Token refused" : "No Jira token") : "Not set up")}</header>
+        ${jira.error ? `<p class="set-error">${esc(jira.error)}</p>` : ""}
+        <dl class="set-rows">${row("Site", jira.site)}${row("Email", jira.email)}${row("Token", jira.token_set ? "set (never shown)" : "missing")}</dl>
+        <p class="set-hint">Shows a ticket's status in the merge popup and moves it once the merge is through. The Bitbucket token is never sent to Jira.</p>
+        ${setUp ? `<details class="set-more"${jiraOpen ? " open" : ""}><summary>Change the Jira settings</summary>${form}</details>` : form}</section>`;
+  }
+  // PixelDeck's own Spotify player (spotifyd): installed, signed in, running.
+  function playerHtml() {
+    const pl = player;
+    if (!pl) return "";
+    const label = !pl.enabled ? "Turned off" : !pl.installed ? "Not installed" : !pl.signed_in ? "Not signed in"
+      : pl.state === "running" ? "Playing as " + pl.device_name : pl.state === "stopped" ? "Stopped, restarting" : pl.state === "error" ? "Could not start" : "Starting";
+    const tone = pl.state === "running" ? "ok" : !pl.installed || pl.state === "error" ? "bad" : "warn";
+    const si = pl.signin || {};
+    let action = "";
+    if (!pl.installed) {
+      action = `<p class="set-hint">Install spotifyd from <button class="link" type="button" data-external="${esc(pl.install_url)}">its releases page</button> (the Linux file ending in <code>x86_64-full.tar.gz</code>) and put <code>spotifyd</code> in <code>~/.local/bin</code>, then open these settings again.</p>`;
+    } else if (si.state === "waiting") {
+      action = `<p class="set-hint">Waiting for you in the browser: log in to Spotify there.${si.url ? ` No browser opened? <button class="link" type="button" data-external="${esc(si.url)}">Open the login page</button>.` : ""}</p>`;
+    } else if (!pl.signed_in) {
+      action = `<p class="set-hint">Sign in once, on Spotify's own login page: PixelDeck never sees your password. It needs Spotify Premium.</p>
+        ${si.state === "failed" ? `<p class="set-error">${esc(si.error || "The sign-in did not finish.")}</p>` : ""}
+        <p class="set-actions"><button class="btn btn--primary" type="button" data-spotifyd-signin>Sign in to Spotify</button></p>
+        <dl class="set-rows">${row("Or in a terminal", pl.signin_command, { code: true, copy: true })}</dl>`;
+    } else {
+      action = `${pl.error ? `<p class="set-error">${esc(pl.error)}</p>` : ""}<p class="set-actions"><button class="btn" type="button" data-spotifyd-restart>Restart the player</button></p>`;
+    }
+    return `<div class="set-sub"><header><h4>PixelDeck's player</h4><span class="set-pill is-${tone}">${esc(label)}</span></header>
+        <p class="set-hint">Plays without the Spotify app: spotifyd, an open-source Spotify Connect player, runs while PixelDeck runs and shows in your devices as <b>${esc(pl.device_name)}</b>. It is not made by Spotify.</p>
+        ${action}</div>`;
+  }
   // The music player owns the Spotify connection; this card shows it and borrows its buttons.
   function spotifyHtml() {
     if (typeof Music === "undefined" || !(state.features || []).includes("spotify")) return "";
@@ -238,7 +277,7 @@ const Settings = (() => {
         ${sp.error ? `<p class="set-error">${esc(sp.error)}</p>` : ""}
         <dl class="set-rows">${row("Plan", plan)}${row("Client ID", sp.configured ? (sp.client_id_ok ? "set" : "set, but it does not look like a Spotify client ID") : `missing: ${sp.setting}`)}${row("Redirect URI", sp.redirect_uri, { code: true, copy: true })}</dl>
         <p class="set-hint">For the Music panel. Register the redirect URI exactly as shown in your Spotify app, and put its Client ID in <code>${esc(sp.setting)}</code>. Play, pause, skip, seek and volume need Spotify Premium, for you and for the app's owner.</p>
-        <p>${buttons}</p></section>`;
+        <p>${buttons}</p>${playerHtml()}</section>`;
   }
   function lookHtml() {
     const p = Prefs.get();
@@ -289,8 +328,16 @@ const Settings = (() => {
     const same = pane.dataset.tab === tab;
     const top = same ? pane.scrollTop : 0;
     pane.dataset.tab = tab;
+    const kept = {};
+    for (const el of pane.querySelectorAll("[data-keep]")) kept[el.dataset.keep] = el.value;
+    const focused = document.activeElement?.dataset?.keep;
+    jiraOpen = !!pane.querySelector("details.set-more[open]") || jiraOpen;
     pane.innerHTML = `<header class="set-head"><h2 id="settings-title">${esc(TABS.find(([id]) => id === tab)[1])}</h2>
         <button class="btn btn--quiet" type="button" data-settings-close aria-label="Close settings">Close</button></header>${body}`;
+    if (same) {
+      for (const el of pane.querySelectorAll("[data-keep]")) if (el.dataset.keep in kept) el.value = kept[el.dataset.keep];
+      if (focused) pane.querySelector(`[data-keep="${focused}"]`)?.focus();
+    }
     pane.scrollTop = top;
     if (!same) { pane.classList.remove("is-switching"); void pane.offsetWidth; pane.classList.add("is-switching"); }
   }
@@ -304,8 +351,8 @@ const Settings = (() => {
     loading = true; paint();
     const wantSetup = (state.features || []).includes("setup");
     try {
-      [report, setup] = await Promise.all([api(test ? "settings-test" : "settings", test ? { method: "POST", body: {} } : undefined),
-        wantSetup ? api("setup") : null]);
+      [report, setup, player] = await Promise.all([api(test ? "settings-test" : "settings", test ? { method: "POST", body: {} } : undefined),
+        wantSetup ? api("setup") : null, (state.features || []).includes("spotifyd") ? api("spotifyd").catch(() => null) : null]);
     } catch (err) { toast("Could not read the settings.", err.message, true); }
     loading = false;
     if (dialog()?.open) paint();
@@ -323,6 +370,25 @@ const Settings = (() => {
     const tabBtn = t.closest("[data-settings-tab]");
     if (tabBtn) { tab = tabBtn.dataset.settingsTab; return paint(); }
     if (t.closest("[data-settings-close]")) return dialog().close();
+    if (t.closest("[data-jira-clear]")) {
+      const b = t.closest("[data-jira-clear]");
+      if (!armed(b, "Sure? Remove Jira")) return;
+      try { const out = await busy(b, () => api("jira-settings", { method: "POST", body: { clear: true } })); report.jira = out.jira; jiraOpen = false; paint(); toast("Jira settings removed."); }
+      catch (err) { toast("Could not remove the Jira settings.", err.message, true); }
+      return;
+    }
+    if (t.closest("[data-spotifyd-signin]")) {
+      const b = t.closest("[data-spotifyd-signin]");
+      try { player = await busy(b, () => api("spotifyd-signin", { method: "POST", body: {} })); } catch (err) { toast("Could not start the sign-in.", err.message, true); return; }
+      paint();
+      followPlayer();
+      return;
+    }
+    if (t.closest("[data-spotifyd-restart]")) {
+      const b = t.closest("[data-spotifyd-restart]");
+      try { player = await busy(b, () => api("spotifyd-restart", { method: "POST", body: {} })); paint(); } catch (err) { toast("Could not restart the player.", err.message, true); }
+      return;
+    }
     if (t.closest("[data-settings-test]")) {
       const b = t.closest("[data-settings-test]");
       await busy(b, () => load(true));
@@ -350,6 +416,34 @@ const Settings = (() => {
     if (!form.closest("#settings-dialog")) return;
     if (form.matches("[data-setup-form]")) { e.preventDefault(); saveSetup("setup", form, form.querySelector("[type=submit]")); }
     if (form.matches("[data-setup-import]")) { e.preventDefault(); saveSetup("setup-import", form, form.querySelector("[type=submit]")); }
+  });
+  // While a sign-in waits on the browser, ask every two seconds how it went (five minutes at most).
+  function followPlayer(started = Date.now()) {
+    clearTimeout(playerPoll);
+    if ((player?.signin?.state !== "waiting") || Date.now() - started > 300000) { if (typeof Music !== "undefined") Music.refresh(); return; }
+    playerPoll = setTimeout(async () => {
+      try { player = await api("spotifyd"); } catch { /* the next look */ }
+      if (dialog()?.open && tab === "connections") paint();
+      if (player?.signin?.state === "done") toast("Signed in: PixelDeck's player is on.", `It shows in your Spotify devices as ${player.device_name}.`);
+      followPlayer(started);
+    }, 2000);
+  }
+  document.addEventListener("submit", async (e) => {
+    const form = e.target.closest?.("[data-jira-form]");
+    if (!form) return;
+    e.preventDefault();
+    const b = form.querySelector("[type=submit]"), err = form.querySelector("[data-jira-error]");
+    err.hidden = true;
+    const body = { site: form.site.value, email: form.email.value, token: form.token.value };
+    try {
+      const out = await busy(b, () => api("jira-settings", { method: "POST", body }));
+      report.jira = out.jira;
+      jiraOpen = !out.jira.ok;
+      for (const el of form.querySelectorAll("[data-keep]")) el.value = "";
+      paint();
+      if (out.jira.ok) toast(`Jira connected${out.jira.me ? ` as ${out.jira.me}` : ""}.`, "Tickets show their status in the merge popup now.");
+      else toast("Saved, but Jira refused it.", out.jira.error || "", true);
+    } catch (ex) { err.textContent = ex.message; err.hidden = false; }
   });
   document.addEventListener("change", (e) => {
     const t = e.target;

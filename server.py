@@ -21,6 +21,7 @@ import mimetypes
 import secrets
 import shutil
 import sys
+import threading
 import time
 import traceback
 from http import HTTPStatus
@@ -37,6 +38,7 @@ import connections  # noqa: E402
 import repos  # noqa: E402
 import sessions  # noqa: E402
 import spotify  # noqa: E402
+import spotifyd  # noqa: E402
 import jira  # noqa: E402
 import launcher  # noqa: E402
 import lyrics  # noqa: E402
@@ -58,8 +60,8 @@ AGENT_KEY = secrets.token_urlsafe(32)
 AGENT_ROUTES = {("POST", "propose"), ("GET", "proposal")}
 PROPOSALS = proposals.Proposals()
 FEATURES = ["merge", "sync", "drop", "proposals", "snapshots", "reviews", "events", "status", "settings", "merge-options", "jira",
-            "restore", "ui-state", "open-link", *account.FEATURES, *repos.FEATURES, *spotify.FEATURES, "lyrics"]
-ROUTE_MODULES = (account, repos, spotify, lyrics)  # each answers its own routes, or None
+            "restore", "ui-state", "open-link", *account.FEATURES, *repos.FEATURES, *spotify.FEATURES, *spotifyd.FEATURES, "lyrics", "jira-settings"]
+ROUTE_MODULES = (account, repos, spotify, spotifyd, lyrics)  # each answers its own routes, or None
 JIRA = jira.Jira()
 SNAPSHOT_MAX = 4 * 1024 * 1024
 MIN_COLS, MIN_ROWS = 20, 4  # a collapsed panel must not squeeze a program into a sliver
@@ -359,6 +361,8 @@ class Desk(BaseHTTPRequestHandler):
                 repo = (query.get("repo") or [""])[0]
                 pr_id = int((query.get("id") or ["0"])[0])
                 return self._send(200, actions.merge_options(engine, repo, pr_id))
+            if method == "POST" and route == "jira-settings":
+                return self._send(200, {"jira": jira.save_settings(JIRA, body)})
             if method == "GET" and route == "ticket":
                 return self._send(200, JIRA.ticket((query.get("key") or [""])[0]))
             if method == "POST" and route == "ticket-move":
@@ -680,6 +684,10 @@ def main():
     Desk.keeper = sessions.Keeper(TERMS)
     Desk.keeper.run()
     atexit.register(Desk.keeper.save)
+    # PixelDeck's own Spotify player, when spotifyd is installed and signed in: it runs while
+    # the server runs and stops with it.
+    atexit.register(spotifyd.PLAYER.stop)
+    threading.Thread(target=spotifyd.PLAYER.start, name="spotifyd-start", daemon=True).start()
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     write_agent_key(args.port)
     if not args.no_refresh:

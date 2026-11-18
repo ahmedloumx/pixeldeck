@@ -588,8 +588,9 @@ const Music = (() => {
     miniEls.title.setAttribute("aria-label", item ? `Now playing: ${item.name} by ${item.artists.join(", ")}. Open the music dropdown.` : "Open the music dropdown");
     const want = artKey(player ? item : null);
     if (miniEls.art.dataset.art !== want) drawArt(miniEls.art, want, 18);
-    const dev = player?.device, here = String(status?.here || "").toLowerCase();
-    const away = !!dev?.name && !!item && dev.name.toLowerCase() !== here && (mode === "demo" || !!here);
+    const dev = player?.device;
+    const here = (status?.here_devices || [status?.here]).filter(Boolean).map((n) => String(n).toLowerCase());
+    const away = !!dev?.name && !!item && !here.includes(dev.name.toLowerCase()) && (mode === "demo" || here.length > 0);
     miniEls.where.hidden = !away;
     if (away && typeof MusicDevices !== "undefined") {
       const html = `${MusicDevices.icon(dev.type, "mm-where-pic")}<span>${esc(dev.name)}</span>`;

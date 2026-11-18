@@ -241,7 +241,8 @@ wins over the file, the file wins over Windows Credential Manager (for `BITBUCKE
 | `BITBUCKET_PROJECT` | Start scoped to one project key. Empty: every project. |
 | `JIRA_SITE`, `TICKET_PREFIXES` | Turn ticket keys such as `ABC-123` in branches and titles into Jira links. |
 | `SPOTIFY_CLIENT_ID` | The Client ID of your own Spotify app, for the music player (see below). |
-| `JIRA_TOKEN`, `JIRA_EMAIL` | An Atlassian API token with Jira access, to show and move a ticket's status in the merge popup. Classic and scoped tokens both work; the Bitbucket token is never sent to Jira. `JIRA_EMAIL` defaults to `BITBUCKET_EMAIL`. |
+| `JIRA_TOKEN`, `JIRA_EMAIL` | An Atlassian API token with Jira access, to show and move a ticket's status in the merge popup. Classic and scoped tokens both work; the Bitbucket token is never sent to Jira. `JIRA_EMAIL` defaults to `BITBUCKET_EMAIL`. **Settings, Connections, Jira** sets all three without editing the file, and tries them at once; the token is never shown back. |
+| `SPOTIFYD`, `SPOTIFYD_PATH`, `SPOTIFYD_DEVICE_NAME` | PixelDeck's own Spotify player (see below): `SPOTIFYD=off` turns it off, `SPOTIFYD_PATH` names the program when it is not on the PATH or in `~/.local/bin`, the device name defaults to `PixelDeck`. |
 | `PIXELDECK_WORKSPACE_ROOT` | The folder with your local clones. Default: the folder PixelDeck sits in. |
 | `PIXELDECK_RELEASE_REPOS` | Glob patterns of repos whose pull requests target master or main before develop. |
 | `PIXELDECK_BRIEFS_DIR` | Your own Claude brief templates (see below). |
@@ -282,6 +283,18 @@ Spotify gives each app its own Client ID, so everyone who runs PixelDeck uses an
 Spotify Premium is needed for the app's owner (in development mode) and for play, pause, skip,
 seek and volume. In development mode an app works for its owner and up to 5 people added under
 User Management. The player shows the exact redirect URI to register, with a copy button.
+
+#### Music without the Spotify app
+
+Spotify's Web API only steers a Spotify app that is open somewhere. To play with none open,
+install [spotifyd](https://github.com/Spotifyd/spotifyd), a small open-source Spotify Connect
+player (not made by Spotify; Premium needed): the Linux file ending in `x86_64-full.tar.gz` from
+its releases, with `spotifyd` put in `~/.local/bin`. Then press **Sign in to Spotify** under
+**Settings, Connections, Spotify**: Spotify's own login page opens in your browser, and the login
+is kept in PixelDeck's state folder, readable by you only. From then on PixelDeck starts it with
+the server, as the device **PixelDeck** playing through this computer's speakers, restarts it if
+it stops, and stops it with the server. It never announces itself on the network, so nobody on
+the same Wi-Fi can take it over.
 
 ### Claude brief templates
 

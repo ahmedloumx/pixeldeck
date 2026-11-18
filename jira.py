@@ -12,6 +12,7 @@ import json
 import re
 import threading
 import urllib.error
+import urllib.parse
 import urllib.request
 
 import config
@@ -158,3 +159,49 @@ class Jira:
             raise ValueError(f"{key} cannot take that step from {current['status']['name']}; reload it")
         self._request("POST", f"/rest/api/3/issue/{key}/transitions", {"transition": {"id": str(transition)}})
         return self.ticket(key)
+
+
+# ---- set up from the settings ---------------------------------------------------
+
+EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
+
+
+def save_settings(client, body):
+    """Save the Jira site, email and API token from the settings, then try them at once.
+
+    The site must be a bare https address (the token is sent there and nowhere else). An empty
+    token keeps the saved one; an empty email falls back to BITBUCKET_EMAIL. With "clear", all
+    three go. The token goes to the system's credential store when there is one, else to the
+    settings file, and never back to the page."""
+    import credentials  # noqa: PLC0415 - kept beside the one use, as in account.py
+
+    keys = ("JIRA_SITE", "JIRA_EMAIL", "JIRA_TOKEN")
+    if body.get("clear"):
+        config.save({k: "" for k in keys})
+        credentials.store().delete("JIRA_TOKEN")
+        client.base = None
+        client.state = {"ok": None, "me": None, "error": None}
+        return client.status()
+    site = str(body.get("site") or "").strip().rstrip("/")
+    email = str(body.get("email") or "").strip()
+    token = str(body.get("token") or "").strip()
+    parts = urllib.parse.urlsplit(site)
+    if parts.scheme != "https" or not parts.netloc or parts.path not in ("", "/") or parts.query or parts.fragment:
+        raise ValueError("The site is your Jira address, such as https://your-team.atlassian.net")
+    if email and not EMAIL.fullmatch(email):
+        raise ValueError("The email is the one you sign in to Atlassian with.")
+    if any(c.isspace() for c in token):
+        raise ValueError("A token has no spaces; paste it again.")
+    if not token and not config.get("JIRA_TOKEN"):
+        raise ValueError("Paste an API token: id.atlassian.com, Security, API tokens.")
+    values = {"JIRA_SITE": f"{parts.scheme}://{parts.netloc}", "JIRA_EMAIL": email}
+    if token:
+        store = credentials.store()
+        if store.name:
+            store.set("JIRA_TOKEN", token)
+            values["JIRA_TOKEN"] = ""  # off the file, so the store's value is the one read
+        else:
+            values["JIRA_TOKEN"] = token
+    config.save(values)
+    client.base = None  # the new settings find their base again
+    return client.check()
