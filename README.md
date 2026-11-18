@@ -71,7 +71,8 @@ Full documentation, with the architecture, security model and measured performan
 - **Themes.** Night (the default) or an optional Retro grey, which brings its own mascots: the same
   bot in orange and the slime in purple. Terminals stay dark in both.
 - **Settings.** What PixelDeck is connected to (Bitbucket, Jira, the Claude Code CLI, git and
-  terminals), what notifies you, and your look: accent colour, number font, motion, mascots.
+  terminals), what notifies you, and your look: accent colour, number font and size, motion,
+  mascots.
 - **Team and insights.** Your teammates' queues, review load and merge history. Insights pick a
   range, from 7 days to 120; a month or less is charted per day.
 - **Repos.** A tab beside the queue, split into a side menu and a pane: the project's repositories
@@ -299,7 +300,7 @@ on every request, so a reload shows a change. The documentation describes each f
 
 - [xterm.js](https://xtermjs.org/) and its fit, WebGL, Unicode 11 and serialize add-ons, MIT license.
 - Fonts: Press Start 2P, Pixelify Sans and Host Grotesk, SIL Open Font License 1.1.
-- Numbers use the ArcadeClassic font by Pizzadude when it is installed on your computer. Its
+- The Arcade number font is ArcadeClassic by Pizzadude when it is installed on your computer. Its
   license allows personal use only, so PixelDeck does not ship it; without it, Press Start 2P
   stands in.
 

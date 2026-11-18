@@ -8,7 +8,7 @@
 
 const Prefs = (() => {
   const KEY = "prdesk.prefs.v1";
-  const DEFAULTS = { theme: "night", accent: "amber", motion: "auto", numbers: "arcade", mascots: true, bubbles: true, games: false, titlebar: "custom" };
+  const DEFAULTS = { theme: "night", accent: "amber", motion: "auto", numbers: "arcade", numSize: "small", mascots: true, bubbles: true, games: false, titlebar: "custom" };
   let prefs = (() => { try { return { ...DEFAULTS, ...(JSON.parse(localStorage.getItem(KEY)) || {}) }; } catch { return { ...DEFAULTS }; } })();
   const listeners = new Set();
   function apply() {
@@ -17,6 +17,7 @@ const Prefs = (() => {
     root.dataset.theme = prefs.theme === "grey" ? "grey" : "night";
     root.dataset.motion = prefs.motion === "calm" ? "calm" : "";
     root.dataset.numbers = prefs.numbers;
+    root.dataset.numSize = prefs.numSize;
     root.classList.toggle("no-mascots", !prefs.mascots);
   }
   function set(patch) {
@@ -198,13 +199,18 @@ const Settings = (() => {
     const swatches = [["amber", "Amber"], ["cool", "Arcade blue"], ["slime", "Slime green"], ["pink", "Neon pink"]]
       .map(([v, label]) => `<button class="swatch-btn" type="button" data-pref="accent" data-value="${v}" aria-pressed="${p.accent === v}" data-swatch="${v}"><span aria-hidden="true"></span>${label}</button>`).join("");
     const toggle = (key, label, hint) => `<label class="switch"><input type="checkbox" data-pref-toggle="${key}"${p[key] ? " checked" : ""}><span class="switch-knob" aria-hidden="true"></span><span>${esc(label)}${hint ? `<small>${esc(hint)}</small>` : ""}</span></label>`;
-    const fontOk = (() => { try { return document.fonts.check('16px "ArcadeClassic"'); } catch { return false; } })();
+    // fonts.check() answers true for any font that is not a web font, installed or not; the
+    // "Arcade Local" face knows whether its local() source loaded.
+    const arcade = [...document.fonts].find((f) => f.family.replace(/"/g, "") === "Arcade Local");
+    if (arcade?.status === "unloaded") arcade.load().catch(() => {});
+    const arcadeHint = { loaded: " (it is)", error: " (it is not, so Press Start stands in)" }[arcade?.status] || "";
     const themes = [["night", "Night"], ["grey", "Retro grey"]]
       .map(([v, label]) => `<button class="swatch-btn theme-btn" type="button" data-pref="theme" data-value="${v}" aria-pressed="${p.theme === v}" data-theme-swatch="${v}"><span aria-hidden="true"></span>${label}</button>`).join("");
     return `<div class="set-block"><h3>Theme</h3><div class="swatches">${themes}</div><p class="set-hint">Retro grey comes with its own mascots: an orange bot and a purple slime.</p></div>
       <div class="set-block"><h3>Accent</h3><div class="swatches">${swatches}</div></div>
-      <div class="set-block"><h3>Numbers</h3><div class="date-bar">${choice("numbers", "arcade", "Arcade")}${choice("numbers", "press", "Press Start")}${choice("numbers", "plain", "Plain")}</div>
-        <p class="set-hint">Arcade uses the ArcadeClassic font when it is installed on this computer${fontOk ? " (it is)" : " (it is not, so Press Start stands in)"}.</p></div>
+      <div class="set-block"><h3>Numbers</h3><div class="date-bar">${choice("numbers", "arcade", "Arcade")}${choice("numbers", "press", "Press Start")}${choice("numbers", "pixelify", "Pixelify")}${choice("numbers", "plain", "Plain")}</div>
+        <div class="date-bar">${choice("numSize", "small", "Small")}${choice("numSize", "medium", "Medium")}${choice("numSize", "large", "Large")}</div>
+        <p class="set-hint">Counts, badges and the small labels. Arcade uses the ArcadeClassic font when it is installed on this computer${arcadeHint}.</p></div>
       <div class="set-block"><h3>Motion</h3><div class="date-bar">${choice("motion", "auto", "Follow the system")}${choice("motion", "calm", "Calm")}</div></div>
       ${typeof PixelChrome !== "undefined" && PixelChrome.available() ? `<div class="set-block"><h3>Title bar</h3><div class="date-bar">${choice("titlebar", "custom", "PixelDeck's menu bar")}${choice("titlebar", "system", "The system's")}</div>
         <p class="set-hint">PixelDeck's own bar moves the window from its empty parts and carries the window buttons. The system's brings back the usual title bar above it.</p></div>` : ""}

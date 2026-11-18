@@ -27,6 +27,11 @@
   --bar-height: 60px; --drawer-width: min(640px, 100%); --control: 36px;
   --font-pixel: "Pixelify Sans", var(--font-display);
   --font-num: "Press Start 2P", var(--font-pixel);
+  /* Small text in the number font takes its size from these, so the Numbers size setting reaches it. */
+  --num-scale: 1;
+  --num-7: calc(7px * var(--num-scale)); --num-8: calc(8px * var(--num-scale)); --num-9: calc(9px * var(--num-scale));
+  --num-10: calc(10px * var(--num-scale)); --num-11: calc(11px * var(--num-scale)); --num-12: calc(12px * var(--num-scale));
+  --num-14: calc(14px * var(--num-scale));
   --font-term: var(--font-outlier);
   --slot-head: 38px;
   --color-accent-deep: oklch(58% 0.13 68); --color-cool-deep: oklch(52% 0.12 262); --color-bad-deep: oklch(50% 0.15 25);
