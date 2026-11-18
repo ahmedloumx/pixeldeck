@@ -11,6 +11,7 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 
 import config
 import gitscan
@@ -76,7 +77,8 @@ def report(engine, port, workspace_root, terminal_problem):
         "git": git(),
         "app": {
             "port": port, "version": version.VERSION, "workspace_root": str(workspace_root), "python": platform.python_version(),
-            "platform": sys.platform, "app_dir": str(config.APP_DIR),
+            # the packaged app's own folder, not the bundle folder inside it
+            "platform": sys.platform, "app_dir": str(Path(sys.executable).parent if config.FROZEN else config.APP_DIR),
             "briefs_dir": str(config.briefs_dir() or ""), "terminal": terminal_problem or None,
         },
     }

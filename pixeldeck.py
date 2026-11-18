@@ -8,6 +8,11 @@
   python3 pixeldeck.py --propose --repo R --branch B --title T [--description-file F]
                                   ask PixelDeck to open a pull request and wait for you
                                   (exit 0 opened, 2 declined, 3 still waiting, 4 error)
+  python3 pixeldeck.py --stop-if-idle    stop the server unless a terminal or a proposal is
+                                  open (exit 5 then); the installer runs it before an update
+  python3 pixeldeck.py --forget-tokens   remove the tokens from the system's credential store
+
+The packaged app is the same program, named pixeldeck (and pixeldeckw, without a console, on Windows).
 
 The window, best first:
   Linux    its own GTK 4 + WebKitGTK window, when PyGObject and WebKitGTK 6 are installed
@@ -31,11 +36,33 @@ import webbrowser
 from pathlib import Path
 
 import config
+import credentials
 import version
 
 HERE = config.APP_DIR
 WINDOWS = sys.platform == "win32"
 MACOS = sys.platform == "darwin"
+# The packaged app is one program in two forms: pixeldeck (a console program, for terminals and
+# agents) and, on Windows, pixeldeckw (no console, for the Start menu). Either one starts the
+# server as `pixeldeck --server`.
+CLI = "pixeldeck" if config.FROZEN else "pixeldeck.py"
+
+
+def tell(message, error=False):
+    """Print it, or show it in a box from pixeldeckw, whose output nobody would see."""
+    if sys.stdout is not None:
+        print(message, file=sys.stderr if error else sys.stdout, flush=True)
+    elif WINDOWS:
+        import ctypes
+        ctypes.windll.user32.MessageBoxW(None, message, config.APP_NAME, 0x10 if error else 0x40)
+
+
+def server_argv():
+    if not config.FROZEN:
+        return [sys.executable, str(HERE / "server.py"), "--port", str(config.port())]
+    # The console form, so the server's output reaches its log even when pixeldeckw starts it.
+    console = Path(sys.executable).with_name("pixeldeck.exe")
+    return [str(console if console.is_file() else sys.executable), "--server"]
 
 
 def url():
@@ -76,8 +103,7 @@ def start_server():
     # python.exe on Windows runs the real interpreter as a child, with a pid of its own.
     start = secrets.token_hex(8)
     with log:  # the server has its own handle on it
-        proc = subprocess.Popen([sys.executable, str(HERE / "server.py"), "--port", str(config.port())],
-                                cwd=str(HERE), env={**os.environ, "PIXELDECK_START_ID": start},
+        proc = subprocess.Popen(server_argv(), cwd=str(HERE), env={**os.environ, "PIXELDECK_START_ID": start},
                                 stdin=subprocess.DEVNULL, stdout=log, stderr=log, **flags)
     for _ in range(80):
         info = health()
@@ -94,7 +120,8 @@ def start_server():
         if info.get("pid"):
             state_file("server.pid").write_text(str(info["pid"]))
         return
-    sys.exit(f"PixelDeck did not start; see {state_file('server.log')}")
+    tell(f"PixelDeck did not start; see {state_file('server.log')}", error=True)
+    sys.exit(1)
 
 
 def stop_server():
@@ -120,10 +147,32 @@ def stop_server():
     print("PixelDeck stopped")
 
 
+def stop_if_idle():
+    """For the installer: stop the server, unless that would cut off a terminal or a proposal."""
+    info = health(timeout=3)
+    if info is None:
+        return 0
+    # An older server does not say (None): it counts as busy.
+    if info.get("terminals") != 0 or info.get("proposals") != 0:
+        tell(f"PixelDeck has open terminals or a pending proposal. Finish them, or run  {CLI} --stop  "
+             "to close them, then try again.", error=True)
+        return 5
+    stop_server()
+    return 0
+
+
+def forget_tokens():
+    store = credentials.store()
+    for key in config.SECRET_KEYS:
+        store.delete(key)
+    print(f"Removed PixelDeck's tokens from {store.name}" if store.name else "This system has no credential store: nothing to remove")
+
+
 # ------------------------------------------------------------------ window
 
 def has_webkit_window():
-    if not sys.platform.startswith("linux"):
+    # The packaged app cannot run app_window.py, and GTK does not bundle well: it uses a browser.
+    if config.FROZEN or not sys.platform.startswith("linux"):
         return False
     probe = ('import gi; gi.require_version("Gtk", "4.0"); gi.require_version("WebKit", "6.0"); '
              'from gi.repository import WebKit')
@@ -251,6 +300,8 @@ def main():
     group.add_argument("--stop", action="store_true")
     group.add_argument("--server", action="store_true")
     group.add_argument("--propose", action="store_true", help="ask PixelDeck to open a pull request")
+    group.add_argument("--stop-if-idle", action="store_true", help="stop the server unless a terminal or a proposal is open")
+    group.add_argument("--forget-tokens", action="store_true", help="remove the tokens from the credential store")
     parser.add_argument("--repo", help="--propose: the repository slug")
     parser.add_argument("--branch", help="--propose: the pushed branch")
     parser.add_argument("--dest", help="--propose: the branch to merge into (default: the repo's usual one)")
@@ -269,6 +320,11 @@ def main():
         return
     if args.stop:
         stop_server()
+        return
+    if args.stop_if_idle:
+        sys.exit(stop_if_idle())
+    if args.forget_tokens:
+        forget_tokens()
         return
     if args.server:
         os.chdir(HERE)
@@ -289,11 +345,11 @@ def main():
             stop_server()
             start_server()
         elif None in busy:  # a server from before /healthz said what a stop would cut off
-            print("PixelDeck changed since its server started. To load the new code, run  pixeldeck.py --stop "
-                  "(it also closes PixelDeck's terminals)  and start PixelDeck again.")
+            tell(f"PixelDeck changed since its server started. To load the new code, run  {CLI} --stop "
+                 "(it also closes PixelDeck's terminals)  and start PixelDeck again.")
         else:
-            print("PixelDeck changed since its server started, and it has open terminals or a pending proposal. "
-                  "When they are done, run  pixeldeck.py --stop  and start PixelDeck again.")
+            tell("PixelDeck changed since its server started, and it has open terminals or a pending proposal. "
+                 f"When they are done, run  {CLI} --stop  and start PixelDeck again.")
     print(f"PixelDeck on {url()} in the {open_window()}")
 
 

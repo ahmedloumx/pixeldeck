@@ -31,6 +31,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
+import account  # noqa: E402
 import actions  # noqa: E402
 import connections  # noqa: E402
 import repos  # noqa: E402
@@ -48,9 +49,8 @@ from engine import Engine  # noqa: E402
 import config  # noqa: E402
 import version  # noqa: E402
 
-STATIC = HERE / "static"
+STATIC = config.APP_DIR / "static"  # next to the code, or in the packaged app's bundle
 BUILD = version.build()  # the code this server runs; the files on disk can move on after a pull
-WORKSPACE_ROOT = config.workspace_root()
 SECRET = secrets.token_urlsafe(32)
 # A second key, for an agent proposing a pull request from a terminal: it can ask and read the
 # answer, nothing else. Written to the state folder (mode 600) at start; see proposals.py.
@@ -58,8 +58,8 @@ AGENT_KEY = secrets.token_urlsafe(32)
 AGENT_ROUTES = {("POST", "propose"), ("GET", "proposal")}
 PROPOSALS = proposals.Proposals()
 FEATURES = ["merge", "sync", "drop", "proposals", "snapshots", "reviews", "events", "status", "settings", "merge-options", "jira",
-            "restore", "ui-state", "open-link", *repos.FEATURES, *spotify.FEATURES, "lyrics"]
-ROUTE_MODULES = (repos, spotify, lyrics)  # each answers its own routes, or None
+            "restore", "ui-state", "open-link", *account.FEATURES, *repos.FEATURES, *spotify.FEATURES, "lyrics"]
+ROUTE_MODULES = (account, repos, spotify, lyrics)  # each answers its own routes, or None
 JIRA = jira.Jira()
 SNAPSHOT_MAX = 4 * 1024 * 1024
 MIN_COLS, MIN_ROWS = 20, 4  # a collapsed panel must not squeeze a program into a sliver
@@ -269,7 +269,7 @@ class Desk(BaseHTTPRequestHandler):
             if method == "POST" and route == "terms":
                 if body.get("kind") != "shell":
                     raise ValueError("only a shell can be opened directly")
-                session = TERMS.spawn("Shell", shell_argv(), WORKSPACE_ROOT)
+                session = TERMS.spawn("Shell", shell_argv(), config.workspace_root())
                 return self._send(200, session.info())
             if method == "POST" and route == "term-restore":
                 skip = body.get("skip_permissions")
@@ -302,25 +302,25 @@ class Desk(BaseHTTPRequestHandler):
             if method == "GET" and route == "branch":
                 repo = (query.get("repo") or [""])[0]
                 branch = (query.get("branch") or [""])[0]
-                return self._send(200, actions.preview(engine, WORKSPACE_ROOT, repo, branch))
+                return self._send(200, actions.preview(engine, config.workspace_root(), repo, branch))
             if method == "POST" and route == "pr-create":
-                result = actions.create(engine, WORKSPACE_ROOT, body)
+                result = actions.create(engine, config.workspace_root(), body)
                 PROPOSALS.opened_elsewhere(body.get("repo"), body.get("branch"), result)
                 return self._send(200, result)
             if method == "POST" and route == "propose":
-                return self._send(200, PROPOSALS.propose(engine, WORKSPACE_ROOT, body))
+                return self._send(200, PROPOSALS.propose(engine, config.workspace_root(), body))
             if method == "GET" and route == "proposal":
                 return self._send(200, PROPOSALS.get((query.get("id") or [""])[0]))
             if method == "GET" and route == "proposals":
                 return self._send(200, {"proposals": PROPOSALS.list()})
             if method == "POST" and route == "proposal-decide":
                 fields = body.get("fields") if isinstance(body.get("fields"), dict) else {}
-                return self._send(200, PROPOSALS.decide(engine, WORKSPACE_ROOT, str(body.get("id") or ""), body.get("action"), fields))
+                return self._send(200, PROPOSALS.decide(engine, config.workspace_root(), str(body.get("id") or ""), body.get("action"), fields))
             if method == "GET" and route == "branch-diff":
                 q = lambda k: (query.get(k) or [""])[0]  # noqa: E731
-                return self._send(200, actions.branch_diff(WORKSPACE_ROOT, q("repo"), q("branch"), q("dest")))
+                return self._send(200, actions.branch_diff(config.workspace_root(), q("repo"), q("branch"), q("dest")))
             if method == "POST" and route == "branch-delete":
-                return self._send(200, actions.delete_branch(engine, WORKSPACE_ROOT, body))
+                return self._send(200, actions.delete_branch(engine, config.workspace_root(), body))
             if method == "POST" and route == "decline":
                 return self._send(200, actions.decline(engine, body))
             if method == "POST" and route == "merge":
@@ -328,13 +328,13 @@ class Desk(BaseHTTPRequestHandler):
             if method == "POST" and route == "review":
                 return self._send(200, actions.review(engine, body))
             if method == "POST" and route == "sync":
-                result = actions.sync(engine, WORKSPACE_ROOT, body)
+                result = actions.sync(engine, config.workspace_root(), body)
                 engine.mark_synced(body.get("repo"), body.get("id"))  # no stale "behind" until the next look
                 return self._send(200, result)
             if method == "GET" and route == "pr-sync":
                 repo = (query.get("repo") or [""])[0]
                 pr_id = int((query.get("id") or ["0"])[0])
-                return self._send(200, actions.sync_status(engine, WORKSPACE_ROOT, repo, pr_id))
+                return self._send(200, actions.sync_status(engine, config.workspace_root(), repo, pr_id))
             for module in ROUTE_MODULES:
                 answer = module.route(self, engine, method, route, query, body)
                 if isinstance(answer, tuple):
@@ -348,13 +348,13 @@ class Desk(BaseHTTPRequestHandler):
             if method == "GET" and route == "status":
                 return self._send(200, self._status())
             if method == "GET" and route == "settings":
-                return self._send(200, {**connections.report(engine, self.port, WORKSPACE_ROOT, terminals.UNAVAILABLE), "jira": JIRA.status()})
+                return self._send(200, {**connections.report(engine, self.port, config.workspace_root(), terminals.UNAVAILABLE), "jira": JIRA.status()})
             if method == "POST" and route == "settings-test":
                 try:
                     engine.refresh_identity()
                 except BitbucketError:
                     pass  # the report carries the refusal
-                return self._send(200, {**connections.report(engine, self.port, WORKSPACE_ROOT, terminals.UNAVAILABLE), "jira": JIRA.check()})
+                return self._send(200, {**connections.report(engine, self.port, config.workspace_root(), terminals.UNAVAILABLE), "jira": JIRA.check()})
             if method == "GET" and route == "merge-options":
                 repo = (query.get("repo") or [""])[0]
                 pr_id = int((query.get("id") or ["0"])[0])
@@ -425,10 +425,11 @@ class Desk(BaseHTTPRequestHandler):
             "budget": engine.budget(),
             "launches": engine.data.get("launches", [])[:8],
             "project": engine.project(),
-            "root": str(WORKSPACE_ROOT),
+            "root": str(config.workspace_root()),
             "platform": sys.platform,
             "terminal": terminals.UNAVAILABLE or "",
             "features": FEATURES,
+            "setup_needed": account.status()["needed"],
             "restore": self.keeper.public_offer() if self.keeper else None,
             "version": version.VERSION,
             "stale": code_changed(),
@@ -449,7 +450,7 @@ class Desk(BaseHTTPRequestHandler):
     def _restore_one(self, entry, skip_permissions=None):
         """One terminal back: a shell in its folder with its last screen above the new prompt,
         or Claude Code resumed (it shows its own history, so no old screen there)."""
-        cwd = entry.get("cwd") if isinstance(entry.get("cwd"), str) and os.path.isdir(entry.get("cwd")) else str(WORKSPACE_ROOT)
+        cwd = entry.get("cwd") if isinstance(entry.get("cwd"), str) and os.path.isdir(entry.get("cwd")) else str(config.workspace_root())
         argv = sessions.restore_argv(entry, shell_argv, launcher.claude_binary, skip_permissions)
         title = entry.get("title") if isinstance(entry.get("title"), str) and entry.get("title") else "Shell"
         session = TERMS.spawn(title[:80], argv, cwd)
@@ -618,7 +619,7 @@ class Desk(BaseHTTPRequestHandler):
         detail = engine.detail(repo, pr_id)
         me = (engine.me() or {}).get("uuid")
         where = body.get("where", "app")
-        record = launcher.launch(WORKSPACE_ROOT, action, detail["pr"], detail, pr["author"]["uuid"] == me,
+        record = launcher.launch(config.workspace_root(), action, detail["pr"], detail, pr["author"]["uuid"] == me,
                                  terms=TERMS if where == "app" else None)
         record.update({"repo": repo, "id": pr_id, "action": action, "pr_title": pr["title"]})
         engine.record_launch(record)
@@ -671,7 +672,7 @@ def main():
         httpd = DeskServer(("127.0.0.1", args.port), Desk)
     except OSError as exc:
         sys.exit(f"PixelDeck cannot listen on 127.0.0.1:{args.port} ({exc.strerror or exc}); is it running already?")
-    Desk.engine = Engine(WORKSPACE_ROOT)
+    Desk.engine = Engine(config.workspace_root())
     Desk.port = args.port
     # Keep the terminals as they are every few seconds, and once more on the way out: atexit
     # runs the keeper before the terminals close (last registered runs first), and a stop

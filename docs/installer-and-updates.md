@@ -1,8 +1,10 @@
 # Installers and updates
 
-Status: proposal. Code changes 6 to 9 below are built; nothing else is yet. This document
-describes what we want a colleague to experience, what has to change in the code to get there,
-and the order we build it in.
+Status: proposal, partly built. Code changes 1 to 9 below are built, and so is a Windows
+installer made by hand (`packaging/build.py`, see the README). Not built yet: the macOS and
+Linux packages, the release workflow, the website, signing and the in-app updates. This
+document describes what we want a colleague to experience, what has to change in the code to
+get there, and the order we build it in.
 
 Decided:
 
@@ -62,21 +64,32 @@ These are needed before any executable works. Each one is based on how the code 
    `python server.py` and the GTK window as `python app_window.py`, by file path. A packaged
    app has no such files. The launcher must start itself with a flag instead
    (`pixeldeck --server`, `pixeldeck --window`); `--server` exists already.
+   Done: a packaged app starts its server as `pixeldeck --server`. On Windows the bundle has
+   two programs, `pixeldeck.exe` (console: terminals, agents, the server) and `pixeldeckw.exe`
+   (no console: the Start menu). `--window` is not needed: the packaged app uses a browser
+   window on every system (see Packaging).
 2. **Bundled files.** `static/` and `briefs/` are read relative to `config.APP_DIR`. In a
-   packaged app they come from the bundle's resource folder.
+   packaged app they come from the bundle's resource folder. Done: `config.APP_DIR` is the
+   bundle folder in a packaged app.
 3. **Settings out of the program folder.** The `.env` sits next to the code today, so an
    update would replace or lose it. It moves to the per-user config folder that `config.py`
    already knows (`%APPDATA%\PixelDeck`, `~/Library/Application Support/PixelDeck`,
    `~/.config/pixeldeck`). A `.env` next to the code keeps working for source runs, and the
-   setup screen offers to import one it finds.
+   setup screen offers to import one it finds. Done, with an import from a path you give
+   rather than a search: Settings, Setup writes the file (`config.save` keeps its comments
+   and other keys).
 4. **The token in the system's credential store** (Windows Credential Manager, macOS
    Keychain, Secret Service on Linux) instead of a plain text file, with the file as a
-   fallback where no store exists.
+   fallback where no store exists. Done for Windows Credential Manager (`credentials.py`,
+   through ctypes, nothing to install). Keychain and Secret Service are not written yet, so
+   macOS and Linux keep the file. The environment and the file win over the store, so a
+   token set by hand still works.
 5. **The clones folder.** `PIXELDECK_WORKSPACE_ROOT` defaults to the folder above the code,
-   which means nothing for an installed app. The setup screen asks for it.
+   which means nothing for an installed app. The setup screen asks for it. Done; until it is
+   set, the packaged app uses the home folder.
 6. **A version number.** Done: `version.py` holds it (`0.1.0` for now), Settings shows it and
-   `/healthz` returns it. Still to do: set it from the git tag at build time, and send it in the
-   User-Agent, which still says `pixeldeck/1.0`.
+   `/healthz` returns it. Also done: the build sets it from the `v*` tag (`build-info.json`
+   in the bundle), and the User-Agent says `PixelDeck/<version>`.
 7. **No stale server.** Done. After `git pull` the browser loads the new page from disk while
    the old server keeps running. The launcher now compares a fingerprint of the Python files the
    server started with against the files on disk, and restarts the server when they differ. It
@@ -166,8 +179,8 @@ writing our own.
 
 ## Order of work
 
-1. **Ready to package.** Code changes 1 to 5 (6 to 9 are done), and a Windows build made by
-   hand and shared by link with two or three colleagues.
+1. **Ready to package.** Code changes 1 to 5, and a Windows build made by hand and shared by
+   link with two or three colleagues. The code and the build are done; sharing is next.
 2. **All three systems.** The release workflow builds Windows, macOS and Linux on a tag.
 3. **Updates.** The website, the signed update list, and the in-app check and install.
 4. **Signing.** Windows signing and macOS notarization, once we know who pays for and owns

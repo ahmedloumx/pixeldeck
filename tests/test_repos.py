@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 _ENV = Path(tempfile.mkdtemp(prefix="pixeldeck-test-")) / ".env"
 _ENV.write_text("BITBUCKET_WORKSPACE=acme\nTICKET_PREFIXES=ABC,XYZ\nJIRA_SITE=https://acme.atlassian.net\n")
 os.environ["PIXELDECK_ENV"] = str(_ENV)
+os.environ["PIXELDECK_CREDENTIALS"] = "off"  # nor a token from the credential store
 for _key in ("BITBUCKET_TOKEN", "BITBUCKET_EMAIL", "BITBUCKET_WORKSPACE", "TICKET_PREFIXES", "JIRA_SITE", "PIXELDECK_BRIEFS_DIR"):
     os.environ.pop(_key, None)
 

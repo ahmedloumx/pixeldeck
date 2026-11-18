@@ -27,6 +27,7 @@ from collections import OrderedDict
 from pathlib import Path
 
 import config
+import version
 import opener
 
 FEATURES = ["spotify"]
@@ -396,7 +397,7 @@ class Client:
 
     def _token_request(self, form):
         body = urllib.parse.urlencode(form).encode()
-        headers = {"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json", "User-Agent": "pixeldeck/1.0"}
+        headers = {"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json", "User-Agent": version.USER_AGENT}
         status, _headers, raw = self.transport("POST", TOKEN_URL, headers, body)
         return status, _json(raw)
 
@@ -441,7 +442,7 @@ class Client:
         data = json.dumps(body).encode() if body is not None else (b"" if method in ("PUT", "POST") else None)
         token = self._access()
         for attempt in (1, 2):
-            headers = {"Authorization": f"Bearer {token}", "Accept": "application/json", "User-Agent": "pixeldeck/1.0"}
+            headers = {"Authorization": f"Bearer {token}", "Accept": "application/json", "User-Agent": version.USER_AGENT}
             if body is not None:
                 headers["Content-Type"] = "application/json"
             status, rheaders, raw = self.transport(method, url, headers, data)
@@ -501,7 +502,7 @@ class Client:
                 self.art.move_to_end(url)
                 return self.art[url]
         # a public image host: no token goes with this request
-        status, headers, raw = self.transport("GET", url, {"Accept": "image/*", "User-Agent": "pixeldeck/1.0"}, None)
+        status, headers, raw = self.transport("GET", url, {"Accept": "image/*", "User-Agent": version.USER_AGENT}, None)
         ctype = (headers or {}).get("content-type", "").split(";")[0].strip().lower()
         if status != 200:
             raise SpotifyError(status, f"Spotify's image server answered {status}.")

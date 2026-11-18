@@ -1981,6 +1981,7 @@ function applyBoot(b) {
   state.root = b.root || "";
   state.platform = b.platform || "";
   state.features = b.features || []; // an older server has none: the page skips what it lacks
+  state.setupNeeded = !!b.setup_needed;
   if (b.restore !== undefined && state.restore === undefined) state.restore = b.restore;
   if (b.stale && !state.staleSaid) {
     state.staleSaid = true;
@@ -2640,7 +2641,8 @@ async function boot() {
   api("projects").then((r) => { state.projects = r.projects; state.project = r.project; renderBar(); }).catch(() => {});
   BootScreen.step("data");
   await loadView();
-  BootScreen.finish(state.me ? "" : "NO CONNECTION").then(() => { if (!offerRestore()) Guide.firstRun(); });
+  // A first start has no account yet: the setup screen comes before the guide.
+  BootScreen.finish(state.me ? "" : "NO CONNECTION").then(() => { if (state.setupNeeded) Settings.open("setup"); else if (!offerRestore()) Guide.firstRun(); });
   if (state.route.pr) { const pr = findPr(state.route.pr); if (pr) openPr(pr); }
   // The server re-reads your open pull requests every minute; the page asks it twice as often.
   setInterval(() => { if (!document.hidden) loadView({ silent: true }); }, 30000);
