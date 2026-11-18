@@ -153,9 +153,32 @@ The server uses the Python standard library only. The one extra package is `pywi
 Windows, for the terminal panel. You also need a Bitbucket Cloud account and an API token.
 
 **Platform status.** PixelDeck is developed and tested on Linux (Fedora, GNOME on Wayland).
-The macOS and Windows code paths are written and covered by import tests that pretend to be
-those systems, but they have not run on a real Mac or Windows machine yet. Reports and fixes
-are welcome.
+It also runs on Windows 11, from a git clone and as the packaged app below. The macOS code
+paths are written and covered by import tests that pretend to be that system, but they have
+not run on a real Mac yet. Reports and fixes are welcome.
+
+## Windows installer
+
+`PixelDeck-Setup-<version>-x64.exe` installs PixelDeck without Python, git clone or `.env`.
+Nothing is published yet: build it with `packaging/build.py` (see Development).
+
+- **Install.** Run it. No administrator rights: it goes into
+  `%LOCALAPPDATA%\Programs\PixelDeck`. It offers a Start menu entry, a desktop icon and the
+  `pixeldeck` command on PATH (for `pixeldeck --stop`, `--status` and an agent's
+  `pixeldeck --propose`). It is not signed yet, so Windows SmartScreen warns on the first run:
+  More info, then Run anyway.
+- **First start.** Settings opens on Setup: your Atlassian email, the API token, the
+  workspace and the folder that holds your clones. **Check** tries each Bitbucket endpoint
+  PixelDeck reads and names any scope the token lacks. **Save** puts the token in Windows
+  Credential Manager and the rest in `%APPDATA%\PixelDeck\.env`. Used PixelDeck from a git
+  clone before? **Import** copies that clone's `.env`, token included.
+- **Update.** Run the new Setup. It stops the server first, and refuses while terminals are
+  open or an agent waits on a proposal, since a stop would end them.
+- **Uninstall.** From Settings, Apps. It asks whether to remove your settings and token too;
+  the answer is no unless you say yes.
+
+The installed app and a git clone share the port (8642) and the settings folders, so run one
+at a time.
 
 ## Quick start
 
@@ -193,13 +216,18 @@ to commit a file edited in the Repos panel. Nothing more: PixelDeck never needs
 admin or delete scopes. Deleting a pushed branch and the Claude fixes go through git with your own
 git credentials, not through the token.
 
-The token lives only in `.env`, which `.gitignore` keeps out of git. PixelDeck sends it to
-`api.bitbucket.org` and nowhere else.
+From a git clone the token lives in `.env`, which `.gitignore` keeps out of git. Saved from the
+setup screen (Settings, Setup) on Windows, it goes to Windows Credential Manager instead, and
+out of the file. PixelDeck sends it to `api.bitbucket.org` and nowhere else.
 
 ## Configuration
 
-Everything is in `.env`; [.env.example](.env.example) lists every key with a comment. A value
-in the real environment wins over the file, and the file is re-read when it changes.
+Everything is in one settings file; [.env.example](.env.example) lists every key with a comment.
+A git clone uses the `.env` next to the code. The packaged app, or a clone without one, uses
+`.env` in the config folder: `%APPDATA%\PixelDeck`, `~/Library/Application Support/PixelDeck`
+or `~/.config/pixeldeck`. `PIXELDECK_ENV` names another file. A value in the real environment
+wins over the file, the file wins over Windows Credential Manager (for `BITBUCKET_TOKEN` and
+`JIRA_TOKEN` only), and the file is re-read when it changes.
 
 | Key | What it is |
 |---|---|
@@ -223,6 +251,8 @@ in the real environment wins over the file, and the file is re-read when it chan
 python3 pixeldeck.py --propose --repo shop-api --branch feat/ABC-12-cart \
     --title "feat: cart totals (ABC-12)" --description-file pr.md
 ```
+
+With the packaged app the command is `pixeldeck --propose ...`, with the same options.
 
 The command waits up to 100 seconds (`--wait` to change it) and then exits with **0** and the
 pull request's link when you open it, **2** if you declined, **3** if you have not answered yet
@@ -295,6 +325,21 @@ python3 -m unittest discover -s tests
 
 There is no build step: the page is plain HTML, CSS and JavaScript in `static/`, read from disk
 on every request, so a reload shows a change. The documentation describes each file.
+
+The Windows installer is the one thing that is built. On Windows, with Python 3.10 or newer:
+
+```sh
+py -3 -m pip install pyinstaller pywinpty      # once
+# and Inno Setup 6, once: https://jrsoftware.org/isinfo.php (or set ISCC to its ISCC.exe)
+py -3 packaging/build.py                       # --app-only stops after the app folder
+```
+
+It writes `dist/PixelDeck-Setup-<version>-x64.exe` and prints its SHA-256. The version is
+the `v*` tag on the commit, else `VERSION` in `version.py`. `packaging/pixeldeck.spec` builds
+one folder with two programs: `pixeldeck.exe`, a console program for terminals, agents and the
+server itself, and `pixeldeckw.exe`, the same without a console, for the Start menu.
+[docs/installer-and-updates.md](docs/installer-and-updates.md) has the plan for macOS, Linux,
+releases and updates.
 
 ## Credits
 

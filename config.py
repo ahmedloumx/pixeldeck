@@ -2,7 +2,8 @@
 
 Lookup order, first hit wins:
   1. the real environment (handy for one-off runs and tests),
-  2. the file named by PIXELDECK_ENV, or else .env next to this file.
+  2. the settings file (see env_path),
+  3. for the tokens only, the system's credential store (see credentials.py).
 
 The file is re-read whenever it changes on disk, so a replaced token is picked up
 without a restart. See .env.example for every key.
@@ -15,7 +16,15 @@ import threading
 from fnmatch import fnmatch
 from pathlib import Path
 
-APP_DIR = Path(__file__).resolve().parent
+import credentials
+
+# A packaged app (PyInstaller) unpacks static/ and briefs/ into its bundle folder, and has no
+# source files next to them.
+FROZEN = bool(getattr(sys, "frozen", False))
+# Resolved: reached by a short name (C:\Users\JOHNDO~1), it would not match the long paths
+# that resolve() gives the files under it.
+APP_DIR = Path(sys._MEIPASS).resolve() if FROZEN else Path(__file__).resolve().parent
+SECRET_KEYS = ("BITBUCKET_TOKEN", "JIRA_TOKEN")
 APP_NAME = "PixelDeck"
 SLUG = "pixeldeck"
 # The Linux window's application id. GNOME ties a window to the launcher named <APP_ID>.desktop,
@@ -29,8 +38,16 @@ _cache = {"path": None, "mtime": None, "values": {}}
 
 
 def env_path():
+    """PIXELDECK_ENV, else a .env next to the code (a git clone), else the one in the config
+    folder, which an update of the packaged app never touches."""
     named = os.environ.get("PIXELDECK_ENV")
-    return Path(named).expanduser() if named else APP_DIR / ".env"
+    if named:
+        return Path(named).expanduser()
+    beside = APP_DIR / ".env"
+    if not FROZEN and beside.is_file():
+        return beside
+    override = os.environ.get("PIXELDECK_CONFIG_DIR")  # not get(): that reads this very file
+    return (Path(override).expanduser() if override else _platform_dir("config")) / ".env"
 
 
 def parse_env(text):
@@ -73,7 +90,60 @@ def get(key, default=""):
     value = os.environ.get(key)
     if value:
         return value
-    return _file_values().get(key) or default
+    value = _file_values().get(key)
+    if value:
+        return value
+    if key in SECRET_KEYS:
+        return credentials.store().get(key) or default
+    return default
+
+
+def file_value(key):
+    """The settings file's own value, whatever the environment or the store says."""
+    return _file_values().get(key, "")
+
+
+def _quote(value):
+    if value != value.strip() or any(c in value for c in " #\"'"):
+        return f"'{value}'" if '"' in value else f'"{value}"'
+    return value
+
+
+def save(values):
+    """Write KEY=value lines into the settings file, keeping its other lines and comments.
+    An empty value removes the key."""
+    for key, value in values.items():
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key) or "\n" in value or "\r" in value:
+            raise ValueError(f"cannot save {key!r}")
+    path = env_path()
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        lines = []
+    pending, done, out = dict(values), set(), []
+    for raw in lines:
+        line = raw.strip()
+        if line.startswith("export "):
+            line = line[len("export "):].lstrip()
+        key = line.split("=", 1)[0].strip() if "=" in line and not line.startswith("#") else None
+        if key in done:  # a second line for a key we just wrote would win over it
+            continue
+        if key in pending:
+            done.add(key)
+            value = pending.pop(key)
+            if value:
+                out.append(f"{key}={_quote(value)}")
+            continue
+        out.append(raw)
+    out += [f"{key}={_quote(value)}" for key, value in pending.items() if value]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write("\n".join(out) + "\n")
+    os.replace(tmp, path)
+    with _lock:
+        _cache.update(path=None, mtime=None, values={})
 
 
 def get_list(key, default=""):
@@ -88,11 +158,12 @@ def get_int(key, default):
 
 
 def mtime():
-    """When the .env last changed, so the engine can retry after a new token."""
+    """When the settings last changed, so the engine can retry after a new token."""
     try:
-        return env_path().stat().st_mtime
+        stamp = env_path().stat().st_mtime
     except OSError:
-        return 0
+        stamp = 0
+    return max(stamp, credentials.changed())
 
 
 # ---------------------------------------------------------------- folders
@@ -137,9 +208,12 @@ def workspace():
 
 
 def workspace_root():
-    """The folder that holds your local clones. Defaults to the folder PixelDeck sits in."""
+    """The folder that holds your local clones. A git clone of PixelDeck defaults to the folder
+    it sits in; the packaged app to your home folder, until the setup screen sets it."""
     root = get("PIXELDECK_WORKSPACE_ROOT")
-    return Path(root).expanduser() if root else APP_DIR.parent
+    if root:
+        return Path(root).expanduser()
+    return Path.home() if FROZEN else APP_DIR.parent
 
 
 def default_project():

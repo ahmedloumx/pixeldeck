@@ -15,3 +15,7 @@ proposals/
 *.log
 .DS_Store
 Thumbs.db
+
+# Packaging output (packaging/build.py)
+/build/
+/dist/

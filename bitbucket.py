@@ -17,6 +17,7 @@ import urllib.request
 from collections import deque
 
 import config
+import version
 
 API = "https://api.bitbucket.org/2.0"
 HOURLY_LIMIT = 1000
@@ -44,15 +45,17 @@ def multipart(fields, files, boundary=None):
 
 
 class BitbucketError(Exception):
-    def __init__(self, status, message):
+    def __init__(self, status, message, detail=None):
         super().__init__(f"{status}: {message}")
         self.status = status
         self.message = message
+        self.detail = detail  # a 403 for a missing scope says {"required": [...], "granted": [...]}
 
 
 class Client:
-    def __init__(self, workspace=None):
+    def __init__(self, workspace=None, login=None):
         self.workspace = workspace or config.workspace()
+        self._login = login  # (email, token) to try before they are saved; else the settings
         self._calls = deque()
         self._lock = threading.Lock()
         self.last_error = None
@@ -61,14 +64,13 @@ class Client:
     # ---- plumbing -------------------------------------------------------
 
     def _auth_header(self):
-        token = config.get("BITBUCKET_TOKEN")
+        email, token = self._login or (config.get("BITBUCKET_EMAIL"), config.get("BITBUCKET_TOKEN"))
         if not token:
             raise BitbucketError(0, f"No BITBUCKET_TOKEN in {config.env_path()}")
         if not self.workspace:
             self.workspace = config.workspace()
         if not self.workspace:
             raise BitbucketError(0, f"No BITBUCKET_WORKSPACE in {config.env_path()}")
-        email = config.get("BITBUCKET_EMAIL")
         if email:
             pair = f"{email}:{token}".encode()
             return "Basic " + base64.b64encode(pair).decode()
@@ -92,7 +94,7 @@ class Client:
         headers = {
             "Accept": "application/json",
             "Authorization": self._auth_header(),
-            "User-Agent": "pixeldeck/1.0",
+            "User-Agent": version.USER_AGENT,
         }
         data = None
         if body is not None:
@@ -109,12 +111,14 @@ class Client:
                 body = json.loads(raw) if raw.strip() else {}
         except urllib.error.HTTPError as exc:
             raw = exc.read().decode("utf-8", "replace")
+            detail = None
             try:
-                message = json.loads(raw)["error"]["message"]
-            except (ValueError, KeyError, TypeError):
+                error = json.loads(raw)["error"]
+                message, detail = error["message"], error.get("detail")
+            except (ValueError, KeyError, TypeError, AttributeError):
                 message = raw[:240] or str(exc.reason)
             self.last_error = {"status": exc.code, "message": message, "at": time.time()}
-            raise BitbucketError(exc.code, message) from None
+            raise BitbucketError(exc.code, message, detail if isinstance(detail, dict) else None) from None
         except (urllib.error.URLError, TimeoutError) as exc:
             reason = str(getattr(exc, "reason", exc))
             self.last_error = {"status": 0, "message": reason, "at": time.time()}
@@ -125,7 +129,7 @@ class Client:
     def text(self, path, limit=4 * 1024 * 1024):
         url = path if path.startswith("http") else API + path
         request = urllib.request.Request(url, headers={
-            "Accept": "text/plain", "Authorization": self._auth_header(), "User-Agent": "pr-desk/1.0"})
+            "Accept": "text/plain", "Authorization": self._auth_header(), "User-Agent": version.USER_AGENT})
         with self._lock:
             self._calls.append(time.time())
         try:
@@ -143,7 +147,7 @@ class Client:
         boundary, data = multipart(fields, files)
         url = path if path.startswith("http") else API + path
         request = urllib.request.Request(url, data=data, method="POST", headers={
-            "Accept": "application/json", "Authorization": self._auth_header(), "User-Agent": "pixeldeck/1.0",
+            "Accept": "application/json", "Authorization": self._auth_header(), "User-Agent": version.USER_AGENT,
             "Content-Type": f"multipart/form-data; boundary={boundary}"})
         with self._lock:
             self._calls.append(time.time())

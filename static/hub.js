@@ -145,8 +145,11 @@ const StatusBar = (() => {
 })();
 
 const Settings = (() => {
-  const TABS = [["connections", "Connections"], ["notifications", "Notifications"], ["look", "Personalise"], ["about", "About"]];
+  const TABS = [["setup", "Setup"], ["connections", "Connections"], ["notifications", "Notifications"], ["look", "Personalise"], ["about", "About"]];
   let tab = "connections", report = null, loading = false, musicHooked = false;
+  // The setup form is redrawn with the rest of the pane, so what you typed lives here until saved.
+  let setup = null, draft = {}, checks = null;
+  const TOKEN_PAGE = "https://id.atlassian.com/manage-profile/security/api-tokens";
   const dialog = () => document.getElementById("settings-dialog");
   const pill = (ok, yes, no) => `<span class="set-pill is-${ok === true ? "ok" : ok === false ? "bad" : "warn"}">${esc(ok === true ? yes : ok === false ? no : "Checking")}</span>`;
   const row = (label, value, opts = {}) => value == null || value === "" ? "" :
@@ -162,7 +165,7 @@ const Settings = (() => {
         ${bb.auth?.error ? `<p class="set-error">${esc(bb.auth.error)}</p>` : ""}
         <dl class="set-rows">${row("Workspace", bb.workspace)}${row("Account", bb.email)}${row("Project", bb.project ? bb.project.name : "Every project")}${row("Token", bb.token_set ? "set (never shown)" : "missing")}${row("Settings file", bb.env_file, { code: true, copy: true })}</dl>
         <div class="set-meter" data-tip="${used} of ${limit} calls used in the last hour"><span style="--w:${Math.min(1, used / limit).toFixed(3)}"></span></div>
-        <p class="set-hint">${used} of ${limit} API calls used in the last hour. Change the token in the settings file; PixelDeck picks it up within a minute.</p>
+        <p class="set-hint">${used} of ${limit} API calls used in the last hour. Change the account or the token in <button class="link" type="button" data-settings-tab="setup">Setup</button>.</p>
         <p><button class="btn" type="button" data-settings-test>Test the connection</button></p></section>
       ${jira ? `<section class="set-card"><header><h3>Jira</h3>${pill(jira.ok, jira.me ? `Connected as ${jira.me}` : "Connected", jira.site ? (jira.token_set ? "Token refused" : "No Jira token") : "Not set up")}</header>
         ${jira.error ? `<p class="set-error">${esc(jira.error)}</p>` : ""}
@@ -175,6 +178,50 @@ const Settings = (() => {
       <section class="set-card"><header><h3>Git and terminals</h3>${pill(git.ok && !app.terminal, "Ready", git.ok ? "Terminals unavailable" : "git missing")}</header>
         <dl class="set-rows">${row("git", git.version)}${row("Terminals", app.terminal || "ready")}${row("Your clones", app.workspace_root, { code: true })}${row("Brief templates", app.briefs_dir, { code: true })}</dl></section>
       ${spotifyHtml()}`;
+  }
+  function setupHtml() {
+    if (!(state.features || []).includes("setup")) return `<p class="set-hint">This needs a newer PixelDeck server: restart it once.</p>`;
+    if (!setup) return `<p class="set-hint">${loading ? "Asking the server…" : "Could not read the setup."}</p>`;
+    const value = (key) => esc(draft[key] ?? setup[key] ?? "");
+    const where = { store: `in ${setup.store}`, file: "in the settings file", environment: "in the environment" }[setup.token];
+    const scopes = ["read:user", "read:workspace", "read:repository", "read:pullrequest"].map((s) => `<code>${s}:bitbucket</code>`).join(", ");
+    const results = checks ? `<ul class="setup-checks">${checks.results.map((r) => `<li class="is-${r.ok ? "ok" : r.ok === false ? "bad" : "warn"}">
+        <span>${esc(r.label)}</span><code>${esc(r.scope)}</code>${r.ok ? "<small>ok</small>" : `<small>${esc(r.hint || "")}</small>`}</li>`).join("")}</ul>
+        ${checks.ok ? `<p class="set-hint">${checks.me ? `Signed in as ${esc(checks.me)}. ` : ""}Everything PixelDeck reads answers. Save to use it.</p>` : ""}` : "";
+    return `<section class="set-card"><header><h3>Bitbucket</h3>${pill(!setup.needed, "Set up", "Not set up")}</header>
+        <p class="set-hint">PixelDeck reads your pull requests with an Atlassian API token. Create one at
+          <button class="link" type="button" data-external="${TOKEN_PAGE}">id.atlassian.com</button> with
+          <em>Create API token with scopes</em>, app Bitbucket, and tick ${scopes}. Add <code>write:pullrequest:bitbucket</code>
+          to open, merge and decline pull requests here, and <code>write:repository:bitbucket</code> to commit from the Repos panel.</p>
+        <form class="setup-form" data-setup-form autocomplete="off">
+          <label class="field-block">Atlassian email<input name="email" type="email" value="${value("email")}" placeholder="you@company.com"></label>
+          <label class="field-block">API token<input name="token" type="password" value="${esc(draft.token || "")}" placeholder="${setup.token ? "saved: leave empty to keep it" : "paste the token"}"></label>
+          <label class="field-block">Workspace<input name="workspace" value="${value("workspace")}" placeholder="${esc("bitbucket.org/<this part>/repo")}" spellcheck="false"></label>
+          <label class="field-block">Your clones<input name="root" value="${value("root")}" placeholder="${esc(setup.root_default)}" spellcheck="false"></label>
+          <p class="set-hint field-wide">${setup.token ? `A token is saved ${esc(where)}.` : "No token yet."}
+            ${setup.store ? `Saving puts the token in ${esc(setup.store)}, not in a file.` : "Saving puts the token in the settings file."}
+            Your clones is the folder that holds your local repositories.</p>
+          ${setup.from_environment.length ? `<p class="set-error field-wide">Set in the environment, which wins over what you save here: ${setup.from_environment.map(esc).join(", ")}</p>` : ""}
+          <p class="setup-actions field-wide"><button class="btn" type="button" data-setup-check>Check</button><button class="btn btn--primary" type="submit">Save</button></p>
+        </form>${results}</section>
+      <section class="set-card"><header><h3>Import</h3></header>
+        <p class="set-hint">Ran PixelDeck from a git clone before? Copy its settings and token: give the clone's folder or its <code>.env</code>.</p>
+        <form class="setup-form" data-setup-import autocomplete="off">
+          <label class="field-block field-wide">Folder or .env file<input name="path" value="${esc(draft.path || "")}" placeholder="${esc("C:\\Users\\you\\pixeldeck")}" spellcheck="false"></label>
+          <p class="setup-actions field-wide"><button class="btn" type="submit">Import</button></p>
+        </form></section>
+      <dl class="set-rows">${row("Settings file", setup.env_file, { code: true, copy: true })}</dl>`;
+  }
+  async function saveSetup(name, form, button) {
+    const before = setup?.needed;
+    try {
+      const answer = await busy(button, () => api(name, { method: "POST", body: Object.fromEntries(new FormData(form)) }));
+      setup = answer; draft = {}; checks = null;
+      toast("Saved.", answer.imported ? `Imported ${answer.imported.length} settings.` : answer.store && answer.token === "store" ? `The token is in ${answer.store}.` : "");
+      // The first setup: start over, so the page connects with the new account.
+      if (before && !answer.needed) { setTimeout(() => location.reload(), 700); return; }
+      paint(); load();
+    } catch (err) { toast("Not saved.", err.message, true); }
   }
   // The music player owns the Spotify connection; this card shows it and borrows its buttons.
   function spotifyHtml() {
@@ -228,7 +275,7 @@ const Settings = (() => {
   function paint() {
     const d = dialog();
     if (!d) return;
-    const body = tab === "connections" ? connectionsHtml() : tab === "notifications" ? (typeof Notify !== "undefined" ? Notify.settingsHtml() : "") : tab === "look" ? lookHtml() : aboutHtml();
+    const body = tab === "setup" ? setupHtml() : tab === "connections" ? connectionsHtml() : tab === "notifications" ? (typeof Notify !== "undefined" ? Notify.settingsHtml() : "") : tab === "look" ? lookHtml() : aboutHtml();
     // The list of sections is drawn once: redrawing it would replay its entrance on every
     // click. Only the section itself changes, and a redraw of the same one keeps its scroll.
     let pane = d.querySelector(":scope > .set-shell > .set-body");
@@ -255,7 +302,11 @@ const Settings = (() => {
     }
     if (!(state.features || []).includes("settings")) { report = null; paint(); return; }
     loading = true; paint();
-    try { report = await api(test ? "settings-test" : "settings", test ? { method: "POST", body: {} } : undefined); } catch (err) { toast("Could not read the settings.", err.message, true); }
+    const wantSetup = (state.features || []).includes("setup");
+    try {
+      [report, setup] = await Promise.all([api(test ? "settings-test" : "settings", test ? { method: "POST", body: {} } : undefined),
+        wantSetup ? api("setup") : null]);
+    } catch (err) { toast("Could not read the settings.", err.message, true); }
     loading = false;
     if (dialog()?.open) paint();
   }
@@ -282,7 +333,23 @@ const Settings = (() => {
     const pref = t.closest("[data-pref]");
     if (pref) { Prefs.set({ [pref.dataset.pref]: pref.dataset.value }); return paint(); }
     if (t.closest("[data-guide-again]")) { dialog().close(); if (typeof Guide !== "undefined") Guide.start(); return; }
+    const check = t.closest("[data-setup-check]");
+    if (check) {
+      try { checks = await busy(check, () => api("setup-check", { method: "POST", body: Object.fromEntries(new FormData(check.form)) })); paint(); }
+      catch (err) { toast("Could not check.", err.message, true); }
+      return;
+    }
     if (t === dialog()) dialog().close();  // a click on the backdrop
+  });
+  document.addEventListener("input", (e) => {
+    const t = e.target;
+    if (t.closest("#settings-dialog") && t.closest("[data-setup-form], [data-setup-import]") && t.name) draft[t.name] = t.value;
+  });
+  document.addEventListener("submit", (e) => {
+    const form = e.target;
+    if (!form.closest("#settings-dialog")) return;
+    if (form.matches("[data-setup-form]")) { e.preventDefault(); saveSetup("setup", form, form.querySelector("[type=submit]")); }
+    if (form.matches("[data-setup-import]")) { e.preventDefault(); saveSetup("setup-import", form, form.querySelector("[type=submit]")); }
   });
   document.addEventListener("change", (e) => {
     const t = e.target;
