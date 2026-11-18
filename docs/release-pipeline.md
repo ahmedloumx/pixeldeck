@@ -156,12 +156,8 @@ was tried.
 
 ## macOS and Linux
 
-They need packaging code before CI can build them:
-
-- `.app` and AppImage targets in the spec, and `build.py` beyond Windows;
-- Keychain and Secret Service in `credentials.py`.
-
-Then the build matrix adds:
+Their packaging code is written ([packaging-macos-linux.md](packaging-macos-linux.md)) but has
+never run. Once a person has tested each one, the build matrix adds:
 
 - `macos-15` (Apple Silicon);
 - `macos-15-intel`: GitHub ends Intel macOS runners after the macOS 15 image is retired, in

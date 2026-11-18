@@ -33,6 +33,22 @@ APP_ID = "io.github.ahmedloumx.PixelDeck"
 ICON_NAME = "pixeldeck"
 DEFAULT_PORT = 8642
 
+
+def appimage():
+    """The AppImage file this packaged app runs from, or None.
+
+    Its runtime sets APPIMAGE and APPDIR, and every program started from inside one inherits
+    them: a shell in another AppImage's terminal, say. So believe them only when this very
+    program sits under APPDIR."""
+    image, mount = os.environ.get("APPIMAGE"), os.environ.get("APPDIR")
+    if not (FROZEN and image and mount and sys.platform.startswith("linux")):
+        return None
+    try:
+        Path(sys.executable).resolve().relative_to(Path(mount).resolve())
+    except ValueError:
+        return None
+    return Path(image)
+
 _lock = threading.Lock()
 _cache = {"path": None, "mtime": None, "values": {}}
 

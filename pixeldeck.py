@@ -60,6 +60,11 @@ def tell(message, error=False):
 def server_argv():
     if not config.FROZEN:
         return [sys.executable, str(HERE / "server.py"), "--port", str(config.port())]
+    image = config.appimage()
+    if image:
+        # Through the AppImage file, so the server gets a mount of its own: the one this
+        # launcher runs from goes away when it exits, and the server's files with it.
+        return [str(image), "--server"]
     # The console form, so the server's output reaches its log even when pixeldeckw starts it.
     console = Path(sys.executable).with_name("pixeldeck.exe")
     return [str(console if console.is_file() else sys.executable), "--server"]

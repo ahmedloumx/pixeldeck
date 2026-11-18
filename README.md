@@ -180,6 +180,29 @@ Nothing is published yet: build it with `packaging/build.py` (see Development).
 The installed app and a git clone share the port (8642) and the settings folders, so run one
 at a time.
 
+## macOS and Linux packages (untested)
+
+The code to build them is here, but no one has run them yet: the Linux package is waiting for
+a test on Fedora, and the macOS one for someone with a Mac. Until then, use a git clone (Quick
+start).
+
+- **Linux:** `PixelDeck-<version>-x86_64.AppImage`, and the same app as a `.tar.gz`.
+  - Mark the AppImage executable and run it.
+  - Settings, About, "On this computer" adds PixelDeck to the app menu and installs the
+    `pixeldeck` command in `~/.local/bin`. If you move the AppImage later, it says so and
+    offers Fix.
+  - The token goes to the system keyring (GNOME Keyring, KWallet 6) through `secret-tool`. When
+    there is none, it stays in `~/.config/pixeldeck/.env`.
+- **macOS:** `PixelDeck-<version>-arm64.dmg` (Apple Silicon) or `-x64.dmg` (Intel).
+  - Drag PixelDeck to Applications.
+  - It is not signed, so macOS refuses the first open: in System Settings, Privacy & Security,
+    click Open Anyway.
+  - About installs the `pixeldeck` command. The token goes to the login Keychain.
+  - Settings stay in `~/Library/Application Support/PixelDeck` after you drag the app to the
+    Bin.
+- **Both:** started from the Dock or an app menu, the server reads your login shell's PATH, so
+  it finds `claude` and `git` where your terminal does.
+
 ## Quick start
 
 ```sh
@@ -326,20 +349,32 @@ python3 -m unittest discover -s tests
 There is no build step: the page is plain HTML, CSS and JavaScript in `static/`, read from disk
 on every request, so a reload shows a change. The documentation describes each file.
 
-The Windows installer is the one thing that is built. On Windows, with Python 3.10 or newer:
+The installers are the one thing that is built. `packaging/build.py` builds the package for
+the system it runs on, with Python 3.10 or newer:
+
+| System | Once | Builds |
+|---|---|---|
+| Windows | `py -3 -m pip install pyinstaller pywinpty`, and [Inno Setup 6](https://jrsoftware.org/isinfo.php) (or set `ISCC`) | `dist/PixelDeck-Setup-<version>-x64.exe` |
+| Linux (untested) | `python3 -m pip install pyinstaller`, and [appimagetool](https://github.com/AppImage/appimagetool/releases) on PATH (or set `APPIMAGETOOL`) | `dist/PixelDeck-<version>-x86_64.AppImage` and a `.tar.gz` |
+| macOS (untested) | `python3 -m pip install pyinstaller` | `dist/PixelDeck-<version>-arm64.dmg` (or `-x64` on Intel) |
 
 ```sh
-py -3 -m pip install pyinstaller pywinpty      # once
-# and Inno Setup 6, once: https://jrsoftware.org/isinfo.php (or set ISCC to its ISCC.exe)
-py -3 packaging/build.py                       # --app-only stops after the app folder
+python3 packaging/build.py            # py -3 on Windows; --app-only stops after the app folder
 ```
 
-It writes `dist/PixelDeck-Setup-<version>-x64.exe` and prints its SHA-256. The version is
-the `v*` tag on the commit, else `VERSION` in `version.py`. `packaging/pixeldeck.spec` builds
-one folder with two programs: `pixeldeck.exe`, a console program for terminals, agents and the
-server itself, and `pixeldeckw.exe`, the same without a console, for the Start menu.
-[docs/installer-and-updates.md](docs/installer-and-updates.md) has the plan for macOS, Linux,
-releases and updates.
+It prints each file's size and SHA-256. Without appimagetool, Linux still gets the `.tar.gz`.
+The version is the `v*` tag on the commit, else `VERSION` in `version.py`.
+
+`packaging/pixeldeck.spec` builds one folder with the program `pixeldeck`: the launcher, the
+`pixeldeck --stop` and `--propose` command, and the server itself (`pixeldeck --server`).
+Windows adds `pixeldeckw.exe`, the same without a console, for the Start menu. macOS wraps the
+folder in `PixelDeck.app`. In an AppImage, the server starts through the AppImage file again,
+because the launcher's own mount, and the files on it, go away when the launcher exits.
+
+The plans: [installer-and-updates.md](docs/installer-and-updates.md),
+[packaging-macos-linux.md](docs/packaging-macos-linux.md),
+[release-pipeline.md](docs/release-pipeline.md) and
+[integration-setup.md](docs/integration-setup.md).
 
 ## Credits
 

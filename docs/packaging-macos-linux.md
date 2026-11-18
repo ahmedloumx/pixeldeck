@@ -1,6 +1,8 @@
 # macOS and Linux packages
 
-Status: plan only. Nothing here is built.
+Status: the code is written and has never run on macOS or Linux. Unit tests pretend to be
+each system, and the Windows build was rebuilt with the same files. Ahmed tests Linux on Fedora;
+macOS waits for someone with a Mac. Building in CI waits for the release pipeline.
 
 This refines the Packaging table of [installer-and-updates.md](installer-and-updates.md), and
 does not change the formats it chose: a `.dmg` for macOS and an AppImage for Linux. It builds on
@@ -18,24 +20,34 @@ gets checked.
   `PixelDeck-<version>-x64.dmg` for Intel.
 - **Install:** open it and drag PixelDeck to Applications.
 - **First start:** the Setup screen from #18, the same as on Windows.
-- **Terminal command:** About offers "Install the `pixeldeck` command". It makes the link
-  `~/.local/bin/pixeldeck`, which needs no administrator password; the Claude Code installer
-  uses the same folder. If that folder is not on the PATH, it says which line to add.
+- **Terminal command:** About, "On this computer", installs the `pixeldeck` command: a small
+  script at `~/.local/bin/pixeldeck` that starts the program inside the app. It needs no
+  administrator password, and the Claude Code installer uses the same folder. If that folder is
+  not on the PATH, About says so.
 - **Uninstall:** drag PixelDeck to the Bin. Settings stay in
-  `~/Library/Application Support/PixelDeck` unless you click "Remove my settings" in About
-  first.
+  `~/Library/Application Support/PixelDeck`; delete that folder to remove them too.
 
 ### Linux
 
 - **Download:** `PixelDeck-<version>-x86_64.AppImage`. A plain `.tar.gz` of the same folder
   is published next to it for people who don't want AppImages.
-- **Install:** mark it executable and run it. Setup offers two buttons:
-  - "Add PixelDeck to the app menu" writes a `.desktop` file and the icon under
-    `~/.local/share`, as `install-desktop.sh` does for a git clone;
-  - "Install the `pixeldeck` command" makes the link `~/.local/bin/pixeldeck`.
-- **If the AppImage moves:** both links break. At each start PixelDeck checks them against
-  its own path (`$APPIMAGE`) and offers to fix them.
-- **Uninstall:** "Remove from the app menu", then delete the file.
+- **Install:** mark it executable and run it. About, "On this computer", offers two buttons:
+  - "App menu" writes a `.desktop` file and the icon under `~/.local/share`, as
+    `install-desktop.sh` does for a git clone;
+  - "pixeldeck command" writes a small script at `~/.local/bin/pixeldeck`.
+- **If the AppImage moves:** both point at the old place. About shows that and offers Fix.
+- **An entry PixelDeck did not write**, such as the one `install-desktop.sh` writes for a git
+  clone under the same name, is only replaced on "Replace", and never removed.
+- **Uninstall:** "Remove" next to each, then delete the file.
+
+### The AppImage and its server
+
+An AppImage runs from a mount that goes away when the program that started it exits. The
+launcher exits once the window is open, and the server it started would lose its own files. So
+in an AppImage the launcher starts the server through the AppImage file again
+(`<file> --server`), which gives the server a mount of its own for as long as it runs. Only the
+AppImage's own program is believed: `$APPIMAGE` is inherited by every program started from
+inside an AppImage, so it counts only when this program sits under `$APPDIR`.
 
 ## How it is built
 
@@ -131,10 +143,11 @@ So each system needs a person before its first release:
 ## Order of work
 
 1. Code changes 1 and 2 (PATH and the token store), with unit tests that pretend to be each
-   system, as the existing tests do.
-2. The Linux package, built in CI and tested by Ahmed on Fedora.
-3. The macOS package, built in CI and tested by a Mac user. It is unsigned at first, with the
-   Open Anyway steps on the download page.
+   system, as the existing tests do. Done, untested on the real systems.
+2. The Linux package: built and tested by Ahmed on Fedora (`python3 packaging/build.py`), then
+   in CI.
+3. The macOS package, built and tested by a Mac user. It is unsigned at first, with the Open
+   Anyway steps on the download page.
 4. Signing for macOS, when there is a Developer account.
 
 ## Open questions
