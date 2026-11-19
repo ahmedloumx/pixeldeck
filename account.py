@@ -141,9 +141,17 @@ def _put_secrets(values):
         return values
     out = dict(values)
     for key in config.SECRET_KEYS:
-        if out.get(key):
+        if not out.get(key):
+            continue
+        # Off the file only once the store gives the same token back: a keyring that is locked
+        # or missing must not lose it.
+        try:
             store.set(key, out[key])
-            out[key] = ""  # off the file, so the store's value is the one read
+            kept = store.get(key, fresh=True) == out[key]
+        except credentials.StoreError:
+            kept = False
+        if kept:
+            out[key] = ""  # so the store's value is the one read
     return out
 
 

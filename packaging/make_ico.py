@@ -1,10 +1,12 @@
-"""A Windows .ico from static/app-icon.svg, which tools/make_icon.py draws as one rect per pixel run.
+"""PixelDeck's icon files from static/app-icon.svg, which tools/make_icon.py draws as one rect
+per pixel run: a Windows .ico, PNGs (Linux), and the PNG set macOS's iconutil makes an .icns of.
 
-Run: python packaging/make_ico.py static/app-icon.svg OUT.ico
+Run: python packaging/make_ico.py static/app-icon.svg OUT.ico   (packaging/build.py does the rest)
 Pixel art scales by whole numbers without blur, so every size is the 32x32 grid repeated
 (16 takes every other pixel).
 """
 
+import os
 import re
 import struct
 import sys
@@ -51,12 +53,28 @@ def ico(grid):
     return out + b"".join(images)
 
 
+def load(source):
+    with open(source, encoding="utf-8") as fh:
+        return read_grid(fh.read())
+
+
+def write_png(grid, size, target):
+    with open(target, "wb") as fh:
+        fh.write(png(grid, size))
+
+
+def write_iconset(grid, folder):
+    """The PNGs macOS's iconutil turns into an .icns: icon_<n>x<n>.png and its @2x."""
+    os.makedirs(folder, exist_ok=True)
+    for size in (16, 32, 128, 256, 512):
+        write_png(grid, size, os.path.join(folder, f"icon_{size}x{size}.png"))
+        write_png(grid, size * 2, os.path.join(folder, f"icon_{size}x{size}@2x.png"))
+
+
 def main():
     source, target = sys.argv[1], sys.argv[2]
-    with open(source, encoding="utf-8") as fh:
-        grid = read_grid(fh.read())
     with open(target, "wb") as fh:
-        fh.write(ico(grid))
+        fh.write(ico(load(source)))
 
 
 if __name__ == "__main__":

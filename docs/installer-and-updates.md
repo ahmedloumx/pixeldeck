@@ -1,8 +1,9 @@
 # Installers and updates
 
 Status: proposal, partly built. Code changes 1 to 9 below are built, and so is a Windows
-installer made by hand (`packaging/build.py`, see the README). Not built yet: the macOS and
-Linux packages, the release workflow, the website, signing and the in-app updates. This
+installer made by hand (`packaging/build.py`, see the README). The macOS and Linux packages
+have code but have never run ([packaging-macos-linux.md](packaging-macos-linux.md)). Not built
+yet: the release workflow, the website, signing and the in-app updates. This
 document describes what we want a colleague to experience, what has to change in the code to
 get there, and the order we build it in.
 

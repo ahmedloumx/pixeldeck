@@ -57,9 +57,45 @@ def tell(message, error=False):
         ctypes.windll.user32.MessageBoxW(None, message, config.APP_NAME, 0x10 if error else 0x40)
 
 
+# Where the common systems keep their certificate bundle: Debian and Ubuntu, Fedora and RHEL
+# (two names), macOS and Alpine.
+CERT_BUNDLES = ("/etc/ssl/certs/ca-certificates.crt", "/etc/pki/tls/certs/ca-bundle.crt",
+                "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem", "/etc/ssl/cert.pem")
+
+
+def prepare_environment(environ=None, verify_paths=None, isfile=os.path.isfile):
+    """For the packaged app on macOS and Linux, before it starts anything.
+
+    PyInstaller points LD_LIBRARY_PATH at the bundle and keeps the old value in
+    LD_LIBRARY_PATH_ORIG. Every program PixelDeck starts (git, ssh, claude, the terminals'
+    shells) would load the bundled libraries; they get the old value back. This process loaded
+    its own already. And the bundled OpenSSL looks for certificates where the build machine
+    keeps them; when they are not there, it gets this system's bundle (SSL_CERT_FILE)."""
+    environ = os.environ if environ is None else environ
+    if not config.FROZEN or WINDOWS:
+        return
+    for name in ("LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"):
+        if f"{name}_ORIG" in environ:
+            environ[name] = environ.pop(f"{name}_ORIG")
+        elif name == "LD_LIBRARY_PATH":
+            environ.pop(name, None)
+    if "SSL_CERT_FILE" not in environ:
+        import ssl
+        paths = verify_paths() if verify_paths else ssl.get_default_verify_paths()
+        if not (paths.cafile or paths.capath):  # None when the compiled-in place does not exist
+            found = next((path for path in CERT_BUNDLES if isfile(path)), None)
+            if found:
+                environ["SSL_CERT_FILE"] = found
+
+
 def server_argv():
     if not config.FROZEN:
         return [sys.executable, str(HERE / "server.py"), "--port", str(config.port())]
+    image = config.appimage()
+    if image:
+        # Through the AppImage file, so the server gets a mount of its own: the one this
+        # launcher runs from goes away when it exits, and the server's files with it.
+        return [str(image), "--server"]
     # The console form, so the server's output reaches its log even when pixeldeckw starts it.
     console = Path(sys.executable).with_name("pixeldeck.exe")
     return [str(console if console.is_file() else sys.executable), "--server"]
@@ -103,7 +139,9 @@ def start_server():
     # python.exe on Windows runs the real interpreter as a child, with a pid of its own.
     start = secrets.token_hex(8)
     with log:  # the server has its own handle on it
-        proc = subprocess.Popen(server_argv(), cwd=str(HERE), env={**os.environ, "PIXELDECK_START_ID": start},
+        # Not from inside this launcher's AppImage mount, which must be free to go when it exits.
+        cwd = config.folder("state") if config.appimage() else HERE
+        proc = subprocess.Popen(server_argv(), cwd=str(cwd), env={**os.environ, "PIXELDECK_START_ID": start},
                                 stdin=subprocess.DEVNULL, stdout=log, stderr=log, **flags)
     for _ in range(80):
         info = health()
@@ -294,6 +332,7 @@ def propose(args):
 
 
 def main():
+    prepare_environment()
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--status", action="store_true")

@@ -1,13 +1,17 @@
 """The tokens in the system's credential store, so they are not in a plain text file.
 
 Windows keeps them in Credential Manager, under "PixelDeck:<KEY>" for the signed-in user.
-macOS and Linux have no store here yet: their tokens stay in the settings file.
+macOS keeps them in the login Keychain (the `security` program), and Linux in the keyring
+behind the Secret Service (GNOME Keyring, KWallet 6), through `secret-tool`. Where none of
+these answers, the tokens stay in the settings file.
 
 PIXELDECK_CREDENTIALS renames the entries (tests use their own name) or, set to "off",
 turns the store off.
 """
 
 import os
+import shutil
+import subprocess
 import sys
 import time
 
@@ -21,7 +25,8 @@ class Store:
 
     name = None
 
-    def get(self, key):
+    def get(self, key, fresh=False):
+        """fresh: ask the store itself, past any cache (to read back what was just saved)."""
         return None
 
     def set(self, key, value):
@@ -61,7 +66,7 @@ class WindowsStore(Store):
     def _target(self, key):
         return f"{self._service}:{key}"
 
-    def get(self, key):
+    def get(self, key, fresh=False):
         ctypes = self._ctypes
         found = ctypes.POINTER(self._Credential)()
         if not self._read(self._target(key), self._TYPE_GENERIC, 0, ctypes.byref(found)):
@@ -91,6 +96,87 @@ class WindowsStore(Store):
         _touch()
 
 
+class CommandStore(Store):
+    """A store reached through a command-line program. Every Bitbucket call asks for the token,
+    so answers are kept for a minute."""
+
+    TTL = 60
+
+    def __init__(self, service, run=subprocess.run):
+        self._service, self._run, self._cache = service, run, {}
+
+    def _exec(self, argv, stdin=None):
+        try:
+            return self._run(argv, input=stdin, capture_output=True, text=True, timeout=15)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise StoreError(f"{self.name}: {exc}") from None
+
+    def get(self, key, fresh=False):
+        hit = self._cache.get(key)
+        if hit and not fresh and time.time() - hit[0] < self.TTL:
+            return hit[1]
+        try:
+            value = self._lookup(key)
+        except StoreError:
+            value = None
+        self._cache[key] = (time.time(), value)
+        return value
+
+    def set(self, key, value):
+        self._store(key, value)
+        self._cache.pop(key, None)
+        _touch()
+
+    def delete(self, key):
+        self._clear(key)
+        self._cache.pop(key, None)
+        _touch()
+
+
+class MacStore(CommandStore):
+    name = "the macOS Keychain"
+    _NOT_FOUND = 44  # security's exit code when there is no such item
+
+    def _lookup(self, key):
+        out = self._exec(["security", "find-generic-password", "-s", self._service, "-a", key, "-w"])
+        return (out.stdout.rstrip("\n") or None) if out.returncode == 0 else None
+
+    def _store(self, key, value):
+        if any(c in value for c in '"\\\n\r'):
+            raise StoreError("the token has characters the Keychain command cannot take")
+        # Through `security -i`, which reads the command from standard input, so the token is
+        # never on a command line that other programs can list.
+        line = f'add-generic-password -U -s "{self._service}" -a "{key}" -l "PixelDeck {key}" -w "{value}"\n'
+        out = self._exec(["security", "-i"], stdin=line)
+        if out.returncode != 0 or (out.stderr or "").strip():
+            raise StoreError(f"the Keychain refused the token: {(out.stderr or '').strip()[:200]}")
+
+    def _clear(self, key):
+        out = self._exec(["security", "delete-generic-password", "-s", self._service, "-a", key])
+        if out.returncode not in (0, self._NOT_FOUND):
+            raise StoreError(f"the Keychain could not remove the token: {(out.stderr or '').strip()[:200]}")
+
+
+class SecretServiceStore(CommandStore):
+    name = "the system keyring"
+
+    def _attrs(self, key):
+        return ["service", self._service, "key", key]
+
+    def _lookup(self, key):
+        out = self._exec(["secret-tool", "lookup", *self._attrs(key)])
+        return (out.stdout.rstrip("\n") or None) if out.returncode == 0 else None
+
+    def _store(self, key, value):
+        # secret-tool reads the secret from standard input when that is not a terminal.
+        out = self._exec(["secret-tool", "store", f"--label=PixelDeck {key}", *self._attrs(key)], stdin=value)
+        if out.returncode != 0:
+            raise StoreError(f"the keyring refused the token: {(out.stderr or '').strip()[:200]}")
+
+    def _clear(self, key):
+        self._exec(["secret-tool", "clear", *self._attrs(key)])  # nothing to clear is no error
+
+
 _changed = 0.0
 _stores = {}
 
@@ -114,5 +200,9 @@ def store():
                 made = WindowsStore(service)
             except (OSError, AttributeError):
                 pass
+        elif service != "off" and sys.platform == "darwin" and shutil.which("security"):
+            made = MacStore(service)
+        elif service != "off" and sys.platform.startswith("linux") and shutil.which("secret-tool"):
+            made = SecretServiceStore(service)
         _stores[service] = made
     return _stores[service]

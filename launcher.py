@@ -158,8 +158,11 @@ def ensure_worktree(root, repo_dir, slug, pr):
 
 def claude_binary():
     named = config.get("PIXELDECK_CLAUDE")
-    home = Path.home() / ".local" / "bin"
-    for candidate in (named, shutil.which("claude"), home / ("claude.exe" if WINDOWS else "claude")):
+    # Where the native installer and Homebrew put it, for a server whose PATH is still short.
+    usual = [Path.home() / ".local" / "bin" / ("claude.exe" if WINDOWS else "claude")]
+    if not WINDOWS:
+        usual += [Path("/opt/homebrew/bin/claude"), Path("/usr/local/bin/claude")]
+    for candidate in (named, shutil.which("claude"), *usual):
         if candidate and Path(candidate).exists():
             return str(candidate)
     raise RuntimeError("claude CLI not found: install Claude Code, or set PIXELDECK_CLAUDE to its path")

@@ -38,7 +38,7 @@ class FakeStore(credentials.Store):
     def __init__(self):
         self.values = {}
 
-    def get(self, key):
+    def get(self, key, fresh=False):
         return self.values.get(key)
 
     def set(self, key, value):

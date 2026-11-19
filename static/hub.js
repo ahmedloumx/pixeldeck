@@ -212,7 +212,7 @@ const Settings = (() => {
   const TABS = [["setup", "Setup"], ["connections", "Connected apps"], ["notifications", "Notifications"], ["look", "Personalise"], ["about", "About"]];
   let tab = "connections", report = null, loading = false, musicHooked = false, appOpen = null;
   // The setup form is redrawn with the rest of the pane, so what you typed lives here until saved.
-  let setup = null, draft = {}, checks = null;
+  let setup = null, draft = {}, checks = null, desk = null;
   let player = null, jiraOpen = false, playerPoll = 0;
   const TOKEN_PAGE = "https://id.atlassian.com/manage-profile/security/api-tokens";
   const dialog = () => document.getElementById("settings-dialog");
@@ -567,7 +567,23 @@ const Settings = (() => {
       <h3>PixelDeck</h3><p>Your pull requests, your team's, and the terminals and agents that work on them, in one window.</p>
       <dl class="set-rows">${row("Version", app?.version)}${row("Server", app ? `127.0.0.1:${app.port}` : "")}${row("Python", app?.python)}${row("Installed in", app?.app_dir, { code: true })}</dl>
       <p><button class="link" type="button" data-external="https://github.com/ahmedloumx/pixeldeck">github.com/ahmedloumx/pixeldeck</button></p>
-      <p><button class="btn btn--quiet" type="button" data-action="open-keys">Keyboard keys</button></p></div>`;
+      <p><button class="btn btn--quiet" type="button" data-action="open-keys">Keyboard keys</button></p></div>${deskHtml()}`;
+  }
+  // The packaged app on macOS and Linux: nothing installed it, so it offers the menu entry and
+  // the terminal command itself. One it did not write is replaced only on "Replace".
+  function deskHtml() {
+    if (!desk?.available) return "";
+    const line = (label, item, add, remove) => {
+      const said = { ok: "installed", stale: `points at an old place: ${item.starts}`, other: `already starts ${item.starts || "something else"}`, missing: "not installed" }[item.state];
+      const button = item.state === "ok" ? `<button class="btn btn--quiet" type="button" data-desktop="${remove}">Remove</button>`
+        : item.state === "other" ? `<button class="btn" type="button" data-desktop="${add}" data-replace="true">Replace</button>`
+        : `<button class="btn" type="button" data-desktop="${add}">${item.state === "stale" ? "Fix" : "Install"}</button>`;
+      return `<div class="set-row"><dt>${esc(label)}</dt><dd>${esc(said)} ${button}</dd></div>`;
+    };
+    const cmd = desk.command;
+    return `<section class="set-card"><header><h3>On this computer</h3></header>
+        <dl class="set-rows">${row("Program", desk.program, { code: true })}${line("pixeldeck command", cmd, "install-command", "remove-command")}${desk.menu ? line("App menu", desk.menu, "add-menu", "remove-menu") : ""}</dl>
+        <p class="set-hint">The <code>pixeldeck</code> command is for terminals and agents (<code>pixeldeck --propose</code>). It goes in <code>${esc(cmd.path)}</code>${cmd.state === "ok" && !cmd.on_path ? ", which is not on your PATH yet: add that folder to it in your shell's profile" : ""}.</p></section>`;
   }
   function paint() {
     const d = dialog();
@@ -609,6 +625,7 @@ const Settings = (() => {
     if (!(state.features || []).includes("settings")) { report = null; paint(); return; }
     loading = true; paint();
     const wantSetup = (state.features || []).includes("setup");
+    if ((state.features || []).includes("desktop")) api("desktop").then((d) => { desk = d; if (dialog()?.open && tab === "about") paint(); }).catch(() => {});
     try {
       [report, setup, player] = await Promise.all([api(test ? "settings-test" : "settings", test ? { method: "POST", body: {} } : undefined),
         wantSetup ? api("setup") : null, (state.features || []).includes("spotifyd") ? api("spotifyd").catch(() => null) : null]);
@@ -684,6 +701,14 @@ const Settings = (() => {
     if (pref) { Prefs.set({ [pref.dataset.pref]: pref.dataset.value }); return paint(); }
     if (t.closest("[data-guide-again]")) { dialog().close(); if (typeof Guide !== "undefined") Guide.start(); return; }
     if (t.closest("[data-welcome-again]")) { dialog().close(); if (typeof Welcome !== "undefined") Welcome.play(); return; }
+    const deskBtn = t.closest("[data-desktop]");
+    if (deskBtn) {
+      try {
+        desk = await busy(deskBtn, () => api("desktop", { method: "POST", body: { action: deskBtn.dataset.desktop, replace: deskBtn.dataset.replace === "true" } }));
+        paint();
+      } catch (err) { toast("Not done.", err.message, true); }
+      return;
+    }
     const check = t.closest("[data-setup-check]");
     if (check) {
       try { checks = await busy(check, () => api("setup-check", { method: "POST", body: Object.fromEntries(new FormData(check.form)) })); paint(); }

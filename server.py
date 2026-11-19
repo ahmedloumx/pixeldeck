@@ -34,6 +34,8 @@ sys.path.insert(0, str(HERE))
 
 import account  # noqa: E402
 import actions  # noqa: E402
+import desktop  # noqa: E402
+import shellpath  # noqa: E402
 import connections  # noqa: E402
 import repos  # noqa: E402
 import sessions  # noqa: E402
@@ -54,7 +56,9 @@ from engine import Engine  # noqa: E402
 import config  # noqa: E402
 import version  # noqa: E402
 
-STATIC = config.APP_DIR / "static"  # next to the code, or in the packaged app's bundle
+# Next to the code, or in the packaged app's bundle. Resolved, as the files asked for are: a .app
+# may reach it through a link.
+STATIC = (config.APP_DIR / "static").resolve()
 BUILD = version.build()  # the code this server runs; the files on disk can move on after a pull
 SECRET = secrets.token_urlsafe(32)
 # A second key, for an agent proposing a pull request from a terminal: it can ask and read the
@@ -63,9 +67,9 @@ AGENT_KEY = secrets.token_urlsafe(32)
 AGENT_ROUTES = {("POST", "propose"), ("GET", "proposal")}
 PROPOSALS = proposals.Proposals()
 FEATURES = ["merge", "sync", "drop", "proposals", "snapshots", "reviews", "events", "status", "settings", "merge-options", "jira",
-            "restore", "ui-state", "open-link", *account.FEATURES, *repos.FEATURES, *spotify.FEATURES, *spotifyd.FEATURES, "lyrics", "jira-settings", *screenlock.FEATURES,
+            "restore", "ui-state", "open-link", *account.FEATURES, *desktop.FEATURES, *repos.FEATURES, *spotify.FEATURES, *spotifyd.FEATURES, "lyrics", "jira-settings", *screenlock.FEATURES,
             *youtube.FEATURES]
-ROUTE_MODULES = (account, repos, spotify, spotifyd, lyrics, screenlock, youtube)  # each answers its own routes, or None
+ROUTE_MODULES = (account, desktop, repos, spotify, spotifyd, lyrics, screenlock, youtube)  # each answers its own routes, or None
 JIRA = jira.Jira()
 SNAPSHOT_MAX = 4 * 1024 * 1024
 MIN_COLS, MIN_ROWS = 20, 4  # a collapsed panel must not squeeze a program into a sliver
@@ -697,6 +701,7 @@ def main():
         httpd = DeskServer(("127.0.0.1", args.port), Desk)
     except OSError as exc:
         sys.exit(f"PixelDeck cannot listen on 127.0.0.1:{args.port} ({exc.strerror or exc}); is it running already?")
+    shellpath.extend_in_background()  # started from a Dock or an app menu, the PATH is short
     Desk.engine = Engine(config.workspace_root())
     Desk.port = args.port
     # Keep the terminals as they are every few seconds, and once more on the way out: atexit
