@@ -439,6 +439,18 @@ class BitbucketStaysTest(GitHubBase):
         self.assertEqual(eng.me(), {"uuid": "{bb}"})
 
 
+class ClonesTest(GitHubBase):
+    def test_a_clone_is_found_by_its_github_origin_in_any_form(self):
+        import gitscan
+        for url in ("git@github.com:acme/shop.git", "https://github.com/acme/shop", "ssh://git@github.com/acme/shop.git"):
+            self.assertEqual(gitscan.remote_repo(url), "acme/shop", url)
+        for url in ("https://github.com/acme", "https://evil.example/acme/shop", "git@gitlab.com:acme/shop.git", "git@github.com:../x"):
+            self.assertIsNone(gitscan.remote_repo(url), url)
+        self.env_file.write_text(self.env_file.read_text() + "GITHUB_URL=https://ghe.example.com/api/v3\n")
+        self.assertEqual(gitscan.remote_repo("git@ghe.example.com:acme/shop.git"), "acme/shop", "Enterprise clones by its host")
+        self.assertIsNone(gitscan.remote_repo("git@github.com:acme/shop.git"))
+
+
 class SetupTest(GitHubBase):
     def test_saving_github_keeps_bitbucket_and_never_shows_the_token(self):
         self.env_file.write_text("BITBUCKET_WORKSPACE=acme\nBITBUCKET_TOKEN=bb-secret\n# kept\n")

@@ -251,7 +251,7 @@ class Desk(BaseHTTPRequestHandler):
         engine = self.engine
         host = self._host()
         if not host.serves(route):  # a stale page asking a read-only host to write
-            return self._error(HTTPStatus.NOT_IMPLEMENTED, f"PixelDeck does not do that on {host.label} yet.")
+            return self._error(HTTPStatus.NOT_IMPLEMENTED, host.refusal(route))
         try:
             if method == "GET" and route == "bootstrap":
                 return self._send(200, self._bootstrap())

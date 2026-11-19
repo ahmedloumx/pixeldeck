@@ -112,7 +112,7 @@ class Engine:
 
     def _note(self, exc):
         if exc.status in (401, 403) or getattr(exc, "unset", False) or exc.status == 0 and "No BITBUCKET_" in exc.message:
-            self.auth = {"ok": False, "error": exc.message, "status": exc.status}
+            self.auth = {"ok": False, "error": exc.message, "status": exc.status, "unset": bool(getattr(exc, "unset", False))}
 
     def refresh_identity(self):
         try:

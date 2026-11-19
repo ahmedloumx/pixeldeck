@@ -67,6 +67,12 @@ class Host:
     def serves(self, route):
         return self.writes or not (route in BITBUCKET_ROUTES or route == "repos" or route.startswith("repo-"))
 
+    def refusal(self, route):
+        """What the page says when it asks for a route this host does not serve."""
+        if route == "repos" or route.startswith("repo-"):
+            return f"The Repos panel reads Bitbucket only for now; browse the code on {self.label}."
+        return f"PixelDeck does not do that on {self.label} yet: do it on {self.label}."
+
     def features(self, features):
         return list(features) if self.writes else [f for f in features if f not in BITBUCKET_FEATURES]
 
