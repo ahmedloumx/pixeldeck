@@ -1250,3 +1250,22 @@ class ReviewActionTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PrExtraTest(unittest.TestCase):
+    def test_commits_link_to_their_own_bitbucket_page_only(self):
+        import types  # noqa: PLC0415
+        import hosts  # noqa: PLC0415
+        a, b, c = "a" * 40, "b" * 40, "c" * 40
+        commits = [
+            {"hash": a, "message": "feat: one\n\nbody", "date": "2026-01-01T00:00:00+00:00", "author": {"raw": "Pixel Pat <p@x>"},
+             "links": {"html": {"href": f"https://bitbucket.org/acme/shop/commits/{a}"}}},
+            {"hash": b, "message": "fix: two", "date": "2026-01-02T00:00:00+00:00", "author": {"user": {"display_name": "Sam"}},
+             "links": {"html": {"href": "https://evil.example/commits/x"}}},
+            {"hash": c, "message": "chore: three", "date": "2026-01-03T00:00:00+00:00", "author": {}},
+        ]
+        fake = types.SimpleNamespace(client=types.SimpleNamespace(workspace="acme", paged=lambda path, params=None, max_pages=10: iter(commits)))
+        out = {"commits": hosts.BitbucketHost(fake).commits("shop", 7)}
+        self.assertEqual([x["url"] for x in out["commits"]], [f"https://bitbucket.org/acme/shop/commits/{a}", "", ""])
+        self.assertEqual([(x["sha"], x["subject"], x["author"]) for x in out["commits"]],
+                         [("aaaaaaaa", "feat: one", "Pixel Pat"), ("bbbbbbbb", "fix: two", "Sam"), ("cccccccc", "chore: three", "")])

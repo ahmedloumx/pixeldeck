@@ -195,19 +195,6 @@ tr.is-cursor { box-shadow: inset 3px 0 0 var(--color-accent); background: var(--
 .commit-list li { display: grid; grid-template-columns: 6rem minmax(0, 1fr) auto auto; gap: var(--space-sm); align-items: baseline; font-size: var(--text-sm); padding-bottom: var(--space-xs); border-bottom: var(--rule-hair) solid var(--color-rule); }
 .commit-list .person { color: var(--color-accent); }
 
-.journey { margin-top: var(--space-lg); }
-.journey-track { position: relative; height: 26px; margin-inline: var(--space-xs); }
-.journey-track::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 2px; background: repeating-linear-gradient(90deg, var(--color-rule-2) 0 6px, transparent 6px 8px); }
-.jmark { position: absolute; top: 50%; left: calc(var(--x, 0) * 100%); width: 10px; height: 10px; transform: translate(-50%, -50%); background: var(--color-muted); }
-.jmark.is-updated { background: var(--color-cool); }
-.jmark.is-approved { background: var(--color-ok); }
-.jmark.is-changes_requested { background: var(--color-bad); }
-.jmark.is-start, .jmark.is-end { width: 14px; height: 14px; background: var(--color-ink); }
-.jmark.is-end.is-open { background: var(--color-accent); }
-.jmark.is-end.is-merged { background: var(--color-cool); }
-.jmark:hover { outline: var(--pixel) solid var(--color-ink); outline-offset: 2px; }
-.journey-ends { display: flex; justify-content: space-between; margin-top: var(--space-2xs); font-size: var(--text-xs); color: var(--color-muted); }
-
 /* files and diff */
 .files { display: grid; grid-template-columns: minmax(12rem, 17rem) minmax(0, 1fr); gap: var(--space-lg); align-items: start; }
 .file-list { position: sticky; top: var(--space-2xs); max-height: calc(100dvh - 18rem); overflow: auto; }
