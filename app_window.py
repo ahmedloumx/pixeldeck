@@ -109,7 +109,11 @@ class DeskApp(Gtk.Application):
             self.content.add_script(WebKit.UserScript.new(
                 CATCH_ERRORS, WebKit.UserContentInjectedFrames.TOP_FRAME,
                 WebKit.UserScriptInjectionTime.START, None, None))
-        view = WebKit.WebView(network_session=self.session, user_content_manager=self.content)
+        # The page plays sound only when you ask it to (Play on a video, Spotify's keys), so the
+        # window lets media start with sound: else YouTube's player, in its own frame, could not
+        # start when you press Play outside it.
+        policies = WebKit.WebsitePolicies(autoplay=WebKit.AutoplayPolicy.ALLOW)
+        view = WebKit.WebView(network_session=self.session, user_content_manager=self.content, website_policies=policies)
         settings = view.get_settings()
         settings.set_enable_developer_extras(True)
         settings.set_javascript_can_open_windows_automatically(True)
@@ -250,19 +254,49 @@ class DeskApp(Gtk.Application):
         return parts.scheme == self.base.scheme and parts.netloc == self.base.netloc
 
     def _on_policy(self, _view, decision, kind):
+        if kind == WebKit.PolicyDecisionType.RESPONSE:
+            return self._on_response(decision)
         if kind not in (WebKit.PolicyDecisionType.NAVIGATION_ACTION, WebKit.PolicyDecisionType.NEW_WINDOW_ACTION):
             return False
-        uri = decision.get_navigation_action().get_request().get_uri()
+        action = decision.get_navigation_action()
+        uri = action.get_request().get_uri()
+        if self._inside(uri):
+            return False
+        # A frame in the page (YouTube's player in the Music panel) loads without a link being
+        # followed, and WebKit does not say which frame a navigation is for. So an https load
+        # that is not a followed link or a sent form goes on here, and the answer decides: the
+        # main frame's goes to the browser (below), a frame's stays in its frame. A click on an
+        # outside link, or a new window, still goes straight to the browser and loads nothing here.
+        # (Not is_user_gesture(): a frame made by a click on Play carries that click.)
+        followed = action.get_navigation_type() in (WebKit.NavigationType.LINK_CLICKED, WebKit.NavigationType.FORM_SUBMITTED,
+                                                     WebKit.NavigationType.FORM_RESUBMITTED)
+        if kind == WebKit.PolicyDecisionType.NAVIGATION_ACTION and not followed and urlsplit(uri).scheme == "https":
+            return False
+        decision.ignore()
+        self._outside(uri)
+        return True
+
+    def _on_response(self, decision):
+        if not decision.is_main_frame_main_resource():
+            return False
+        uri = decision.get_request().get_uri()
         if self._inside(uri):
             return False
         decision.ignore()
-        if urlsplit(uri).scheme in ("http", "https"):
-            Gio.AppInfo.launch_default_for_uri(uri, None)
+        self._outside(uri)
         return True
+
+    def _outside(self, uri):
+        if urlsplit(uri).scheme not in ("http", "https"):
+            return
+        if self.selftest:  # a check never opens a browser: it reports what would have gone there
+            self.selftest.setdefault("outside", []).append(uri)
+            return
+        Gio.AppInfo.launch_default_for_uri(uri, None)
 
     def _on_create(self, view, _action):
         # A panel popped out of the workspace gets a window of its own, same profile.
-        child = WebKit.WebView(related_view=view, user_content_manager=self.content)
+        child = WebKit.WebView(related_view=view, user_content_manager=self.content, website_policies=view.get_website_policies())
         child.set_settings(view.get_settings())
         win = self._window(child, 1180, 780)
         child.connect("ready-to-show", lambda _v: win.present())
@@ -321,6 +355,7 @@ class DeskApp(Gtk.Application):
             report = {"result": text}
         if isinstance(report, dict):
             report["windows"] = len(self.get_windows())
+            report["sent_to_browser"] = self.selftest.get("outside", [])
             report["webkit"] = f"{WebKit.get_major_version()}.{WebKit.get_minor_version()}.{WebKit.get_micro_version()}"
         print(json.dumps(report, indent=1), flush=True)
         if isinstance(report, dict) and (report.get("errors") or report.get("error")):

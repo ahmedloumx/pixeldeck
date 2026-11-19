@@ -139,6 +139,11 @@ Full documentation, with the architecture, security model and measured performan
   it back on; playing something from here turns it on again. It drives
   your own Spotify app (desktop or phone) through Spotify's Web API. Each person uses their own
   Spotify app, see below. **Preview** in the player shows it with made-up music.
+- **YouTube.** A switch on top of the Music panel picks Spotify or YouTube. Paste a YouTube link
+  and it plays at once, no key needed; with a free API key the panel searches YouTube too. Videos
+  play in YouTube's own player inside a pixel TV, with the bot sitting on top: in the panel, or
+  floating over your work (drag it anywhere, it never covers the bar). The bar's mini player
+  switches between Spotify and YouTube with its first button, and a quick toggle floats the TV.
 - **Lyrics.** The LYRICS key puts the song's lyrics beside the deck, from
   [LRCLIB](https://lrclib.net), a free and open lyrics database (Spotify's API has none). Timed
   lyrics follow the song and a click on a line jumps there; the small player has a LYRICS tab.
@@ -297,6 +302,22 @@ works, yellow when it needs you, grey when it is not connected. A click opens it
    setup) and save it, then press **Connect** and sign in to Spotify. More in
    [The music player and your Spotify app](#the-music-player-and-your-spotify-app).
 
+### Set up YouTube
+
+Playing needs no setup: paste a YouTube link (or a video id) in the Music panel's YouTube view.
+Searching needs a free API key:
+
+1. Open [YouTube Data API v3](https://console.cloud.google.com/apis/library/youtube.googleapis.com)
+   in the Google Cloud console, pick or create a project (free) and press **Enable**.
+2. Open **Credentials**, press **Create credentials**, **API key**, and restrict the key to
+   **YouTube Data API v3** (no website or IP address restriction: the search runs from the
+   PixelDeck server).
+3. Paste the key in **Settings, Connected apps, YouTube** and save it.
+
+The free quota is 10,000 units a day and a search costs 100, so about 100 searches a day; the
+same search again within a few minutes is answered from memory and costs nothing. Playing costs
+nothing. The key is kept like the other tokens and never reaches the page.
+
 ## Configuration
 
 Everything is in one settings file; [.env.example](.env.example) lists every key with a comment.
@@ -313,6 +334,7 @@ wins over the file, the file wins over Windows Credential Manager (for `BITBUCKE
 | `BITBUCKET_PROJECT` | Start scoped to one project key. Empty: every project. |
 | `JIRA_SITE`, `TICKET_PREFIXES` | Turn ticket keys such as `ABC-123` in branches and titles into Jira links. |
 | `SPOTIFY_CLIENT_ID` | The Client ID of your own Spotify app, for the music player (see below). |
+| `YOUTUBE_API_KEY` | A free YouTube Data API v3 key, for searching YouTube in the Music panel (see [Set up YouTube](#set-up-youtube)). Pasted links play without it. |
 | `JIRA_TOKEN`, `JIRA_EMAIL` | An Atlassian API token with Jira access, to show and move a ticket's status in the merge popup. Classic and scoped tokens both work; the Bitbucket token is never sent to Jira. `JIRA_EMAIL` defaults to `BITBUCKET_EMAIL`. **Settings, Connected apps, Jira** sets all three without editing the file, and tries them at once; the token is never shown back. |
 | `SPOTIFYD`, `SPOTIFYD_PATH`, `SPOTIFYD_DEVICE_NAME` | PixelDeck's own Spotify player (see below): `SPOTIFYD=off` turns it off, `SPOTIFYD_PATH` names the program when it is not on the PATH or in `~/.local/bin`, the device name defaults to `PixelDeck`. |
 | `PIXELDECK_WORKSPACE_ROOT` | The folder with your local clones. Default: the folder PixelDeck sits in. |
@@ -407,6 +429,9 @@ folder. Files you leave out come from `briefs/`. Placeholders such as `{source}`
 - Spotify tokens stay on the server, in the state folder with mode 600, and never reach the page
   or a log. The sign-in comes back to `/spotify/callback` with a single-use state that expires in
   10 minutes; album art is fetched by the server from Spotify's image host only.
+- The YouTube API key stays on the server and goes to Google only. Videos play in YouTube's own
+  player from youtube-nocookie.com, the one site the page may frame; thumbnails come through the
+  server from YouTube's image host only.
 
 ## Development
 

@@ -253,6 +253,20 @@ const Settings = (() => {
         <p class="set-actions"><button class="btn btn--primary" type="submit">Save</button>${sp?.configured ? ' <button class="btn btn--quiet" type="button" data-spotify-clear>Remove</button>' : ""}</p></form>`;
   }
 
+  // YouTube: the API key for the search, saved from here and never shown back. Playing needs none.
+  function youtubeHtml(yt) {
+    const where = { store: `in ${yt?.store}`, file: "in the settings file", environment: "in the environment" }[yt?.where] || "";
+    return `<section class="set-card"><header><h3>YouTube</h3>${pill(yt ? !!(yt.key_set && yt.key_ok) : null, "Search on", yt?.key_set ? "Check the key" : "Links only")}</header>
+        <dl class="set-rows">${row("API key", yt?.key_set ? `set${where ? ` ${where}` : ""} (never shown)` : "missing: pasted links still play")}${row("Free quota", "10,000 units a day; a search costs 100, so about 100 searches")}</dl>
+        <form class="set-form" data-youtube-form autocomplete="off">
+          <label class="field-block"><span>API key</span><input type="password" name="key" data-keep="youtube-key" spellcheck="false" autocomplete="new-password"
+            placeholder="${yt?.key_set ? "Saved: paste another to change it" : "AIza and 35 more letters and digits"}"></label>
+          <p class="set-error" data-youtube-error hidden></p>
+          <p class="set-actions"><button class="btn btn--primary" type="submit">Save</button>${yt?.key_set ? ' <button class="btn btn--quiet" type="button" data-youtube-clear>Remove</button>' : ""}
+            <button class="btn btn--quiet" type="button" data-tube="open">Open YouTube in Music</button></p></form>
+        <p class="set-hint">The key is free and only searches: it goes to Google, never to the page. The same search again within a few minutes costs nothing. Videos play in YouTube's own player, in the Music panel or a floating pixel TV.</p></section>`;
+  }
+
   /* Connected apps: what PixelDeck connects to, grouped, each with an 8-bit icon and its state.
      A click opens its guide beside the list: the steps, each with the link to the exact page,
      then its fields and buttons. The same guides are in the README, for a new colleague. */
@@ -309,7 +323,18 @@ const Settings = (() => {
           `Add this redirect URI to it: <code>${esc(sp?.redirect_uri || "")}</code>${sp?.redirect_uri ? ` <button class="link" type="button" data-copy-value="${esc(sp.redirect_uri)}">Copy</button>` : ""}.`,
           "Paste the app's <b>Client ID</b> below and save it, then press <b>Connect</b> and sign in to Spotify."] });
     }
-    apps.push({ id: "youtube", group: "media", label: "YouTube", soon: true, line: "Videos in a floating pixel TV" });
+    if (typeof MusicYouTube !== "undefined" && (state.features || []).includes("youtube")) {
+      const yt = MusicYouTube.status(), ok = !!(yt?.key_set && yt.key_ok);
+      apps.push({ id: "youtube", group: "media", label: "YouTube", anchor: "set-up-youtube", card: () => youtubeHtml(yt),
+        tone: !yt ? "off" : ok ? "ok" : yt.key_set ? "bad" : "off",
+        pill: !yt ? "Checking" : ok ? "Search on" : yt.key_set ? "Check the key" : "Links only",
+        line: ok ? "Search and play in a floating pixel TV" : "Pasted links play; a free key adds search",
+        steps: [`Open ${ext("https://console.cloud.google.com/apis/library/youtube.googleapis.com", "YouTube Data API v3")} in the Google Cloud console, pick or create a project (free) and press <b>Enable</b>.`,
+          "Open <b>Credentials</b>, press <b>Create credentials</b>, <b>API key</b>, and restrict the key to <b>YouTube Data API v3</b>.",
+          "Paste the key below and save it. Playing a pasted link needs no key."] });
+    } else {
+      apps.push({ id: "youtube", group: "media", label: "YouTube", soon: true, line: "Videos in a floating pixel TV" });
+    }
     return apps;
   }
   const appIcon = (id, px) => (typeof ControlCenter !== "undefined" ? ControlCenter.appIcon(id, px) : "");
@@ -510,6 +535,7 @@ const Settings = (() => {
       if (!musicHooked) { musicHooked = true; Music.onStatus(() => { if (dialog()?.open && tab === "connections") paint(); }); }
       Music.refresh();
     }
+    if (typeof MusicYouTube !== "undefined") MusicYouTube.refresh().then(() => { if (dialog()?.open && tab === "connections") paint(); });
     if (!(state.features || []).includes("settings")) { report = null; paint(); return; }
     loading = true; paint();
     const wantSetup = (state.features || []).includes("setup");
@@ -643,6 +669,26 @@ const Settings = (() => {
       paint();
       toast("Saved.", "Now press Connect and sign in to Spotify in your browser.");
     } catch (ex) { err.textContent = ex.message; err.hidden = false; }
+  });
+  document.addEventListener("submit", async (e) => {
+    const form = e.target.closest?.("[data-youtube-form]");
+    if (!form) return;
+    e.preventDefault();
+    const b = form.querySelector("[type=submit]"), err = form.querySelector("[data-youtube-error]");
+    err.hidden = true;
+    try {
+      await busy(b, () => api("youtube-key", { method: "POST", body: { key: form.key.value } }));
+      form.key.value = "";
+      if (typeof MusicYouTube !== "undefined") await MusicYouTube.refresh();
+      paint();
+      toast("Saved.", "Search YouTube from the Music panel now.");
+    } catch (ex) { err.textContent = ex.message; err.hidden = false; }
+  });
+  document.addEventListener("click", async (e) => {
+    const b = e.target.closest?.("#settings-dialog [data-youtube-clear]");
+    if (!b || !armed(b, "Sure? Remove the key")) return;
+    try { await busy(b, () => api("youtube-key", { method: "POST", body: { clear: true } })); if (typeof MusicYouTube !== "undefined") await MusicYouTube.refresh(); paint(); toast("YouTube's API key removed.", "Pasted links still play."); }
+    catch (err) { toast("Could not remove it.", err.message, true); }
   });
   document.addEventListener("change", (e) => {
     const t = e.target;
