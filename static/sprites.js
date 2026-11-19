@@ -148,7 +148,7 @@ const Sprites = (() => {
     el.dataset.frame = frame;
   }
   function flash(el, frame, ms = 160) {
-    if (!el || el._timer || reduced()) return;
+    if (!el || el._timer || el._wiggling || reduced()) return;
     el.dataset.frame = frame;
     setTimeout(() => { if (!el._timer) el.dataset.frame = el._look || 0; }, ms);
   }
@@ -173,7 +173,8 @@ const Sprites = (() => {
       if (!r.width || el._timer) continue;
       const cx = r.left + r.width / 2, cy = r.top + r.height * 0.45;
       el._look = LOOK[`${pointerY < cy - 4 ? "up" : "down"}-${pointerX < cx ? "left" : "right"}`];
-      if (el.dataset.frame !== "1") el.dataset.frame = el._look; // not in the middle of a blink
+      // not in the middle of a blink or a joystick wiggle, which ends on the new look
+      if (el.dataset.frame !== "1" && !el._wiggling) el.dataset.frame = el._look;
     }
   }
   addEventListener("pointermove", (e) => {
