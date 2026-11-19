@@ -1,0 +1,413 @@
+"""Run with: python3 -m unittest discover -s tests  (from the PixelDeck folder).
+
+YouTube is faked here: every request goes to a scripted transport that fails on anything it
+was not told to expect, and the API key lives in the test's own settings file."""
+
+import json
+import os
+import sys
+import tempfile
+import types
+import unittest
+from pathlib import Path
+from unittest import mock
+from urllib.parse import parse_qs, urlsplit
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+# Tests never read your .env: they write one of their own.
+_ENV = Path(tempfile.mkdtemp(prefix="pixeldeck-test-")) / ".env"
+_START = "BITBUCKET_WORKSPACE=acme\n# a comment that stays\n"
+os.environ.setdefault("PIXELDECK_ENV", str(_ENV))
+
+import youtube  # noqa: E402
+
+KEY = "AIza" + "Sy0123456789abcdefghijklmnopqrstu_-"  # made up: the shape of a key, 39 characters
+OTHER = "AIza" + "Zz9876543210ZYXWVUTSRQPONMLKJIHGF-_"
+VID = "dQw4w9WgXcQ"
+HANDLER = types.SimpleNamespace(port=8644)
+SEARCH = youtube.SEARCH_URL
+
+
+def answer(status=200, payload=None, headers=None, raw=None):
+    body = raw if raw is not None else (b"" if payload is None else json.dumps(payload).encode())
+    return status, {"content-type": "application/json", **(headers or {})}, body
+
+
+def google_error(code, reason, message="", detail=None):
+    err = {"code": code, "message": message, "errors": [{"message": message, "domain": "youtube", "reason": reason}]}
+    if detail:
+        err["details"] = [{"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": detail, "domain": "googleapis.com"}]
+    return answer(code, {"error": err})
+
+
+def snippet(ident, title, channel="Lofi Cat", live="none", thumb=None):
+    pics = {"default": {"url": f"https://i.ytimg.com/vi/{ident}/default.jpg"},
+            "medium": {"url": thumb or f"https://i.ytimg.com/vi/{ident}/mqdefault.jpg"}}
+    return {"kind": "youtube#searchResult", "id": {"kind": "youtube#video", "videoId": ident},
+            "snippet": {"title": title, "channelTitle": channel, "liveBroadcastContent": live, "thumbnails": pics}}
+
+
+class FakeTube:
+    """Answers queued per (method, URL prefix). The last answer repeats; an unknown URL fails the test."""
+
+    def __init__(self):
+        self.calls = []
+        self.routes = []
+
+    def on(self, method, prefix, *answers):
+        self.routes.insert(0, (method, prefix, list(answers)))
+
+    def __call__(self, method, url, headers, body):
+        self.calls.append(types.SimpleNamespace(method=method, url=url, headers=dict(headers), body=body))
+        for m, prefix, answers in self.routes:
+            if m == method and url.startswith(prefix):
+                return answers.pop(0) if len(answers) > 1 else answers[0]
+        raise AssertionError(f"unexpected request {method} {url}")
+
+
+class FakeStore:
+    name = "Test credential store"
+
+    def __init__(self):
+        self.items = {}
+
+    def get(self, key):
+        return self.items.get(key)
+
+    def set(self, key, value):
+        self.items[key] = value
+
+    def delete(self, key):
+        self.items.pop(key, None)
+
+
+class Base(unittest.TestCase):
+    def setUp(self):
+        # Each test gets this file's settings, whatever another test module set at its import.
+        _ENV.write_text(_START)
+        env = {k: v for k, v in os.environ.items() if k != youtube.SETTING}
+        env.update(PIXELDECK_ENV=str(_ENV), PIXELDECK_CREDENTIALS="off")
+        patcher = mock.patch.dict(os.environ, env, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.now = [1000.0]
+        self.fake = FakeTube()
+        self.saved = youtube.CLIENT
+        youtube.CLIENT = youtube.Client(transport=self.fake, clock=lambda: self.now[0])
+        self.addCleanup(setattr, youtube, "CLIENT", self.saved)
+
+    def route(self, method, name, query=None, body=None):
+        return youtube.route(HANDLER, None, method, name, query or {}, body)
+
+    def save(self, key=KEY):
+        return self.route("POST", "youtube-key", body={"key": key})
+
+
+class KeyTest(Base):
+    """The API key is set from the settings, into the settings file, and never read back."""
+
+    def test_saving_writes_the_settings_file_and_never_answers_the_key(self):
+        status = self.save(f"  {KEY} ")
+        text = _ENV.read_text()
+        self.assertIn(f"YOUTUBE_API_KEY={KEY}\n", text)
+        self.assertIn("# a comment that stays", text)
+        self.assertEqual((status["key_set"], status["key_ok"], status["where"], status["setting"]), (True, True, "file", "YOUTUBE_API_KEY"))
+        self.assertNotIn(KEY, json.dumps(status), "the key never goes back to the page")
+        self.assertNotIn(KEY, json.dumps(self.route("GET", "youtube-status")))
+        self.assertEqual(self.fake.calls, [], "saving asks nobody")
+
+    def test_a_key_that_is_not_one_is_refused_and_nothing_is_written(self):
+        for bad in ("", "   ", KEY[:-1], KEY + "x", "AIzb" + KEY[4:], KEY.lower(), KEY[:20] + " " + KEY[21:], KEY[:-1] + "!",
+                    f"{KEY}\nEVIL=1", "BITBUCKET_TOKEN=x", None, 12345, [KEY], {"key": KEY}):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                self.save(bad)
+        self.assertEqual(_ENV.read_text(), _START)
+        self.assertFalse(self.route("GET", "youtube-status")["key_set"])
+
+    def test_clear_removes_it_and_forgets_the_searches(self):
+        self.save()
+        youtube.CLIENT.cache["lofi"] = (self.now[0], {"items": []})
+        status = self.route("POST", "youtube-key", body={"clear": True})
+        self.assertNotIn("YOUTUBE_API_KEY", _ENV.read_text())
+        self.assertEqual((status["key_set"], status["where"]), (False, None))
+        self.assertEqual(len(youtube.CLIENT.cache), 0)
+
+    def test_a_credential_store_takes_the_key_off_the_file(self):
+        store = FakeStore()
+        with mock.patch.object(youtube.credentials, "store", lambda: store):
+            _ENV.write_text(_START + f"YOUTUBE_API_KEY={OTHER}\n")
+            status = self.save()
+            self.assertEqual(store.items, {"YOUTUBE_API_KEY": KEY})
+            self.assertNotIn("YOUTUBE_API_KEY", _ENV.read_text(), "the file's old key would win over the store's")
+            self.assertEqual((status["key_set"], status["where"], status["store"]), (True, "store", "Test credential store"))
+            self.assertNotIn(KEY, json.dumps(status))
+            self.assertEqual(youtube.api_key(), KEY)
+            self.route("POST", "youtube-key", body={"clear": True})
+            self.assertEqual(store.items, {})
+
+    def test_the_environment_wins_and_says_so(self):
+        os.environ["YOUTUBE_API_KEY"] = OTHER
+        self.assertEqual(self.route("GET", "youtube-status")["where"], "environment")
+
+
+class SearchTest(Base):
+    def setUp(self):
+        super().setUp()
+        self.save()
+
+    def results(self, *items):
+        self.fake.on("GET", SEARCH, answer(200, {"kind": "youtube#searchListResponse", "items": list(items)}))
+
+    def test_a_search_asks_for_embeddable_videos_and_answers_trimmed(self):
+        self.results(
+            snippet("abcdefghijk", "Lofi hip hop radio &#39;24/7&#39; &amp; beats", live="live"),
+            snippet("ABCDEFGHIJ_", "Synthwave <mix>", channel=None, thumb="https://evil.example/x.jpg"),
+            {"id": {"kind": "youtube#channel", "channelId": "UC123"}, "snippet": {"title": "A channel"}},
+            snippet("short", "an id that is not one"),
+            "not an item",
+        )
+        out = self.route("GET", "youtube-search", {"q": ["  lofi   hip hop "]})
+        self.assertEqual(out["items"], [
+            {"id": "abcdefghijk", "title": "Lofi hip hop radio '24/7' & beats", "channel": "Lofi Cat",
+             "thumb": "https://i.ytimg.com/vi/abcdefghijk/mqdefault.jpg", "live": True},
+            {"id": "ABCDEFGHIJ_", "title": "Synthwave <mix>", "channel": None,
+             "thumb": "https://i.ytimg.com/vi/ABCDEFGHIJ_/default.jpg", "live": False},
+        ])
+        self.assertEqual((out["query"], out["link"], out["cached"]), ("lofi hip hop", False, False))
+        call = self.fake.calls[0]
+        parts = urlsplit(call.url)
+        self.assertEqual(f"{parts.scheme}://{parts.netloc}{parts.path}", SEARCH)
+        q = {k: v[0] for k, v in parse_qs(parts.query).items()}
+        self.assertEqual(q, {"part": "snippet", "type": "video", "maxResults": "12", "safeSearch": "moderate",
+                             "videoEmbeddable": "true", "q": "lofi hip hop", "key": KEY})
+        self.assertNotIn(KEY, json.dumps(out), "the key never goes back to the page")
+
+    def test_the_same_search_is_answered_from_memory_for_a_few_minutes(self):
+        self.results(snippet("abcdefghijk", "One"))
+        first = self.route("GET", "youtube-search", {"q": ["Lofi Hip Hop"]})
+        again = self.route("GET", "youtube-search", {"q": [" lofi  hip hop"]})
+        self.assertEqual(len(self.fake.calls), 1, "a repeated search costs no quota")
+        self.assertEqual((first["cached"], again["cached"], again["items"]), (False, True, first["items"]))
+        self.now[0] += youtube.CACHE_TTL + 1
+        self.route("GET", "youtube-search", {"q": ["lofi hip hop"]})
+        self.assertEqual(len(self.fake.calls), 2, "after a while it asks again")
+
+    def test_the_memory_is_capped(self):
+        self.results(snippet("abcdefghijk", "One"))
+        for n in range(youtube.CACHE_MAX + 5):
+            self.route("GET", "youtube-search", {"q": [f"song {n}"]})
+        self.assertEqual(len(youtube.CLIENT.cache), youtube.CACHE_MAX)
+        self.assertNotIn("song 0", youtube.CLIENT.cache)
+
+    def test_the_quota_says_what_it_is_and_is_not_kept(self):
+        self.fake.on("GET", SEARCH, google_error(403, "quotaExceeded", "The request cannot be completed because you have exceeded your <a href='/quota'>quota</a>."),
+                     answer(200, {"items": [snippet("abcdefghijk", "One")]}))
+        with self.assertRaises(youtube.YouTubeError) as caught:
+            self.route("GET", "youtube-search", {"q": ["lofi"]})
+        self.assertEqual(caught.exception.status, 403)
+        self.assertIn("10,000 units a day", caught.exception.message)
+        self.assertIn("about 100 searches", caught.exception.message)
+        self.assertEqual(len(self.route("GET", "youtube-search", {"q": ["lofi"]})["items"]), 1, "a refusal is not kept")
+        self.assertEqual(len(self.fake.calls), 2)
+
+    def test_a_bad_key_and_other_refusals_say_what_to_do(self):
+        cases = [
+            (google_error(400, "badRequest", "API key not valid. Please pass a valid API key.", "API_KEY_INVALID"), youtube.BAD_KEY),
+            (google_error(400, "keyInvalid", "Bad Request"), youtube.BAD_KEY),
+            (google_error(403, "accessNotConfigured", "YouTube Data API v3 has not been used in project 1 before", "SERVICE_DISABLED"), youtube.NOT_ENABLED),
+            (google_error(403, "forbidden", "Requests to this API are blocked.", "API_KEY_SERVICE_BLOCKED"), youtube.RESTRICTED),
+            (google_error(403, "forbidden", "Requests from referer <empty> are blocked.", "API_KEY_HTTP_REFERRER_BLOCKED"), youtube.RESTRICTED),
+            (google_error(403, "rateLimitExceeded", "slow down"), youtube.QUOTA),
+        ]
+        for n, (reply, message) in enumerate(cases):
+            with self.subTest(case=n):
+                self.fake.on("GET", SEARCH, reply)
+                with self.assertRaises(youtube.YouTubeError) as caught:
+                    self.route("GET", "youtube-search", {"q": [f"case {n}"]})
+                self.assertEqual(caught.exception.message, message)
+
+    def test_an_unknown_refusal_keeps_googles_words_but_never_the_key(self):
+        self.fake.on("GET", SEARCH, google_error(500, "backendError", f"<b>Backend</b> broke for key={KEY}, sorry"))
+        with self.assertRaises(youtube.YouTubeError) as caught:
+            self.route("GET", "youtube-search", {"q": ["lofi"]})
+        self.assertEqual(caught.exception.message, "YouTube answered 500: Backend broke for key=[key], sorry")
+        self.fake.on("GET", SEARCH, answer(502, raw=b"<html>gateway</html>"))
+        with self.assertRaises(youtube.YouTubeError) as caught:
+            self.route("GET", "youtube-search", {"q": ["other"]})
+        self.assertEqual(caught.exception.message, "YouTube answered 502")
+
+    def test_a_network_failure_never_shows_the_url(self):
+        def down(*_a, **_k):
+            raise youtube.urllib.error.URLError("Name or service not known")
+        opener = types.SimpleNamespace(open=down)
+        with mock.patch.object(youtube, "_opener", [opener]):
+            with self.assertRaises(youtube.YouTubeError) as caught:
+                youtube.urllib_transport("GET", f"{SEARCH}?key={KEY}", {}, None)
+        self.assertEqual(caught.exception.status, 0)
+        self.assertNotIn(KEY, caught.exception.message)
+        self.assertIn("could not be reached", caught.exception.message)
+
+    def test_what_the_search_refuses_before_asking(self):
+        for bad in ([""], ["   "], ["x" * (youtube.QUERY_MAX + 1)]):
+            with self.subTest(q=bad), self.assertRaises(ValueError):
+                self.route("GET", "youtube-search", {"q": bad})
+        with self.assertRaises(ValueError):
+            youtube.CLIENT.search(None)
+        self.assertEqual(self.fake.calls, [])
+
+    def test_without_a_key_a_search_is_refused_and_asks_nobody(self):
+        self.route("POST", "youtube-key", body={"clear": True})
+        with self.assertRaises(youtube.NoKey) as caught:
+            self.route("GET", "youtube-search", {"q": ["lofi hip hop"]})
+        self.assertIn("pasted link plays without one", str(caught.exception))
+        self.assertEqual(self.fake.calls, [])
+
+
+class ThroughTheServerTest(Base):
+    """The page sees one error shape: the server's, with the status a refusal deserves."""
+
+    def setUp(self):
+        super().setUp()
+        import server  # noqa: PLC0415 - as in test_desk: the server module is heavy to load
+        self.sent = []
+        self.desk = server.Desk.__new__(server.Desk)
+        self.desk.engine = None
+        self.desk.keeper = None
+        self.desk._send = lambda code, body, *rest: self.sent.append((int(code), body, rest))
+
+    def call(self, method, route, query=None, body=None):
+        self.sent.clear()
+        self.desk._api(method, route, query or {}, body)
+        return self.sent[-1]
+
+    def test_errors_answer_in_the_servers_shape(self):
+        code, body, _ = self.call("GET", "youtube-search", {"q": ["lofi"]})
+        self.assertEqual((code, body["error"]), (403, youtube.NO_KEY))
+        self.save()
+        self.fake.on("GET", SEARCH, google_error(403, "quotaExceeded", "quota"))
+        code, body, _ = self.call("GET", "youtube-search", {"q": ["lofi"]})
+        self.assertEqual((code, body["error"], body["upstream"]), (502, youtube.QUOTA, 403))
+        code, body, _ = self.call("GET", "youtube-search", {"q": ["x" * 300]})
+        self.assertEqual(code, 400)
+        code, body, _ = self.call("POST", "youtube-key", body={"key": "nope"})
+        self.assertEqual(code, 400)
+        code, body, _ = self.call("GET", "youtube-thumb", {"url": ["https://evil.example/vi/abcdefghijk/mqdefault.jpg"]})
+        self.assertEqual(code, 400)
+
+    def test_a_link_plays_through_the_server_without_a_key(self):
+        code, body, _ = self.call("GET", "youtube-search", {"q": [f"https://youtu.be/{VID}?t=42"]})
+        self.assertEqual((code, body["link"], body["items"][0]["id"]), (200, True, VID))
+        self.assertEqual(self.fake.calls, [])
+
+    def test_a_thumbnail_goes_out_as_a_picture(self):
+        self.fake.on("GET", "https://i.ytimg.com/", answer(200, raw=b"\xff\xd8jpeg", headers={"content-type": "image/jpeg"}))
+        code, body, rest = self.call("GET", "youtube-thumb", {"url": [f"https://i.ytimg.com/vi/{VID}/mqdefault.jpg"]})
+        self.assertEqual((code, body, rest), (200, b"\xff\xd8jpeg", ("image/jpeg",)))
+
+    def test_the_page_may_frame_youtubes_player_and_nothing_else(self):
+        import server  # noqa: PLC0415
+        headers = {}
+        self.desk._send = lambda code, body, ctype=None, extra=None: headers.update(extra or {})
+        self.desk._index()
+        policy = dict(part.strip().split(" ", 1) for part in headers["Content-Security-Policy"].split(";") if part.strip())
+        self.assertEqual(policy["frame-src"], "https://www.youtube-nocookie.com")
+        self.assertEqual(policy["img-src"], "'self' data:", "pictures still come through the server only")
+        self.assertEqual(policy["frame-ancestors"], "'none'")
+        self.assertIn("youtube", server.FEATURES)
+
+
+class ThumbTest(Base):
+    def test_thumbnails_only_come_from_youtubes_image_host(self):
+        good = f"https://i.ytimg.com/vi/{VID}/mqdefault.jpg"
+        for bad in ("http://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg", "https://i.ytimg.com.evil.example/vi/dQw4w9WgXcQ/mqdefault.jpg",
+                    "https://evil.example/https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg", "https://user@i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg",
+                    "https://i.ytimg.com:444/vi/dQw4w9WgXcQ/mqdefault.jpg", good + "?x=1", good + "#x", good + "\n",
+                    "https://i.ytimg.com/vi/../dQw4w9WgXcQ/mqdefault.jpg", "https://i.ytimg.com/vi/dQw4w9WgXc/mqdefault.jpg",
+                    "https://i.ytimg.com/vi/dQw4w9WgXcQ/mq/default.jpg", "https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.png",
+                    "https://I.YTIMG.COM/vi/dQw4w9WgXcQ/mqdefault.jpg", "https://i9.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg",
+                    "https://i.ytimg.com/an_webp/dQw4w9WgXcQ/mqdefault.webp", "https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg",
+                    "", None, [good]):
+            with self.subTest(url=bad), self.assertRaises(ValueError):
+                youtube.thumb_url(bad)
+        for ok in (good, f"https://i.ytimg.com/vi/{VID}/mqdefault_live.jpg", f"https://i.ytimg.com/vi_webp/{VID}/hqdefault.webp"):
+            with self.subTest(url=ok):
+                self.assertEqual(youtube.thumb_url(ok), ok)
+        self.assertEqual(self.fake.calls, [])
+
+    def test_a_thumbnail_is_fetched_once_without_the_key(self):
+        self.save()
+        url = f"https://i.ytimg.com/vi/{VID}/mqdefault.jpg"
+        self.fake.on("GET", "https://i.ytimg.com/", answer(200, raw=b"\xff\xd8jpeg", headers={"content-type": "image/jpeg; charset=binary"}))
+        self.assertEqual(self.route("GET", "youtube-thumb", {"url": [url]}), (b"\xff\xd8jpeg", "image/jpeg"))
+        self.assertEqual(self.route("GET", "youtube-thumb", {"url": [url]}), (b"\xff\xd8jpeg", "image/jpeg"))
+        self.assertEqual(len(self.fake.calls), 1, "kept in memory")
+        call = self.fake.calls[0]
+        self.assertEqual(call.url, url)
+        self.assertNotIn(KEY, json.dumps(call.headers))
+
+    def test_what_is_not_a_small_picture_is_refused(self):
+        for n, reply in enumerate((answer(200, raw=b"<html>", headers={"content-type": "text/html"}),
+                                   answer(200, raw=b"x" * (youtube.THUMB_MAX + 1), headers={"content-type": "image/jpeg"}),
+                                   answer(404, raw=b"", headers={"content-type": "image/jpeg"}))):
+            with self.subTest(case=n):
+                self.fake.on("GET", "https://i.ytimg.com/", reply)
+                with self.assertRaises(youtube.YouTubeError):
+                    youtube.CLIENT.thumb(f"https://i.ytimg.com/vi/{VID}/{'abc'[n]}default.jpg")
+
+    def test_the_thumbnail_memory_is_capped_by_bytes(self):
+        self.fake.on("GET", "https://i.ytimg.com/", answer(200, raw=b"x" * 200_000, headers={"content-type": "image/jpeg"}))
+        for n in range(60):
+            youtube.CLIENT.thumb(f"https://i.ytimg.com/vi/{VID[:-2]}{n:02d}/mqdefault.jpg")
+        self.assertLessEqual(youtube.CLIENT.thumb_bytes, youtube.THUMB_BYTES)
+        self.assertEqual(youtube.CLIENT.thumb_bytes, sum(len(v[0]) for v in youtube.CLIENT.thumbs.values()))
+
+
+class LinkTest(Base):
+    """A pasted link or id plays without the API: read here, asking nobody."""
+
+    def test_the_links_youtube_gives_out(self):
+        for text in (f"https://www.youtube.com/watch?v={VID}", f"https://youtube.com/watch?v={VID}&t=42s&list=PL1",
+                     f"https://www.youtube.com/watch?feature=share&v={VID}", f"http://www.youtube.com/watch?v={VID}",
+                     f"https://m.youtube.com/watch?v={VID}", f"https://music.youtube.com/watch?v={VID}",
+                     f"https://youtu.be/{VID}", f"https://youtu.be/{VID}?si=abc&t=10", f"youtu.be/{VID}",
+                     f"www.youtube.com/watch?v={VID}", f"youtube.com/watch?v={VID}", f"https://www.youtube.com/shorts/{VID}",
+                     f"https://www.youtube.com/embed/{VID}?start=3", f"https://www.youtube-nocookie.com/embed/{VID}",
+                     f"https://www.youtube.com/live/{VID}?feature=shared", f"https://WWW.YOUTUBE.COM/watch?v={VID}",
+                     f"https://www.youtube.com:443/watch?v={VID}", f"  https://youtu.be/{VID}  ", VID):
+            with self.subTest(text=text):
+                self.assertEqual(youtube.video_id(text), VID)
+
+    def test_what_is_not_a_link_to_one_video(self):
+        for text in (f"https://evil.example/watch?v={VID}", f"https://youtube.com.evil.example/watch?v={VID}",
+                     f"https://evil.example/?u=https://youtu.be/{VID}", f"https://notyoutube.com/watch?v={VID}",
+                     f"https://youtu.be.evil.example/{VID}", "https://www.youtube.com/playlist?list=PL0123456789",
+                     "https://www.youtube.com/@lofigirl", f"https://www.youtube.com/watch?v={VID[:-1]}",
+                     f"https://www.youtube.com/watch?v={VID}x", f"https://www.youtube.com/watch/{VID}",
+                     f"ftp://youtube.com/watch?v={VID}", f"javascript:alert(1)//youtu.be/{VID}",
+                     f"https://user@youtube.com/watch?v={VID}", f"https://youtube.com:8080/watch?v={VID}",
+                     f"https://youtu.be/{VID} and more", f"https://youtube.com/watch?v={VID[:5]}%20{VID[5:]}",
+                     "dQw4w9WgXc", "dQw4w9WgXcQQ", "dQw4w9WgXc!", "", "   ", None, 42, "https://[::1/watch?v=x"):
+            with self.subTest(text=text):
+                self.assertIsNone(youtube.video_id(text))
+        self.assertIsNone(youtube.video_id(VID, bare=False), "a bare id only when asked for")
+
+    def test_a_link_answers_without_a_key_or_a_call(self):
+        out = self.route("GET", "youtube-search", {"q": [f"https://www.youtube.com/watch?v={VID}"]})
+        self.assertEqual(out, {"query": f"https://www.youtube.com/watch?v={VID}", "link": True, "cached": False,
+                               "items": [{"id": VID, "title": None, "channel": None, "thumb": f"https://i.ytimg.com/vi/{VID}/mqdefault.jpg", "live": False}]})
+        self.assertEqual(self.route("GET", "youtube-search", {"q": [VID]})["items"][0]["id"], VID)
+        self.assertEqual(self.fake.calls, [])
+
+    def test_with_a_key_a_lone_word_is_a_search_and_an_id_is_still_an_id(self):
+        self.save()
+        self.fake.on("GET", SEARCH, answer(200, {"items": [snippet("abcdefghijk", "Programming music")]}))
+        self.assertFalse(self.route("GET", "youtube-search", {"q": ["programming"]})["link"])
+        self.assertEqual(len(self.fake.calls), 1)
+        self.assertTrue(self.route("GET", "youtube-search", {"q": [VID]})["link"], "an id has a digit, - or _")
+        self.assertTrue(self.route("GET", "youtube-search", {"q": ["https://youtu.be/abcdefghijk"]})["link"], "a link is a link, whatever its id")
+        self.assertEqual(len(self.fake.calls), 1)
+
+
+if __name__ == "__main__":
+    unittest.main()

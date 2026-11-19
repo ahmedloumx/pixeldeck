@@ -43,6 +43,7 @@ import jira  # noqa: E402
 import launcher  # noqa: E402
 import lyrics  # noqa: E402
 import screenlock  # noqa: E402
+import youtube  # noqa: E402
 import terminals  # noqa: E402
 import opener  # noqa: E402
 import proposals  # noqa: E402
@@ -62,8 +63,9 @@ AGENT_KEY = secrets.token_urlsafe(32)
 AGENT_ROUTES = {("POST", "propose"), ("GET", "proposal")}
 PROPOSALS = proposals.Proposals()
 FEATURES = ["merge", "sync", "drop", "proposals", "snapshots", "reviews", "events", "status", "settings", "merge-options", "jira",
-            "restore", "ui-state", "open-link", *account.FEATURES, *repos.FEATURES, *spotify.FEATURES, *spotifyd.FEATURES, "lyrics", "jira-settings", *screenlock.FEATURES]
-ROUTE_MODULES = (account, repos, spotify, spotifyd, lyrics, screenlock)  # each answers its own routes, or None
+            "restore", "ui-state", "open-link", *account.FEATURES, *repos.FEATURES, *spotify.FEATURES, *spotifyd.FEATURES, "lyrics", "jira-settings", *screenlock.FEATURES,
+            *youtube.FEATURES]
+ROUTE_MODULES = (account, repos, spotify, spotifyd, lyrics, screenlock, youtube)  # each answers its own routes, or None
 JIRA = jira.Jira()
 SNAPSHOT_MAX = 4 * 1024 * 1024
 MIN_COLS, MIN_ROWS = 20, 4  # a collapsed panel must not squeeze a program into a sliver
@@ -233,6 +235,8 @@ class Desk(BaseHTTPRequestHandler):
             "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; "
                                        "style-src 'self' 'unsafe-inline'; "
                                        "script-src 'self'; font-src 'self'; connect-src 'self'; "
+                                       # YouTube's own player, in the Music panel and the floating TV
+                                       "frame-src https://www.youtube-nocookie.com; "
                                        "frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
         })
 
@@ -402,6 +406,8 @@ class Desk(BaseHTTPRequestHandler):
         except spotify.SpotifyError as exc:
             return self._error(HTTPStatus.BAD_GATEWAY, exc.message, upstream=exc.status)
         except lyrics.LyricsError as exc:
+            return self._error(HTTPStatus.BAD_GATEWAY, exc.message, upstream=exc.status)
+        except youtube.YouTubeError as exc:
             return self._error(HTTPStatus.BAD_GATEWAY, exc.message, upstream=exc.status)
         except jira.JiraError as exc:
             return self._error(HTTPStatus.BAD_GATEWAY, exc.message, upstream=exc.status, jira=JIRA.status())

@@ -604,8 +604,10 @@ const Music = (() => {
   function paintMini() {
     if (!mini) return;
     const on = mode === "live" || mode === "demo";
-    mini.hidden = !on;
-    if (!on) return;
+    // YouTube shares the mini player and adds its first button, the switch (music-youtube.js)
+    const tube = typeof MusicYouTube !== "undefined" ? MusicYouTube : null;
+    mini.hidden = !on && !tube?.live();
+    if (!on) { tube?.paintMini(mini); return; }
     if (!miniEls.play) {
       mini.innerHTML = `<button class="mm-play" type="button" data-music="toggle" aria-label="Play">${glyph("play", 2)}${glyph("pause", 2)}</button>
         <button class="mm-title" type="button" data-music="drop" aria-haspopup="dialog" aria-expanded="false"><canvas class="mm-art" width="18" height="18" aria-hidden="true"></canvas>
@@ -632,6 +634,7 @@ const Music = (() => {
       if (miniEls.where._html !== html) { miniEls.where.innerHTML = html; miniEls.where._html = html; }
       miniEls.where.dataset.tip = `Playing on ${dev.name}`;
     }
+    tube?.paintMini(mini);
   }
 
   // PLAY ON: the device playing, with its kind's picture; a click lists them all.
@@ -1148,8 +1151,10 @@ const Music = (() => {
   /* ------------------------------------------------------------ mount */
 
   function mount(el) {
-    root = el;
-    root.classList.add("mu-panel");
+    el.classList.add("mu-panel");
+    // YouTube shares the panel: a switch on top picks it or Spotify, and the deck is drawn in a
+    // host of its own below the switch (music-youtube.js).
+    root = typeof MusicYouTube !== "undefined" ? MusicYouTube.mountPanel(el) : el;
     mini = document.getElementById("music-mini");
     document.addEventListener("click", (e) => { onClick(e); });
     document.addEventListener("keydown", (e) => {

@@ -35,6 +35,7 @@ const ControlCenter = (() => {
     moon: ["...###...", "..##.....", ".##......", ".##......", ".##......", ".##......", "..##...#.", "...#####.", "........."],
     lyrics: ["#########", ".........", "######...", ".........", "########.", ".........", "#####....", ".........", "#######.."],
     tray: ["####.####", "#..#.#..#", "#..#.#..#", "####.####", ".........", "####.####", "#..#.#..#", "#..#.#..#", "####.####"],
+    tv: ["..#...#..", "...#.#...", "#########", "#.......#", "#.......#", "#.......#", "#.......#", "#########", ".#.....#."],
     meter: [".........", "#########", "#.#.#.#.#", "#.#.#.#.#", "#.#.#.#.#", "#########", "........."],
     smile: ["..#####..", ".#.....#.", "#..#.#..#", "#.......#", "#.#...#.#", "#..###..#", ".#.....#.", "..#####.."],
     wave: [".........", "..##...##", ".#..#.#..", "#....#...", ".........", "..##...##", ".#..#.#..", "#....#...", "........."],
@@ -78,6 +79,10 @@ const ControlCenter = (() => {
         if (Layout.visibility().find((v) => v.id === "music")?.hidden) Layout.show("music");
         Layout.activate("music");
       } },
+    // YouTube plays a pasted link with no setup at all, so it is live once a key or a video is there.
+    { id: "youtube", label: "YouTube", live: () => (typeof MusicYouTube === "undefined" ? false : MusicYouTube.live()),
+      yes: () => (MusicYouTube.status()?.key_set ? "search and play" : "plays pasted links"), no: "not set up",
+      open: () => (MusicYouTube.live() ? MusicYouTube.openPanel() : Settings.open("connections", { app: "youtube" })) },
     { id: "claude", label: "Claude Code", live: () => (report?.claude ? !!report.claude.ok : null),
       yes: () => (report?.claude?.version ? `ready, ${report.claude.version}` : "ready"), no: "not found", open: () => Settings.open("connections", { app: "claude" }) },
   ];
@@ -95,6 +100,8 @@ const ControlCenter = (() => {
       on: () => Music.lyrics(), set: (on) => Music.setLyrics(on), tip: "Lyrics in place of the music library" },
     { id: "float", label: "Mini player", glyph: "pop", ok: () => typeof MusicFloat !== "undefined" && musicOn(),
       on: () => MusicFloat.isOpen(), set: (on) => (on ? MusicFloat.popOut() : MusicFloat.dock()), tip: "A small player floating over the layout" },
+    { id: "youtube", label: "YouTube", glyph: "tv", ok: () => typeof MusicTV !== "undefined",
+      on: () => MusicTV.isFloating(), set: (on) => (on ? MusicTV.float() : MusicTV.dock({ open: false })), tip: "The pixel TV with YouTube, floating over the layout" },
     { id: "tray", label: "Apps in the bar", glyph: "tray", ok: () => true,
       on: () => config().tray, set: (on) => save({ tray: on }), tip: "The app icons beside the bell" },
     { id: "api", label: "API meter", glyph: "meter", ok: () => true,
@@ -113,7 +120,7 @@ const ControlCenter = (() => {
   const tileOf = (id) => TILES.find((t) => t.id === id);
 
   /* ---------------------------------------------------------------- what is kept */
-  const DEFAULTS = { order: TILES.map((t) => t.id), pins: [], layout: "grid", apps: { bitbucket: true, jira: true, spotify: true, claude: true }, tray: true, api: false };
+  const DEFAULTS = { order: TILES.map((t) => t.id), pins: [], layout: "grid", apps: { bitbucket: true, jira: true, spotify: true, youtube: true, claude: true }, tray: true, api: false };
   function config() {
     const c = Prefs.get("bar") || {};
     const known = new Set(TILES.map((t) => t.id));
@@ -295,6 +302,7 @@ const ControlCenter = (() => {
     paintBar();
     Prefs.onChange(() => paint());
     if (typeof Music !== "undefined") { Music.onStatus(() => paint()); Music.onLyrics?.(() => paint()); }
+    if (typeof MusicYouTube !== "undefined") MusicYouTube.onChange(() => paint());
     if (typeof Notify !== "undefined") Notify.onChange(() => paintBar());
     document.getElementById("settings-dialog")?.addEventListener("close", () => readReport());
     setTimeout(readReport, 4000);
