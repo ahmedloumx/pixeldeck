@@ -341,9 +341,10 @@ Searching needs a free API key:
 
 1. Open [YouTube Data API v3](https://console.cloud.google.com/apis/library/youtube.googleapis.com)
    in the Google Cloud console, pick or create a project (free) and press **Enable**.
-2. Open **Credentials**, press **Create credentials**, **API key**, and restrict the key to
+2. Open **Credentials**, press **Create credentials**, then **API key**, and restrict the key to
    **YouTube Data API v3** (no website or IP address restriction: the search runs from the
-   PixelDeck server).
+   PixelDeck server). Not **OAuth client ID**: PixelDeck needs no client file. The key starts
+   with `AIza` (a capital I, not an L).
 3. Paste the key in **Settings, Connected apps, YouTube** and save it.
 
 The free quota is 10,000 units a day and a search costs 100, so about 100 searches a day; the
