@@ -1,0 +1,61 @@
+/* The pull request view: the reviewers as a row of faces beside the title, the description
+   first with the activity beside it as a vertical timeline, commits you can open. */
+
+/* ---------------------------------------------------------------- reviewers beside the title */
+.pr-title-row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--space-2xs) var(--space-md); }
+.pr-title-row h2 { flex: 1 1 24rem; min-width: 0; }
+.pr-reviewers { display: inline-flex; align-items: center; flex: none; margin-left: auto; padding: 3px 0 0; }
+.rv-count { margin-right: 8px; padding: 2px 5px; border: var(--rule-hair) solid var(--color-rule); color: var(--color-muted); font-size: var(--num-8); }
+.rv-face { position: relative; display: inline-flex; flex: none; border-radius: 50%; box-shadow: 0 0 0 2px var(--color-paper); transition: transform 120ms steps(2, end); }
+.rv-face + .rv-face { margin-left: -4px; }
+.rv-face:hover { z-index: 2; transform: translateY(-2px); }
+.pr-reviewers .rv-face .face { width: 30px; min-width: 30px; height: 30px; font-size: 10px; letter-spacing: 0; background: var(--color-paper-2); }
+.rv-more { margin-left: 4px; padding: 3px 6px; border: var(--rule-hair) solid var(--color-rule); border-radius: 12px; color: var(--color-muted); font-size: var(--num-8); }
+
+/* ---------------------------------------------------------------- overview: description, activity */
+.pr-body { container: pr-body / inline-size; }
+.ov { display: grid; grid-template-columns: minmax(0, 1fr) minmax(17rem, 22rem); gap: var(--space-xl); align-items: start; }
+.ov-title { margin: 0 0 var(--space-sm); font-size: var(--text-md); letter-spacing: 0; }
+.ov-main { min-width: 0; }
+.ov-desc { max-width: 82ch; }
+/* Beside the description, the activity stays in view while the description scrolls. */
+.ov-side { position: sticky; top: 0; display: grid; gap: var(--space-sm); max-height: calc(100dvh - var(--head-h, 0px) - 12rem); min-height: 12rem; overflow: auto;
+  overscroll-behavior: contain; padding: var(--space-sm) var(--space-sm) var(--space-md); border: var(--rule-hair) solid var(--color-rule); background: var(--color-paper-2); scrollbar-color: auto; }
+.ov-side::-webkit-scrollbar { width: 8px; }
+.ov-side::-webkit-scrollbar-thumb { background: var(--color-rule-2); }
+.ov-side .ov-title { margin: var(--space-2xs) 0 0; }
+.ov-side .pr-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(4.4rem, 1fr)); gap: var(--space-xs); padding: 0 0 var(--space-sm); border-top: 0; }
+.ov-side .pr-facts dt { font-size: var(--text-xs); }
+@container pr-body (max-width: 760px) {
+  .ov { grid-template-columns: minmax(0, 1fr); }
+  .ov-side { position: static; max-height: none; }
+}
+
+/* The timeline: a line down the left, a pixel node per event in its colour, a day where it changes. */
+.tl { position: relative; display: grid; gap: 2px; margin: 0; padding: 0 0 0 20px; list-style: none; }
+.tl::before { content: ""; position: absolute; left: 6px; top: 6px; bottom: 6px; width: 2px; background: repeating-linear-gradient(var(--color-rule-2) 0 4px, transparent 4px 6px); }
+.tl-day { margin: var(--space-xs) 0 2px -20px; padding-left: 20px; color: var(--color-muted); font: 400 var(--num-8) var(--font-num); letter-spacing: 0.06em; text-transform: uppercase; }
+.tl-item { --tone: var(--color-muted); position: relative; padding: 4px 0 6px; }
+.tl-node { position: absolute; left: -19px; top: 8px; width: 12px; height: 12px; background: var(--tone); box-shadow: 0 0 0 3px var(--color-paper-2); }
+.tl-item.is-approved { --tone: var(--color-ok); }
+.tl-item.is-changes_requested, .tl-item.is-declined { --tone: var(--color-bad); }
+.tl-item.is-updated { --tone: var(--color-cool); }
+.tl-item.is-merged { --tone: var(--color-accent); }
+.tl-item.is-opened { --tone: var(--color-ink); }
+.tl-item.is-opened .tl-node { width: 14px; height: 14px; left: -20px; }
+.tl-line { margin: 0; font-size: var(--text-sm); line-height: 1.45; color: var(--color-ink-2); }
+.tl-line b { color: var(--color-ink); font-weight: 600; }
+.tl-line code { padding: 0 3px; font-size: 0.9em; }
+.tl-line .when { margin-left: 6px; color: var(--color-muted); font-size: var(--text-xs); white-space: nowrap; }
+.tl-text { display: -webkit-box; margin: 3px 0 0; padding: 4px 8px; overflow: hidden; border-left: 2px solid var(--tone); background: var(--color-paper); color: var(--color-ink-2);
+  font-size: var(--text-xs); line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow-wrap: anywhere; }
+
+/* ---------------------------------------------------------------- commits you can open */
+.commit-list li { display: block; padding-bottom: 0; }
+.commit-row { display: grid; grid-template-columns: 6rem minmax(0, 1fr) auto auto; gap: var(--space-sm); align-items: baseline; width: 100%; padding: 6px 8px var(--space-xs);
+  border: 0; background: none; color: inherit; font: inherit; font-size: var(--text-sm); text-align: left; }
+button.commit-row { cursor: pointer; }
+button.commit-row:hover { background: var(--color-paper-2); }
+button.commit-row:hover .commit-subject { color: var(--color-ink); text-decoration: underline; text-underline-offset: 3px; }
+button.commit-row:focus-visible { outline: var(--pixel) solid var(--color-focus); outline-offset: -2px; }
+.commit-subject { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

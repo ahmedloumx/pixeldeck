@@ -149,12 +149,14 @@ class BitbucketHost(Host):
         out = []
         for c in self.client.paged(self._base(repo, pr_id) + "/commits", {"pagelen": 50}, max_pages=4):
             author = c.get("author") or {}
+            # the commit's own page, opened from the Commits tab: Bitbucket's link only
+            url = ((c.get("links") or {}).get("html") or {}).get("href") or ""
             out.append({
                 "sha": (c.get("hash") or "")[:8],
                 "subject": (c.get("message") or "").split("\n", 1)[0],
                 "author": (author.get("user") or {}).get("display_name") or (author.get("raw") or "").split(" <")[0],
                 "at": c.get("date"),
-                "url": ((c.get("links") or {}).get("html") or {}).get("href"),  # in the same answer: no call
+                "url": url if isinstance(url, str) and url.startswith("https://bitbucket.org/") else "",  # in the same answer: no call
             })
         return out
 

@@ -1097,20 +1097,45 @@ function saveViewed(pr, set) {
   try { localStorage.setItem(VIEWED_KEY, JSON.stringify(all)); } catch { /* storage blocked */ }
 }
 
-const JOURNEY_WORD = { approved: "approved", changes_requested: "asked for changes", commented: "commented", updated: "updated the branch" };
-function journey(pr, extra) {
-  const t0 = Date.parse(pr.created_on);
-  const t1 = pr.state === "OPEN" ? Date.now() : Date.parse(pr.updated_on);
-  const span = Math.max(1, t1 - t0);
-  const marks = (extra?.timeline || []).filter((e) => e.at).map((e) => {
-    const x = Math.min(1, Math.max(0, (Date.parse(e.at) - t0) / span));
-    return `<span class="jmark is-${e.kind}" style="--x:${x.toFixed(4)}" data-tip="${esc(`${e.who} ${JOURNEY_WORD[e.kind] || e.kind}, ${ago(e.at)}`)}"></span>`;
+/* The reviewers in one row of faces beside the title: approvals first, then asked changes,
+   then the rest. Each face's ring and mark say where that review stands; hover names it. */
+const REVIEW_ORDER = { approved: 0, changes_requested: 1, commented: 2, pending: 3 };
+function reviewerRow(pr) {
+  const all = [...(pr.reviews || [])].sort((a, b) => (REVIEW_ORDER[a.state] ?? 4) - (REVIEW_ORDER[b.state] ?? 4));
+  if (!all.length) return "";
+  const MAX = 10;
+  const shown = all.slice(0, MAX).map((r) => `<span class="rv-face" data-tip="${esc(`${r.name} ${REVIEW_WORD[r.state] || r.state}`)}">${face(r, r.state)}</span>`).join("");
+  const rest = all.slice(MAX);
+  const more = rest.length ? `<span class="rv-more num8" data-tip="${esc(rest.map((r) => `${r.name} ${REVIEW_WORD[r.state] || r.state}`).join(", "))}">+${rest.length}</span>` : "";
+  const ok = all.filter((r) => r.state === "approved").length;
+  return `<div class="pr-reviewers" role="group" aria-label="Reviewers: ${ok} of ${all.length} approved"><span class="rv-count num8" data-tip="${ok} of ${all.length} reviewers approved">${ok}/${all.length}</span>${shown}${more}</div>`;
+}
+
+/* The activity as a vertical timeline, newest on top, a day label where the day changes, down to
+   the opening of the pull request. */
+const TL_WORD = { approved: "approved", changes_requested: "asked for changes", commented: "commented", updated: "pushed new commits", opened: "opened the pull request", merged: "merged it", declined: "declined it" };
+function dayOf(at) {
+  const d = new Date(at), t = new Date();
+  const day = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((day(t) - day(d)) / 86400000);
+  return diff === 0 ? "Today" : diff === 1 ? "Yesterday" : d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+}
+function activityTimeline(pr, extra) {
+  const items = (extra?.timeline || []).filter((e) => e.at).map((e) => {
+    const kind = e.kind === "updated" && e.state === "MERGED" ? "merged" : e.kind === "updated" && e.state === "DECLINED" ? "declined" : e.kind;
+    return { ...e, kind };
+  });
+  items.push({ kind: "opened", who: pr.author?.name || "Someone", at: pr.created_on });
+  let last = "";
+  const rows = items.map((e) => {
+    const label = dayOf(e.at);
+    const day = label !== last ? `<li class="tl-day">${esc(label)}</li>` : "";
+    last = label;
+    return `${day}<li class="tl-item is-${esc(e.kind)}"><span class="tl-node" aria-hidden="true"></span>
+      <div class="tl-card"><p class="tl-line"><b>${esc(e.who || "Someone")}</b> ${esc(TL_WORD[e.kind] || e.kind)}${e.where ? ` on <code>${esc(e.where.split("/").pop())}</code>` : ""}<time class="when" title="${esc(new Date(e.at).toLocaleString("en-GB"))}">${esc(ago(e.at))}</time></p>
+        ${e.text ? `<p class="tl-text">${esc(e.text)}</p>` : ""}</div></li>`;
   }).join("");
-  return `<div class="journey" aria-label="Pull request timeline"><div class="journey-track">${marks}
-      <span class="jmark is-start" style="--x:0" data-tip="${esc(`Opened ${ago(pr.created_on)}`)}"></span>
-      <span class="jmark is-end is-${pr.state.toLowerCase()}" style="--x:1" data-tip="${esc(pr.state === "OPEN" ? "Now" : `${pr.state.toLowerCase()} ${ago(pr.updated_on)}`)}"></span></div>
-    <div class="journey-ends"><span>opened ${esc(ago(pr.created_on))}</span><span>${pr.state === "OPEN" ? "now" : `${esc(pr.state.toLowerCase())} ${esc(ago(pr.updated_on))}`}</span></div>
-    <p class="age-legend"><span class="age-key is-cool"></span>pushed <span class="age-key is-muted"></span>comment <span class="age-key is-ok"></span>approval <span class="age-key is-bad"></span>changes requested</p></div>`;
+  return `<ol class="tl" aria-label="Activity, newest first">${rows}</ol>`;
 }
 
 function tabOverview() {
@@ -1124,14 +1149,13 @@ function tabOverview() {
     <div><dt>Added</dt><dd class="num8 plus">${added == null ? "…" : `+${added}`}</dd></div>
     <div><dt>Removed</dt><dd class="num8 minus">${removed == null ? "…" : `-${removed}`}</dd></div>
     <div><dt>Comments</dt><dd class="num8">${pr.comment_count || 0}</dd></div></dl>`;
-  const reviewers = (pr.reviews || []).map((r) => `<li>${face(r, r.state)}<span>${esc(r.name)}</span><em class="is-${r.state}">${esc(REVIEW_WORD[r.state] || r.state)}</em></li>`).join("");
-  const activity = (extra?.timeline || []).slice(0, 25).map((e) => `<li class="entry">
-      <div class="entry-meta"><span class="person">${esc(e.who)}</span><span>${esc(JOURNEY_WORD[e.kind] || e.kind)}${e.where ? ` on ${esc(e.where)}` : ""}</span><time class="when">${esc(ago(e.at))}</time></div>
-      ${e.text ? `<div class="entry-body"><p>${esc(e.text)}</p></div>` : ""}</li>`).join("");
-  return `${facts}${extra ? journey(pr, extra) : ""}
-    <section class="pr-section"><h3>Reviewers</h3>${reviewers ? `<ul class="reviewer-list">${reviewers}</ul>` : '<p class="empty">No reviewers.</p>'}</section>
-    <section class="pr-section"><h3>Description</h3>${detail?.description ? `<div class="entry-body">${md(detail.description)}</div>` : '<p class="empty">No description.</p>'}</section>
-    <section class="pr-section"><h3>Activity</h3>${extra ? (activity ? `<ol class="entries">${activity}</ol>` : '<p class="empty">No activity yet.</p>') : '<p class="empty">Loading the activity…</p>'}</section>`;
+  return `<div class="ov">
+      <section class="ov-main" aria-labelledby="ov-desc"><h3 class="ov-title" id="ov-desc">Description</h3>
+        ${detail?.description ? `<div class="entry-body ov-desc">${md(detail.description)}</div>` : detail ? '<p class="empty">No description.</p>' : '<p class="empty">Loading the description…</p>'}</section>
+      <aside class="ov-side" aria-labelledby="ov-act">${facts}
+        <h3 class="ov-title" id="ov-act">Activity</h3>
+        ${extra ? activityTimeline(pr, extra) : '<p class="empty">Loading the activity…</p>'}</aside>
+    </div>`;
 }
 
 function tabFiles() {
@@ -1301,7 +1325,17 @@ function tabCommits() {
   const { extra } = state.pr;
   if (!extra) return `<p class="empty">Loading the commits…</p>`;
   if (!extra.commits.length) return `<p class="empty">No commits.</p>`;
-  return `<ol class="commit-list">${extra.commits.map((c) => `<li><span class="id">${esc(c.sha)}</span><span>${esc(c.subject)}</span><span class="person">${esc(c.author)}</span><time class="when">${esc(ago(c.at))}</time></li>`).join("")}</ol>`;
+  // Each commit opens its own page, from the host's link; an older Bitbucket server sent none, so
+  // that one is built from the pull request's (bitbucket.org/<workspace>/<repo>/pull-requests/<id>
+  // to .../commits/<sha>).
+  const pr = state.pr.detail?.pr || state.pr.pr;
+  const base = /^https:\/\/bitbucket\.org\/[^/]+\/[^/]+\//.exec(pr?.url || "")?.[0];
+  const link = (c) => c.url || (base && c.sha ? `${base}commits/${encodeURIComponent(c.sha)}` : "");
+  return `<ol class="commit-list">${extra.commits.map((c) => {
+    const url = link(c);
+    const inner = `<span class="id">${esc(c.sha)}</span><span class="commit-subject">${esc(c.subject)}</span><span class="person">${esc(c.author)}</span><time class="when">${esc(ago(c.at))}</time>`;
+    return `<li>${url ? `<button class="commit-row" type="button" data-external="${esc(url)}" data-tip="Open ${esc(c.sha)} on ${esc(state.host?.label || "Bitbucket")}">${inner}</button>` : `<div class="commit-row">${inner}</div>`}</li>`;
+  }).join("")}</ol>`;
 }
 function tabTasks() {
   const tasks = state.pr.detail?.tasks || [];
@@ -1338,7 +1372,7 @@ function renderPr() {
         <div class="pr-top"><span class="id">${esc(full.repo)} #${full.id}</span>${stateChip(full)}<span>${esc(full.author.name)}</span><time class="when">${esc(ago(full.updated_on))}</time>
           <span class="spacer"></span><button class="link" type="button" data-external="${esc(full.url)}">${esc(state.host?.label || "Bitbucket")}</button><button class="link copy-link" type="button" data-copy-link="${esc(full.url)}" title="Copy the link to this pull request">Copy link</button>${ticket}
           <button class="link" type="button" data-action="reload-pr">Reload</button><button class="btn btn--quiet" type="button" data-action="close-pr" data-tip="Back to the list">Back to the queue</button></div>
-        <h2>${esc(full.title)}</h2>
+        <div class="pr-title-row"><h2>${esc(full.title)}</h2>${reviewerRow(full)}</div>
         <div class="branch">${esc(full.source)} into ${esc(full.dest)}</div>
         <div class="pr-checks" id="pr-checks" role="status">${prChecks(full)}</div>
         ${prLaunches(full)}
