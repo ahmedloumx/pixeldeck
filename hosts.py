@@ -45,6 +45,12 @@ def current():
 
 
 def make(host_id, engine):
+    if host_id == "github":
+        import github
+        return github.GitHubHost(engine)
+    if host_id == "gitlab":
+        import gitlab
+        return gitlab.GitLabHost(engine)
     return BitbucketHost(engine)
 
 
@@ -142,6 +148,7 @@ class BitbucketHost(Host):
                 "subject": (c.get("message") or "").split("\n", 1)[0],
                 "author": (author.get("user") or {}).get("display_name") or (author.get("raw") or "").split(" <")[0],
                 "at": c.get("date"),
+                "url": ((c.get("links") or {}).get("html") or {}).get("href"),  # in the same answer: no call
             })
         return out
 
