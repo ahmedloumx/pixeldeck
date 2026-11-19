@@ -7,7 +7,7 @@
    leaves the bar as it was. */
 
 // The themes and accents PixelDeck knows; anything else falls back to the first.
-const THEMES = [["night", "Night", "dark"], ["midnight", "Midnight", "dark"], ["daylight", "Daylight", "light"], ["grey", "Retro grey", "light"]];
+const THEMES = [["night", "Night", "dark"], ["midnight", "Midnight", "dark"], ["bubblegum", "Bubblegum", "dark"], ["daylight", "Daylight", "light"], ["grey", "Retro grey", "light"]];
 const ACCENTS = [["amber", "Amber"], ["cool", "Arcade blue"], ["slime", "Slime green"], ["pink", "Neon pink"], ["purple", "Purple"], ["turquoise", "Turquoise"]];
 const Prefs = (() => {
   const KEY = "prdesk.prefs.v1";
@@ -39,7 +39,7 @@ const Prefs = (() => {
 /* The blob is an AI helper, and each theme repaints it. After a theme change, the next few
    times you hover a blob it has something to say about its CSS. */
 const BlobTalk = (() => {
-  const COLOUR = { night: "green", midnight: "cyan", daylight: "orange", grey: "purple" };
+  const COLOUR = { night: "green", midnight: "cyan", bubblegum: "mint", daylight: "orange", grey: "purple" };
   const JOKES = [
     (was) => `Someone changed my CSS again. I was ${was} five minutes ago.`,
     () => "My colour got washed out by the last update. Classic cascade.",
@@ -117,6 +117,7 @@ const StatusBar = (() => {
   const $id = (id) => document.getElementById(id);
   const two = (n) => String(n).padStart(2, "0");
   const has = (f) => (state.features || []).includes(f);
+  const hostName = () => state.host?.label || "Bitbucket";  // an older server names none: Bitbucket
 
   function paintApi() {
     const { used, limit } = state.budget;
@@ -131,7 +132,7 @@ const StatusBar = (() => {
     const api = $id("st-api");
     if (api) {
       api.classList.toggle("is-low", left <= 3);
-      api.dataset.tip = `${used} of ${limit} Bitbucket API calls used in the last hour, ${limit - used} left. The background refresh pauses at ${Math.round(limit * 0.8)}.`;
+      api.dataset.tip = `${used} of ${limit} ${hostName()} API calls used this hour, ${limit - used} left. The background refresh pauses at ${Math.round(limit * 0.8)}.`;
       // The meter is a quick toggle, off by default; it shows itself when the calls run low.
       if (typeof ControlCenter !== "undefined") api.hidden = !(ControlCenter.config().api || left <= 3);
     }
@@ -139,10 +140,10 @@ const StatusBar = (() => {
   function connection() {
     if (offline) return ["bad", "PixelDeck's server does not answer. Is it still running?"];
     const auth = status?.auth || state.auth || {};
-    if (auth.ok === false) return ["bad", `Bitbucket refused the token: ${auth.error || "unknown error"}`];
+    if (auth.ok === false) return ["bad", `${hostName()} refused the token: ${auth.error || "unknown error"}`];
     if (status?.schedule?.paused) return ["warn", "Background refresh paused: 80% of the hourly API calls are used. It resumes as the hour rolls over."];
-    if (auth.ok === true || state.me) return ["ok", `Connected to Bitbucket${state.me ? ` as ${state.me.name}` : ""}.`];
-    return ["warn", "Connecting to Bitbucket…"];
+    if (auth.ok === true || state.me) return ["ok", `Connected to ${hostName()}${state.me ? ` as ${state.me.name}` : ""}.`];
+    return ["warn", `Connecting to ${hostName()}…`];
   }
   function paintSync() {
     const [tone, tip] = connection();
@@ -231,6 +232,24 @@ const Settings = (() => {
         <p class="set-hint">${used} of ${limit} API calls used in the last hour. Change the account or the token in <button class="link" type="button" data-settings-tab="setup">Setup</button>.</p>
         <p><button class="btn" type="button" data-settings-test>Test the connection</button></p></section>`;
   }
+  // GitHub and GitLab: what is set and whether it is the host in use. The token is never shown.
+  const CODE_HOSTS = { github: ["GitHub", "Organization", "calls used this hour, as GitHub counts them"],
+    gitlab: ["GitLab", "Group", "calls made in the last hour"] };
+  const hostTone = (h) => (h.active ? (h.auth?.ok === true ? "ok" : h.auth?.ok === false ? "bad" : h.token_set ? "warn" : "off") : h.token_set ? "warn" : "off");
+  const hostPill = (h) => (h.active ? (h.auth?.ok === true ? "Connected" : h.auth?.ok === false ? (h.token_set ? "Token refused" : "Not set up") : h.token_set ? "Checking" : "Not set up")
+    : h.token_set ? "Not in use" : "Not set up");
+  function codeHostCard(id) {
+    const h = report[id], [name, scope, counted] = CODE_HOSTS[id];
+    const used = h.budget?.used || 0, limit = h.budget?.limit || 5000;
+    const meter = h.active ? `<div class="set-meter" data-tip="${used} of ${limit} ${esc(counted)}"><span style="--w:${Math.min(1, used / limit).toFixed(3)}"></span></div>
+        <p class="set-hint">${used} of ${limit} API ${esc(counted)}. Read only for now: merge, approve and decline stay on ${name}.</p>
+        <p><button class="btn" type="button" data-settings-test>Test the connection</button></p>`
+      : `<p class="set-hint">${h.token_set ? "Saved but not in use" : "Not set up"}: pick ${name} in ${toSetupFor(id)} to read your pull requests from it.</p>`;
+    return `<section class="set-card"><header><h3>${name}</h3><span class="set-pill is-${hostTone(h)}">${esc(h.active && h.me ? `Connected as ${h.me.name}` : hostPill(h))}</span></header>
+        ${h.active && h.auth?.error ? `<p class="set-error">${esc(h.auth.error)}</p>` : ""}
+        <dl class="set-rows">${row(scope, h.org || h.group || "every one the token can see")}${row("Address", h.url, { code: true })}${row("Token", h.token_set ? "set (never shown)" : "missing")}</dl>
+        ${meter}</section>`;
+  }
   function claudeCard() {
     const cl = report.claude;
     return `<section class="set-card"><header><h3>Claude Code</h3>${pill(cl.ok, "Ready", cl.path ? "Not answering" : "Not found")}</header>
@@ -253,6 +272,20 @@ const Settings = (() => {
         <p class="set-actions"><button class="btn btn--primary" type="submit">Save</button>${sp?.configured ? ' <button class="btn btn--quiet" type="button" data-spotify-clear>Remove</button>' : ""}</p></form>`;
   }
 
+  // YouTube: the API key for the search, saved from here and never shown back. Playing needs none.
+  function youtubeHtml(yt) {
+    const where = { store: `in ${yt?.store}`, file: "in the settings file", environment: "in the environment" }[yt?.where] || "";
+    return `<section class="set-card"><header><h3>YouTube</h3>${pill(yt ? !!(yt.key_set && yt.key_ok) : null, "Search on", yt?.key_set ? "Check the key" : "Links only")}</header>
+        <dl class="set-rows">${row("API key", yt?.key_set ? `set${where ? ` ${where}` : ""} (never shown)` : "missing: pasted links still play")}${row("Free quota", "10,000 units a day; a search costs 100, so about 100 searches")}</dl>
+        <form class="set-form" data-youtube-form autocomplete="off">
+          <label class="field-block"><span>API key</span><input type="password" name="key" data-keep="youtube-key" spellcheck="false" autocomplete="new-password"
+            placeholder="${yt?.key_set ? "Saved: paste another to change it" : "Starts with AIza (capital I), 39 characters"}"></label>
+          <p class="set-error" data-youtube-error hidden></p>
+          <p class="set-actions"><button class="btn btn--primary" type="submit">Save</button>${yt?.key_set ? ' <button class="btn btn--quiet" type="button" data-youtube-clear>Remove</button>' : ""}
+            <button class="btn btn--quiet" type="button" data-tube="open">Open YouTube in Music</button></p></form>
+        <p class="set-hint">The key is free and only searches: it goes to Google, never to the page. The same search again within a few minutes costs nothing. Videos play in YouTube's own player, in the Music panel or a floating pixel TV.</p></section>`;
+  }
+
   /* Connected apps: what PixelDeck connects to, grouped, each with an 8-bit icon and its state.
      A click opens its guide beside the list: the steps, each with the link to the exact page,
      then its fields and buttons. The same guides are in the README, for a new colleague. */
@@ -260,25 +293,39 @@ const Settings = (() => {
   const GROUPS = [["code", "Where your code lives"], ["ai", "AI helpers"], ["tickets", "Tickets"], ["media", "Music and video"]];
   const ext = (url, label) => `<button class="link" type="button" data-external="${esc(url)}">${esc(label)}</button>`;
   const toSetup = '<button class="link" type="button" data-settings-tab="setup">Setup</button>';
+  const toSetupFor = (id) => `<button class="link" type="button" data-settings-tab="setup" data-setup-host="${id}">Setup</button>`;
   function appsModel() {
     const bb = report.bitbucket, cl = report.claude, git = report.git, app = report.app, jira = report.jira;
     const bbOk = bb.auth?.ok === true ? true : bb.auth?.ok === false ? false : null;
+    const bbIdle = bb.active === false;  // another host is in use
     const scopes = ["read:user", "read:workspace", "read:repository", "read:pullrequest"].map((x) => `<code>${x}:bitbucket</code>`).join(", ");
     const apps = [
       { id: "bitbucket", group: "code", label: "Bitbucket", anchor: "set-up-bitbucket", card: bitbucketCard,
-        tone: bbOk === true ? "ok" : !bb.token_set ? "off" : bbOk === false ? "bad" : "warn",
-        pill: bbOk === true ? "Connected" : !bb.token_set ? "Not set up" : bbOk === false ? "Token refused" : "Checking",
+        tone: bbIdle ? (bb.token_set ? "warn" : "off") : bbOk === true ? "ok" : !bb.token_set ? "off" : bbOk === false ? "bad" : "warn",
+        pill: bbIdle ? (bb.token_set ? "Not in use" : "Not set up") : bbOk === true ? "Connected" : !bb.token_set ? "Not set up" : bbOk === false ? "Token refused" : "Checking",
         line: bb.me ? `${bb.workspace}, signed in as ${bb.me.name}` : bb.workspace ? `Workspace ${bb.workspace}` : "Your pull requests and your team's",
         steps: [`Open ${ext(TOKEN_PAGE, "id.atlassian.com, Security, API tokens")} and press <b>Create API token with scopes</b>.`,
           `Pick the app <b>Bitbucket</b> and tick ${scopes}. Add <code>write:pullrequest:bitbucket</code> to merge from here.`,
-          `Paste it in ${toSetup} with your Atlassian email and your workspace, then press <b>Check</b> and <b>Save</b>.`] },
+          `Paste it in ${toSetupFor("bitbucket")} with your Atlassian email and your workspace, then press <b>Check</b> and <b>Save</b>.`] },
       { id: "git", group: "code", label: "Git and terminals", anchor: "set-up-git", card: gitCard,
         tone: git.ok && !app.terminal ? "ok" : git.ok ? "warn" : "bad", pill: git.ok && !app.terminal ? "Ready" : git.ok ? "No terminals" : "git missing",
         line: git.ok ? `${git.version || "git"}, your clones and the terminals` : "Install git for the terminals and the Repos panel",
         steps: [`Install git from ${ext("https://git-scm.com/downloads", "git-scm.com/downloads")}.`,
           `Point <b>Your clones</b> in ${toSetup} at the folder that holds your repositories.`] },
-      { id: "github", group: "code", label: "GitHub", soon: true, line: "Pull requests from github.com" },
-      { id: "gitlab", group: "code", label: "GitLab", soon: true, line: "gitlab.com or your own server" },
+      report.github ? { id: "github", group: "code", label: "GitHub", anchor: "set-up-github", card: () => codeHostCard("github"),
+        tone: hostTone(report.github), pill: hostPill(report.github),
+        line: report.github.active && report.github.me ? `${report.github.org ? `${report.github.org}, ` : ""}signed in as ${report.github.me.name}` : "Pull requests from github.com or Enterprise",
+        steps: [`Open ${ext("https://github.com/settings/personal-access-tokens/new", "github.com, Settings, Fine-grained tokens")} and generate a new token.`,
+          "Pick your organization as the <b>Resource owner</b> and the repositories, then under <b>Repository permissions</b> give <b>Pull requests</b>, <b>Contents</b> and <b>Metadata</b> read access.",
+          `Paste it in ${toSetupFor("github")}, pick <b>GitHub</b> and add your organization, then press <b>Check</b> and <b>Save</b>.`] }
+        : { id: "github", group: "code", label: "GitHub", soon: true, line: "Pull requests from github.com" },
+      report.gitlab ? { id: "gitlab", group: "code", label: "GitLab", anchor: "set-up-gitlab", card: () => codeHostCard("gitlab"),
+        tone: hostTone(report.gitlab), pill: hostPill(report.gitlab),
+        line: report.gitlab.active && report.gitlab.me ? `${report.gitlab.group ? `${report.gitlab.group}, ` : ""}signed in as ${report.gitlab.me.name}` : "gitlab.com or your own server",
+        steps: [`Open ${ext("https://gitlab.com/-/user_settings/personal_access_tokens", "gitlab.com, Preferences, Access tokens")} (the same page on your own server) and add a new token.`,
+          "Tick the scope <code>read_api</code> and give it an expiry date.",
+          `Paste it in ${toSetupFor("gitlab")}, pick <b>GitLab</b>, add your group and, off gitlab.com, your server's address, then press <b>Check</b> and <b>Save</b>.`] }
+        : { id: "gitlab", group: "code", label: "GitLab", soon: true, line: "gitlab.com or your own server" },
       { id: "claude", group: "ai", label: "Claude Code", anchor: "set-up-claude-code", card: claudeCard,
         tone: cl.ok ? "ok" : cl.path ? "bad" : "off", pill: cl.ok ? "Ready" : cl.path ? "Not answering" : "Not found",
         line: cl.ok ? `${cl.version || "Found"}: fixes and reviews in a terminal` : "Fixes and reviews pull requests in a terminal here",
@@ -309,7 +356,18 @@ const Settings = (() => {
           `Add this redirect URI to it: <code>${esc(sp?.redirect_uri || "")}</code>${sp?.redirect_uri ? ` <button class="link" type="button" data-copy-value="${esc(sp.redirect_uri)}">Copy</button>` : ""}.`,
           "Paste the app's <b>Client ID</b> below and save it, then press <b>Connect</b> and sign in to Spotify."] });
     }
-    apps.push({ id: "youtube", group: "media", label: "YouTube", soon: true, line: "Videos in a floating pixel TV" });
+    if (typeof MusicYouTube !== "undefined" && (state.features || []).includes("youtube")) {
+      const yt = MusicYouTube.status(), ok = !!(yt?.key_set && yt.key_ok);
+      apps.push({ id: "youtube", group: "media", label: "YouTube", anchor: "set-up-youtube", card: () => youtubeHtml(yt),
+        tone: !yt ? "off" : ok ? "ok" : yt.key_set ? "bad" : "off",
+        pill: !yt ? "Checking" : ok ? "Search on" : yt.key_set ? "Check the key" : "Links only",
+        line: ok ? "Search and play in a floating pixel TV" : "Pasted links play; a free key adds search",
+        steps: [`Open ${ext("https://console.cloud.google.com/apis/library/youtube.googleapis.com", "YouTube Data API v3")} in the Google Cloud console, pick or create a project (free) and press <b>Enable</b>.`,
+          "Open <b>Credentials</b>, press <b>Create credentials</b>, then <b>API key</b> (not <em>OAuth client ID</em>: PixelDeck needs no client file), and restrict the key to <b>YouTube Data API v3</b>.",
+          "Paste the key below and save it. Playing a pasted link needs no key."] });
+    } else {
+      apps.push({ id: "youtube", group: "media", label: "YouTube", soon: true, line: "Videos in a floating pixel TV" });
+    }
     return apps;
   }
   const appIcon = (id, px) => (typeof ControlCenter !== "undefined" ? ControlCenter.appIcon(id, px) : "");
@@ -337,31 +395,20 @@ const Settings = (() => {
     return `<p class="set-hint">Green: working. Yellow: set up, but it needs you. Grey: not connected yet. Click one for its guide: every step links to the page it needs.</p>
       <div class="capps-wrap${open ? " has-drawer" : ""}"><div class="capps-list">${groups}</div>${open ? drawerHtml(open) : ""}</div>`;
   }
+  const HOST_CHOICES = [["bitbucket", "Bitbucket"], ["github", "GitHub"], ["gitlab", "GitLab"]];
   function setupHtml() {
     if (!(state.features || []).includes("setup")) return `<p class="set-hint">This needs a newer PixelDeck server: restart it once.</p>`;
     if (!setup) return `<p class="set-hint">${loading ? "Asking the server…" : "Could not read the setup."}</p>`;
-    const value = (key) => esc(draft[key] ?? setup[key] ?? "");
-    const where = { store: `in ${setup.store}`, file: "in the settings file", environment: "in the environment" }[setup.token];
-    const scopes = ["read:user", "read:workspace", "read:repository", "read:pullrequest"].map((s) => `<code>${s}:bitbucket</code>`).join(", ");
+    const inUse = setup.host || "bitbucket";
+    const host = setup.github ? draft.host || inUse : "bitbucket";  // an older server knows Bitbucket only
     const results = checks ? `<ul class="setup-checks">${checks.results.map((r) => `<li class="is-${r.ok ? "ok" : r.ok === false ? "bad" : "warn"}">
         <span>${esc(r.label)}</span><code>${esc(r.scope)}</code>${r.ok ? "<small>ok</small>" : `<small>${esc(r.hint || "")}</small>`}</li>`).join("")}</ul>
         ${checks.ok ? `<p class="set-hint">${checks.me ? `Signed in as ${esc(checks.me)}. ` : ""}Everything PixelDeck reads answers. Save to use it.</p>` : ""}` : "";
-    return `<section class="set-card"><header><h3>Bitbucket</h3>${pill(!setup.needed, "Set up", "Not set up")}</header>
-        <p class="set-hint">PixelDeck reads your pull requests with an Atlassian API token. Create one at
-          <button class="link" type="button" data-external="${TOKEN_PAGE}">id.atlassian.com</button> with
-          <em>Create API token with scopes</em>, app Bitbucket, and tick ${scopes}. Add <code>write:pullrequest:bitbucket</code>
-          to open, merge and decline pull requests here, and <code>write:repository:bitbucket</code> to commit from the Repos panel.</p>
-        <form class="setup-form" data-setup-form autocomplete="off">
-          <label class="field-block">Atlassian email<input name="email" type="email" value="${value("email")}" placeholder="you@company.com"></label>
-          <label class="field-block">API token<input name="token" type="password" value="${esc(draft.token || "")}" placeholder="${setup.token ? "saved: leave empty to keep it" : "paste the token"}"></label>
-          <label class="field-block">Workspace<input name="workspace" value="${value("workspace")}" placeholder="${esc("bitbucket.org/<this part>/repo")}" spellcheck="false"></label>
-          <label class="field-block">Your clones<input name="root" value="${value("root")}" placeholder="${esc(setup.root_default)}" spellcheck="false"></label>
-          <p class="set-hint field-wide">${setup.token ? `A token is saved ${esc(where)}.` : "No token yet."}
-            ${setup.store ? `Saving puts the token in ${esc(setup.store)}, not in a file.` : "Saving puts the token in the settings file."}
-            Your clones is the folder that holds your local repositories.</p>
-          ${setup.from_environment.length ? `<p class="set-error field-wide">Set in the environment, which wins over what you save here: ${setup.from_environment.map(esc).join(", ")}</p>` : ""}
-          <p class="setup-actions field-wide"><button class="btn" type="button" data-setup-check>Check</button><button class="btn btn--primary" type="submit">Save</button></p>
-        </form>${results}</section>
+    const picker = setup.github ? `<section class="set-card"><header><h3>Where your code lives</h3>${pill(!setup.needed, `${HOST_CHOICES.find(([id]) => id === inUse)[1]} in use`, "Not set up")}</header>
+        <div class="date-bar host-pick" role="group" aria-label="Code host">${HOST_CHOICES.map(([id, name]) => `<button class="date-chip" type="button" data-setup-host="${id}" aria-pressed="${host === id}">${appIcon(id, 1.4)} ${esc(name)}${id === inUse ? " <small>in use</small>" : ""}</button>`).join("")}</div>
+        <p class="set-hint">PixelDeck reads one host at a time. Each keeps its own settings and its own team, so switching back loses nothing.</p></section>` : "";
+    const form = host === "bitbucket" ? bitbucketForm() : otherHostForm(host);
+    return `${picker}${form}${results}</section>
       <section class="set-card"><header><h3>Import</h3></header>
         <p class="set-hint">Ran PixelDeck from a git clone before? Copy its settings and token: give the clone's folder or its <code>.env</code>.</p>
         <form class="setup-form" data-setup-import autocomplete="off">
@@ -370,14 +417,62 @@ const Settings = (() => {
         </form></section>
       <dl class="set-rows">${row("Settings file", setup.env_file, { code: true, copy: true })}</dl>`;
   }
+  // The end of each form: where the token goes, what the environment overrides, Check and Save.
+  function formFoot(source) {
+    const where = { store: `in ${setup.store}`, file: "in the settings file", environment: "in the environment" }[source];
+    return `<p class="set-hint field-wide">${source ? `A token is saved ${esc(where)}.` : "No token yet."}
+            ${setup.store ? `Saving puts the token in ${esc(setup.store)}, not in a file.` : "Saving puts the token in the settings file."}
+            Your clones is the folder that holds your local repositories.</p>
+          ${setup.from_environment.length ? `<p class="set-error field-wide">Set in the environment, which wins over what you save here: ${setup.from_environment.map(esc).join(", ")}</p>` : ""}
+          <p class="setup-actions field-wide"><button class="btn" type="button" data-setup-check>Check</button><button class="btn btn--primary" type="submit">Save</button></p>
+        </form>`;
+  }
+  function bitbucketForm() {
+    const value = (key) => esc(draft[key] ?? setup[key] ?? "");
+    const scopes = ["read:user", "read:workspace", "read:repository", "read:pullrequest"].map((s) => `<code>${s}:bitbucket</code>`).join(", ");
+    return `<section class="set-card"><header><h3>Bitbucket</h3>${pill(setup.host === "github" || setup.host === "gitlab" ? null : !setup.needed, "Set up", "Not set up")}</header>
+        <p class="set-hint">PixelDeck reads your pull requests with an Atlassian API token. Create one at
+          <button class="link" type="button" data-external="${TOKEN_PAGE}">id.atlassian.com</button> with
+          <em>Create API token with scopes</em>, app Bitbucket, and tick ${scopes}. Add <code>write:pullrequest:bitbucket</code>
+          to open, merge and decline pull requests here, and <code>write:repository:bitbucket</code> to commit from the Repos panel.</p>
+        <form class="setup-form" data-setup-form autocomplete="off">${setup.github ? '<input type="hidden" name="host" value="bitbucket">' : ""}
+          <label class="field-block">Atlassian email<input name="email" type="email" value="${value("email")}" placeholder="you@company.com"></label>
+          <label class="field-block">API token<input name="token" type="password" value="${esc(draft.token || "")}" placeholder="${setup.token ? "saved: leave empty to keep it" : "paste the token"}"></label>
+          <label class="field-block">Workspace<input name="workspace" value="${value("workspace")}" placeholder="${esc("bitbucket.org/<this part>/repo")}" spellcheck="false"></label>
+          <label class="field-block">Your clones<input name="root" value="${value("root")}" placeholder="${esc(setup.root_default)}" spellcheck="false"></label>
+          ${formFoot(setup.token)}`;
+  }
+  function otherHostForm(id) {
+    const h = setup[id], gh = id === "github";
+    const value = (key) => esc(draft[key] ?? h[key] ?? "");
+    const owner = gh ? "org" : "group";
+    const intro = gh
+      ? `PixelDeck reads your pull requests with a personal access token. Create a fine-grained one at
+          <button class="link" type="button" data-external="https://github.com/settings/personal-access-tokens/new">github.com, Settings, Fine-grained tokens</button>:
+          your organization as the resource owner, the repositories, and read access to <b>Pull requests</b>, <b>Contents</b> and <b>Metadata</b>.
+          A classic token with <code>repo</code> (and <code>read:org</code> for the team list) works too.`
+      : `PixelDeck reads your merge requests with a personal access token with the <code>read_api</code> scope. Create one at
+          <button class="link" type="button" data-external="https://gitlab.com/-/user_settings/personal_access_tokens">gitlab.com, Preferences, Access tokens</button>,
+          or on the same page of your own server.`;
+    return `<section class="set-card"><header><h3>${gh ? "GitHub" : "GitLab"}</h3>${pill(setup.host === id ? !setup.needed : h.token ? null : false, "Set up", "Not set up")}</header>
+        <p class="set-hint">${intro} Read only for now: merging, approving and declining stay on ${gh ? "GitHub" : "GitLab"}.</p>
+        <form class="setup-form" data-setup-form autocomplete="off"><input type="hidden" name="host" value="${id}">
+          <label class="field-block">Token<input name="token" type="password" value="${esc(draft.token || "")}" placeholder="${h.token ? "saved: leave empty to keep it" : "paste the token"}"></label>
+          <label class="field-block">${gh ? "Organization" : "Group"}<input name="${owner}" value="${value(owner)}" placeholder="${esc(gh ? "github.com/<this part>, optional" : "gitlab.com/<this part>, optional")}" spellcheck="false"></label>
+          <label class="field-block">${gh ? "API address" : "Server"}<input name="url" value="${value("url")}" placeholder="${esc(h.url_default)}" spellcheck="false"></label>
+          <label class="field-block">Your clones<input name="root" value="${esc(draft.root ?? setup.root ?? "")}" placeholder="${esc(setup.root_default)}" spellcheck="false"></label>
+          <p class="set-hint field-wide">${gh ? "The organization keeps the lists to it and offers its members for your team. GitHub Enterprise: <code>https://your-server/api/v3</code>."
+            : "The group keeps the lists to it and its subgroups, and offers its members for your team."}</p>
+          ${formFoot(h.token)}`;
+  }
   async function saveSetup(name, form, button) {
     const before = setup?.needed;
     try {
       const answer = await busy(button, () => api(name, { method: "POST", body: Object.fromEntries(new FormData(form)) }));
       setup = answer; draft = {}; checks = null;
       toast("Saved.", answer.imported ? `Imported ${answer.imported.length} settings.` : answer.store && answer.token === "store" ? `The token is in ${answer.store}.` : "");
-      // The first setup: start over, so the page connects with the new account.
-      if (before && !answer.needed) { setTimeout(() => location.reload(), 700); return; }
+      // The first setup, or another code host: start over, so the page connects with the new account.
+      if ((before && !answer.needed) || (answer.host && answer.host !== (state.host?.id || "bitbucket"))) { setTimeout(() => location.reload(), 700); return; }
       paint(); load();
     } catch (err) { toast("Not saved.", err.message, true); }
   }
@@ -526,6 +621,7 @@ const Settings = (() => {
       if (!musicHooked) { musicHooked = true; Music.onStatus(() => { if (dialog()?.open && tab === "connections") paint(); }); }
       Music.refresh();
     }
+    if (typeof MusicYouTube !== "undefined") MusicYouTube.refresh().then(() => { if (dialog()?.open && tab === "connections") paint(); });
     if (!(state.features || []).includes("settings")) { report = null; paint(); return; }
     loading = true; paint();
     const wantSetup = (state.features || []).includes("setup");
@@ -550,8 +646,12 @@ const Settings = (() => {
   document.addEventListener("click", async (e) => {
     const t = e.target;
     if (!t.closest("#settings-dialog")) return;
+    const pick = t.closest("[data-setup-host]");
+    // Another host's form starts empty: a token typed for one host never rides to another.
+    if (pick && pick.dataset.setupHost !== (draft.host || setup?.host)) { draft = { host: pick.dataset.setupHost }; checks = null; }
     const tabBtn = t.closest("[data-settings-tab]");
     if (tabBtn) { tab = tabBtn.dataset.settingsTab; return paint(); }
+    if (pick) return paint();
     if (t.closest("[data-settings-close]")) return dialog().close();
     const capp = t.closest("[data-capp]");
     if (capp) {
@@ -668,6 +768,26 @@ const Settings = (() => {
       paint();
       toast("Saved.", "Now press Connect and sign in to Spotify in your browser.");
     } catch (ex) { err.textContent = ex.message; err.hidden = false; }
+  });
+  document.addEventListener("submit", async (e) => {
+    const form = e.target.closest?.("[data-youtube-form]");
+    if (!form) return;
+    e.preventDefault();
+    const b = form.querySelector("[type=submit]"), err = form.querySelector("[data-youtube-error]");
+    err.hidden = true;
+    try {
+      await busy(b, () => api("youtube-key", { method: "POST", body: { key: form.key.value } }));
+      form.key.value = "";
+      if (typeof MusicYouTube !== "undefined") await MusicYouTube.refresh();
+      paint();
+      toast("Saved.", "Search YouTube from the Music panel now.");
+    } catch (ex) { err.textContent = ex.message; err.hidden = false; }
+  });
+  document.addEventListener("click", async (e) => {
+    const b = e.target.closest?.("#settings-dialog [data-youtube-clear]");
+    if (!b || !armed(b, "Sure? Remove the key")) return;
+    try { await busy(b, () => api("youtube-key", { method: "POST", body: { clear: true } })); if (typeof MusicYouTube !== "undefined") await MusicYouTube.refresh(); paint(); toast("YouTube's API key removed.", "Pasted links still play."); }
+    catch (err) { toast("Could not remove it.", err.message, true); }
   });
   document.addEventListener("change", (e) => {
     const t = e.target;

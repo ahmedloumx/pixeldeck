@@ -5,13 +5,17 @@ the "pushed, no PR" list is as fresh as the last fetch in each clone.
 """
 
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import config
 
 SKIP_BRANCHES = {"HEAD", "develop", "main", "master"}
+_SCP = re.compile(r"(?:[\w.+-]+@)?([A-Za-z0-9.-]+):(?!//)(.+)")
+_REPO_PATH = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*(?:/[A-Za-z0-9_][A-Za-z0-9_.-]*){1,20}")
 
 
 # Never wait on a prompt: the server has no terminal, so a missing key must fail, not hang.
@@ -32,8 +36,34 @@ def git(repo_dir, *args, timeout=20):
     return result.stdout
 
 
+def _web_host():
+    """The host name a clone of the code host in use points at (GitHub or GitLab)."""
+    if config.code_host() == "github":
+        api = urlsplit(config.get("GITHUB_URL") or "https://api.github.com").hostname or ""
+        return "github.com" if api == "api.github.com" else api.lower()
+    return (urlsplit(config.get("GITLAB_URL") or "https://gitlab.com").hostname or "").lower()
+
+
+def remote_repo(url):
+    """The repository an origin URL names on GitHub (owner/name) or GitLab (group/project),
+    in https, ssh:// or scp-like (git@host:path) form, or None for another server."""
+    parts = urlsplit(url)
+    if parts.scheme and parts.hostname:
+        host, path = parts.hostname.lower(), parts.path
+    else:
+        match = _SCP.fullmatch(url)
+        if not match:
+            return None
+        host, path = match.group(1).lower(), match.group(2)
+    path = path.strip("/").removesuffix(".git")
+    if host != _web_host() or not _REPO_PATH.fullmatch(path):
+        return None
+    return path if config.code_host() == "gitlab" or path.count("/") == 1 else None
+
+
 def repo_dirs(root):
-    """Map repo slug -> main clone directory (a .git directory, not a worktree)."""
+    """Map repo slug -> main clone directory (a .git directory, not a worktree). The slug is
+    the code host's own name for it: a Bitbucket slug, owner/name on GitHub, a GitLab path."""
     found = {}
     for entry in sorted(Path(root).iterdir()):
         if not (entry / ".git").is_dir():
@@ -41,6 +71,12 @@ def repo_dirs(root):
         try:
             url = git(entry, "remote", "get-url", "origin").strip()
         except (RuntimeError, subprocess.TimeoutExpired):
+            continue
+        if config.code_host() != "bitbucket":
+            slug = remote_repo(url)
+            # A folder named like the repository wins over a stray copy.
+            if slug and (slug not in found or entry.name == slug.rsplit("/", 1)[-1]):
+                found[slug] = entry
             continue
         workspace = config.workspace()
         if not workspace:

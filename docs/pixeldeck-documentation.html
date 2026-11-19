@@ -217,6 +217,7 @@ footer { margin-top: 72px; padding-top: 18px; border-top: 3px dashed var(--rule-
       <li><strong>The arcade dock</strong>: Tetris, Snake and Flappy beside the terminal, switched on in the Layout menu. The bot and the slime play in all three. Game keys stay in the game while it has focus.</li>
       <li><strong>Bot ideas</strong>: while one of your pull requests waits on reviewers or on its merge, the bot on the terminal bar now and then suggests a round, built from parts so the same line does not come back soon. At most every 10 minutes, never while you type, never taking focus.</li>
       <li><strong>Music</strong>: a retro boombox for Spotify (pixelated album art, a green LCD, a block progress bar to seek, transport keys, volume blocks, an equalizer, devices, playlists as cassettes) and a mini player in the status bar. It drives your own Spotify app through the Web API with your own Spotify app's Client ID (<code>SPOTIFY_CLIENT_ID</code>); Premium is needed for the owner and for control. <strong>Preview</strong> shows it with made-up music.</li>
+      <li><strong>YouTube</strong>: a switch on top of the Music panel picks Spotify or YouTube. A pasted YouTube link plays at once, with no key; a free YouTube Data API v3 key (<code>YOUTUBE_API_KEY</code>, saved from Settings, Connected apps, YouTube) adds search, about 100 a day on the free quota. Videos play in YouTube's own player inside a pixel TV with the bot on top, in the panel or floating over your work; the bar's mini player switches Spotify and YouTube, and a quick toggle floats the TV.</li>
       <li><strong>Lyrics and devices</strong>: the LYRICS key shows the song's lyrics beside the deck, from LRCLIB (lrclib.net), timed when LRCLIB has the times, following the song, a click on a line jumping there; only the title, artist, album and length are sent, while the lyrics are open. PLAY ON shows the device playing with a picture of its kind and lists the others; the status bar names it when it is not this computer.</li>
       <li><strong>Music without the Spotify app</strong>: with spotifyd installed (an open-source Spotify Connect player, not made by Spotify; Premium needed) and signed in once from Settings, Connections, Spotify, PixelDeck runs it alongside the server as the device PixelDeck, playing through this computer's speakers. It restarts if it stops, stops with the server, and never announces itself on the network.</li>
       <li><strong>Welcome</strong>: on the first start, "Welcome" in eight languages drawn in pixels until you insert a coin, then five stages (the crew, where your code lives, your tools, your look, press start); SKIP at any moment, Help, Welcome plays it again.</li>
@@ -253,6 +254,7 @@ footer { margin-top: 72px; padding-top: 18px; border-top: 3px dashed var(--rule-
 cd pixeldeck
 cp .env.example .env        # Windows: copy .env.example .env</code></pre>
   <p>Set <code>BITBUCKET_EMAIL</code>, <code>BITBUCKET_TOKEN</code>, <code>BITBUCKET_WORKSPACE</code>, and <code>PIXELDECK_WORKSPACE_ROOT</code> (the folder with your clones). Create the token at <a href="https://id.atlassian.com/manage-profile/security/api-tokens">id.atlassian.com</a> with Bitbucket read access to your user, the workspace, repositories and pull requests, plus pull request write if you want to open, merge and decline pull requests from PixelDeck, and repository write to commit a file edited in the Repos panel. It never needs admin or delete scopes.</p>
+  <p>On GitHub or GitLab instead, set <code>PIXELDECK_CODE_HOST=github</code> (or <code>gitlab</code>) and <code>GITHUB_TOKEN</code> (or <code>GITLAB_TOKEN</code>), or pick the host in <b>Settings, Setup</b>. A GitHub token needs read access to Pull requests, Contents and Metadata (<a href="https://github.com/settings/personal-access-tokens/new">github.com, Settings, Fine-grained tokens</a>); a GitLab one the <code>read_api</code> scope (<a href="https://gitlab.com/-/user_settings/personal_access_tokens">gitlab.com, Access tokens</a>). Both hosts are read only for now: merging, approving and declining stay on their websites.</p>
   <h3 style="margin-top:18px">2. Start it</h3>
   <div class="scroll"><table>
     <thead><tr><th>System</th><th>Start</th><th>Stop</th><th>Extras</th></tr></thead>
@@ -273,9 +275,13 @@ cp .env.example .env        # Windows: copy .env.example .env</code></pre>
     <tbody>
       <tr><td><code>BITBUCKET_EMAIL</code>, <code>BITBUCKET_TOKEN</code></td><td>Your Atlassian account email and API token. Required.</td></tr>
       <tr><td><code>BITBUCKET_WORKSPACE</code></td><td>The workspace slug, as in <code>bitbucket.org/&lt;workspace&gt;/&lt;repo&gt;</code>. Required.</td></tr>
+      <tr><td><code>PIXELDECK_CODE_HOST</code></td><td>Where your pull requests live: <code>bitbucket</code> (the default), <code>github</code> or <code>gitlab</code>. One at a time; each keeps its own settings, cache and team.</td></tr>
+      <tr><td><code>GITHUB_TOKEN</code>, <code>GITHUB_URL</code>, <code>GITHUB_ORG</code></td><td>A GitHub personal access token with read access to pull requests, contents and metadata; the API address (default <code>https://api.github.com</code>, Enterprise <code>https://&lt;server&gt;/api/v3</code>); an organization to keep to, whose members the team picker offers.</td></tr>
+      <tr><td><code>GITLAB_TOKEN</code>, <code>GITLAB_URL</code>, <code>GITLAB_GROUP</code></td><td>A GitLab personal access token with <code>read_api</code>; your server (default <code>https://gitlab.com</code>); a group to keep to, with its subgroups.</td></tr>
       <tr><td><code>BITBUCKET_PROJECT</code></td><td>Start scoped to one project key. Empty: every project. You can switch in the app.</td></tr>
       <tr><td><code>JIRA_SITE</code>, <code>TICKET_PREFIXES</code></td><td>Turn ticket keys such as <code>ABC-123</code> in branches and titles into Jira links. With no prefixes, any key that looks like one counts, so set them when you can.</td></tr>
       <tr><td><code>SPOTIFY_CLIENT_ID</code></td><td>Your own Spotify app's Client ID, for the music player. Register <code>http://127.0.0.1:8642/spotify/callback</code> (your port) as its redirect URI; Spotify allows plain http only for 127.0.0.1. No client secret: sign-in uses PKCE.</td></tr>
+      <tr><td><code>YOUTUBE_API_KEY</code></td><td>A free YouTube Data API v3 key, for searching YouTube in the Music panel. Pasted links play without it. Saved from Settings, Connected apps, YouTube; never sent to the page.</td></tr>
       <tr><td><code>JIRA_TOKEN</code>, <code>JIRA_EMAIL</code></td><td>An Atlassian API token with Jira access, for the ticket status in the merge popup. A classic token talks to the site; a token with scopes goes through Atlassian's gateway, found on its own. The Bitbucket token is never sent to Jira. <code>JIRA_EMAIL</code> defaults to <code>BITBUCKET_EMAIL</code>.</td></tr>
       <tr><td><code>PIXELDECK_WORKSPACE_ROOT</code></td><td>The folder with your local clones: for pushed branches, worktrees and the terminal's start folder. Default: the folder PixelDeck sits in.</td></tr>
       <tr><td><code>PIXELDECK_RELEASE_REPOS</code></td><td>Glob patterns of repos whose pull requests target master or main before develop.</td></tr>
@@ -351,6 +357,7 @@ cp .env.example .env        # Windows: copy .env.example .env</code></pre>
       <li>Merged pull requests incrementally, with a full walk every 6 hours, over the last 120 days. Declined: the last 90 days.</li>
       <li>Pull request detail (threads, tasks, activity) is kept 15 minutes. Diff and commits are kept per source commit, so only a new push refetches them.</li>
       <li>The project list and each project's repositories are kept a day. Switching project costs no API calls.</li>
+      <li>On GitHub, the same cadence: each person's lists come from the search API, and an open pull request is read in full only when its update time moved. Every read sends the last answer's ETag, so an unchanged one is a 304 that GitHub does not count; the status bar shows GitHub's own hourly count, and a spent limit is waited out without a call.</li>
     </ul>
   </div>
   <div class="card">
@@ -487,6 +494,8 @@ cp .env.example .env        # Windows: copy .env.example .env</code></pre>
       <tr><td><code>terminals.py</code></td><td class="n">259</td><td>Terminal sessions: pty on Linux and macOS, ConPTY on Windows.</td></tr>
       <tr><td><code>launcher.py</code></td><td class="n">232</td><td>Claude brief from templates, worktree, launch.</td></tr>
       <tr><td><code>bitbucket.py</code></td><td class="n">240</td><td>REST client, paging, the hourly call counter, and a multipart form for commits.</td></tr>
+      <tr><td><code>hosts.py</code>, <code>codehost.py</code></td><td class="n">474</td><td>The code host seam the engine reads through (Bitbucket by default), and the careful JSON client GitHub and GitLab share: ETags, rate limits, the token kept to its own server.</td></tr>
+      <tr><td><code>github.py</code>, <code>gitlab.py</code></td><td class="n">983</td><td>GitHub (REST v3, Enterprise too) and GitLab (REST v4) as read-only code hosts, and their setup check.</td></tr>
       <tr><td><code>actions.py</code></td><td class="n">414</td><td>Open, sync, merge (with the popup's options) and decline a pull request; review; delete a pushed branch.</td></tr>
       <tr><td><code>gitscan.py</code>, <code>opener.py</code>, <code>check_api.py</code></td><td class="n">261</td><td>Branches pushed without a pull request; opening links; an API shape check.</td></tr>
       <tr><td><code>briefs/</code></td><td class="n">62</td><td>The default Claude brief templates.</td></tr>
@@ -504,14 +513,14 @@ cp .env.example .env        # Windows: copy .env.example .env</code></pre>
     <li>Run it on a real Mac and a real Windows machine, and fix what turns up.</li>
     <li>Compress API responses, or slim the team payload to what the views draw: 6.7 MB of JSON would be 374 KB compressed.</li>
     <li>Two windows showing the same terminal fight over its size: the last one to resize wins.</li>
-    <li>Bitbucket Cloud only. Bitbucket Data Center, GitHub and GitLab are not supported.</li>
+    <li>GitHub and GitLab are read only: merge, approve, decline, sync, opening a pull request and the Repos panel work on Bitbucket only. Bitbucket Data Center is not supported.</li>
     <li>The Repos editor commits one file at a time. Executable files, links, files that are not UTF-8 or mix line endings, and files over 512 KB are edited on Bitbucket.</li>
   </ul>
 </div>
 
 <footer>
   PIXELDECK &middot; MIT LICENSE &middot; FONTS UNDER THE SIL OPEN FONT LICENSE &middot; XTERM.JS UNDER MIT<br>
-  NOT AFFILIATED WITH ATLASSIAN OR ANTHROPIC
+  NOT AFFILIATED WITH ATLASSIAN, GITHUB, GITLAB OR ANTHROPIC
 </footer>
 
 </div>

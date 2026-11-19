@@ -4,6 +4,9 @@ Everything the page shows is served from the on-disk cache, so the page is
 instant and survives restarts. A background loop keeps the cache warm within
 the hourly call budget: my own pull requests every 5 minutes, each teammate
 every 15, comment threads only when a PR's update signature moves.
+
+The pull requests come from one code host at a time (see hosts.py): Bitbucket unless the
+settings say GitHub or GitLab. Each host keeps its own cache and team files.
 """
 
 import json
@@ -16,8 +19,10 @@ from pathlib import Path
 import config
 import events
 import gitscan
+import hosts
 import model
-from bitbucket import HOURLY_LIMIT, BitbucketError, Client
+from bitbucket import Client
+from codehost import HostError
 
 ME_EVERY = 300
 OPEN_EVERY = 60  # your open pull requests alone: one call, so an approval shows within a minute or two
@@ -31,7 +36,6 @@ FULL_WALK_EVERY = 6 * 3600
 HISTORY_WINDOW_DAYS = 30
 PROJECT_LIST_MAX_AGE = 24 * 3600
 DECLINED_WINDOW_DAYS = 90
-BACKGROUND_CEILING = int(HOURLY_LIMIT * 0.8)
 TICK = 30  # the refresh loop wakes this often
 
 
@@ -46,19 +50,44 @@ def _atomic_write(path, payload):
 
 
 class Engine:
-    def __init__(self, root, workspace=None):
+    def __init__(self, root, workspace=None, host=None):
         self.root = Path(root)
-        self.client = Client(workspace)
+        self.client = Client(workspace)  # Bitbucket's: the actions and the Repos panel use it
         self.lock = threading.RLock()
-        self.cache_file = config.folder("cache") / "cache.json"
-        self.settings_file = config.settings_file()
+        self._start(host or hosts.current())
+
+    def _start(self, host_id):
+        """Read pull requests from host_id, with that host's own cache and team."""
+        self.host_id = host_id
+        self._host = hosts.make(host_id, self)
+        self.cache_file = hosts.file_for(config.folder("cache") / "cache.json", host_id)
+        self.settings_file = hosts.file_for(config.settings_file(), host_id)
         self.data = {"me": None, "members": [], "people": {}, "details": {}, "launches": [], "history": {}}
-        self.config = {"team": None, "project": config.default_project()}
+        self.config = {"team": None, "project": config.default_project() if host_id == "bitbucket" else None}
         self.auth = {"ok": None, "error": None}
         self._pushed = {"at": 0, "items": []}
         self._seed_tried = False
+        for name in ("_person_locks", "_diff_cache", "_extra_cache", "_behind_at", "_env_seen", "_auth_try_at"):
+            self.__dict__.pop(name, None)
         self._load()
         self.events = events.Log(self.data, self._save)
+
+    @property
+    def host(self):
+        host = self.__dict__.get("_host")
+        if host is None:  # an engine made without __init__ (as the tests make them) reads Bitbucket
+            host = self.__dict__["_host"] = hosts.BitbucketHost(self)
+        return host
+
+    def use_host(self, host_id=None):
+        """Follow the settings to another code host. True when it switched: the page then has
+        another account, cache and team, and starts over."""
+        host_id = host_id or hosts.current()
+        with self.lock:
+            if host_id == self.__dict__.get("host_id", "bitbucket"):
+                return False
+            self._start(host_id)
+        return True
 
     # ---- persistence ----------------------------------------------------
 
@@ -82,31 +111,23 @@ class Engine:
     # ---- auth and identity ----------------------------------------------
 
     def _note(self, exc):
-        if exc.status in (401, 403) or exc.status == 0 and "No BITBUCKET_" in exc.message:
-            self.auth = {"ok": False, "error": exc.message, "status": exc.status}
+        if exc.status in (401, 403) or getattr(exc, "unset", False) or exc.status == 0 and "No BITBUCKET_" in exc.message:
+            self.auth = {"ok": False, "error": exc.message, "status": exc.status, "unset": bool(getattr(exc, "unset", False))}
 
     def refresh_identity(self):
         try:
-            raw = self.client.me()
-        except BitbucketError as exc:
+            me = self.host.me()
+        except HostError as exc:
             self._note(exc)
             raise
         self.auth = {"ok": True, "error": None}
         with self.lock:
-            self.data["me"] = {
-                "uuid": raw.get("uuid"),
-                "name": raw.get("display_name"),
-                "nickname": raw.get("nickname"),
-                "account_id": raw.get("account_id"),
-            }
+            self.data["me"] = me
         try:
-            members = self.client.members()
+            members = self.host.members()
             with self.lock:
-                self.data["members"] = [
-                    {"uuid": m.get("uuid"), "name": m.get("display_name"), "nickname": m.get("nickname")}
-                    for m in members if m.get("uuid")
-                ]
-        except BitbucketError:
+                self.data["members"] = members
+        except HostError:
             pass  # the team picker falls back to people seen on pull requests
         self._save()
         return self.data["me"]
@@ -173,11 +194,9 @@ class Engine:
             key = f"{pr['repo']}#{pr['id']}"
             open_keys.add(key)
             try:
-                raw = self.client.get(f"/repositories/{self.client.workspace}/{pr['repo']}/commits",
-                                      {"include": pr["dest"], "exclude": pr["source"], "pagelen": 5, "fields": "values.hash,next"})
-            except BitbucketError:
+                behind, more = self.host.behind(pr)
+            except HostError:
                 continue
-            behind, more = len(raw.get("values") or []), bool(raw.get("next"))
             before = store.get(key)
             with self.lock:
                 store[key] = {"behind": behind, "more": more, "at": time.time()}
@@ -219,19 +238,16 @@ class Engine:
                 continue
             looked += 1
             try:
-                raw = self.client.get(
-                    f"/repositories/{self.client.workspace}/{ev['repo']}/pullrequests/{int(ev['pr_id'])}/comments",
-                    {"sort": "-created_on", "pagelen": max(1, min(50, int(ev.get("count") or 1))),
-                     "fields": "values.user.uuid,values.user.display_name,values.deleted"})
-            except BitbucketError:
+                comments = self.host.commenters(ev["repo"], ev["pr_id"], max(1, min(50, int(ev.get("count") or 1))))
+            except HostError:
                 out.append(ev)
                 continue
-            others = [c for c in raw.get("values") or [] if not c.get("deleted") and (c.get("user") or {}).get("uuid") != me]
+            others = [c for c in comments if c.get("uuid") != me]
             if not others:
                 continue
-            names = list(dict.fromkeys((c.get("user") or {}).get("display_name") or "Someone" for c in others))
+            names = list(dict.fromkeys(c.get("name") or "Someone" for c in others))
             out.append({**ev, "count": len(others), "names": names[:5],
-                        "actor": {"uuid": (others[0].get("user") or {}).get("uuid"), "name": names[0]}})
+                        "actor": {"uuid": others[0].get("uuid"), "name": names[0]}})
         return out
 
     def refresh_person(self, uuid, before_open=None):
@@ -252,24 +268,24 @@ class Engine:
         cached = previous.get("merged") or []
         newest = cached[0]["updated_on"] if cached else None
         incremental = (
-            newest and newest >= window_start and self.client.sort_supported
+            newest and newest >= window_start and self.host.incremental
             and time.time() - (previous.get("full_at") or 0) < FULL_WALK_EVERY
         )
         meta = {}
         declined_start = (datetime.now(timezone.utc) - timedelta(days=DECLINED_WINDOW_DAYS)).isoformat()
         try:
-            open_prs = [model.slim_pr(p) for p in self.client.user_prs(uuid, "OPEN", max_pages=4)]
-            declined = [model.slim_pr(p) for p in self.client.user_prs(uuid, "DECLINED", newer_than=declined_start, max_pages=2)]
+            open_prs = self.host.prs(uuid, "OPEN", max_pages=4)
+            declined = self.host.prs(uuid, "DECLINED", newer_than=declined_start, max_pages=2)
             if incremental:
-                fresh = [model.slim_pr(p) for p in self.client.user_prs(uuid, "MERGED", newer_than=newest, max_pages=3, meta=meta)]
+                fresh = self.host.prs(uuid, "MERGED", newer_than=newest, max_pages=3, meta=meta)
                 by_key = {(p["repo"], p["id"]): p for p in cached}
                 by_key.update({(p["repo"], p["id"]): p for p in fresh})
                 merged = [p for p in by_key.values() if (p.get("updated_on") or "") >= window_start]
                 full_at = previous.get("full_at")
             else:
-                merged = [model.slim_pr(p) for p in self.client.user_prs(uuid, "MERGED", newer_than=window_start, max_pages=12, meta=meta)]
+                merged = self.host.prs(uuid, "MERGED", newer_than=window_start, max_pages=12, meta=meta)
                 full_at = time.time()
-        except BitbucketError as exc:
+        except HostError as exc:
             if exc.status == 401:  # a 403 here is one endpoint, not a dead token
                 self._note(exc)
             with self.lock:
@@ -293,6 +309,7 @@ class Engine:
                 "full_at": full_at,
                 "error": None,
             }
+        self._refresh_asked(uuid)
         self._save()
         return self.data["people"][uuid]
 
@@ -305,7 +322,7 @@ class Engine:
             return self._refresh_open(uuid)
 
     def _refresh_open(self, uuid):
-        open_prs = [model.slim_pr(p) for p in self.client.user_prs(uuid, "OPEN", max_pages=4)]
+        open_prs = self.host.prs(uuid, "OPEN", max_pages=4)
         with self.lock:
             entry = self.data["people"].get(uuid)
             if entry is None:
@@ -317,7 +334,7 @@ class Engine:
         if {(p["repo"], p["id"]) for p in before} - {(p["repo"], p["id"]) for p in open_prs}:
             try:
                 return self.refresh_person(uuid, before_open=before)
-            except BitbucketError:
+            except HostError:
                 # Put the old list back, so the next read still sees what left and logs it.
                 with self.lock:
                     entry["open"] = before
@@ -325,7 +342,37 @@ class Engine:
         if changed:
             self._record(uuid, events.diff(before, open_prs, self._me_uuid()))
             self._save()
+        if self._refresh_asked(uuid):
+            self._save()
         return entry
+
+    def _refresh_asked(self, uuid):
+        """Open pull requests that ask for your review, on a host that can search for them
+        (Bitbucket's are found on your team's lists instead). A new one is news, unless its
+        author is on your team: their list says so already. True when the list moved."""
+        if uuid != self._me_uuid():
+            return False
+        try:
+            asked = self.host.review_requests(uuid)
+        except HostError:
+            return False  # the rest of the refresh stands; the next one tries again
+        if asked is None:
+            return False
+        with self.lock:
+            before = self.data.get("asked")
+            self.data["asked"] = asked
+        if before is None or json.dumps(before, sort_keys=True) == json.dumps(asked, sort_keys=True):
+            return before is None
+        team = {m["uuid"] for m in self.team()}
+        seen = {(p["repo"], p["id"]) for p in before}
+        self.events.record(uuid, [events._base(pr, "review_requested", actor=events._who(pr.get("author")))
+                                  for pr in asked if (pr["repo"], pr["id"]) not in seen
+                                  and (pr.get("author") or {}).get("uuid") not in team])
+        return True
+
+    def asked(self):
+        with self.lock:
+            return list(self.data.get("asked") or [])
 
     def file_merged(self, uuid, raw):
         """Move a pull request just merged from here into the merged list at once, from
@@ -350,7 +397,7 @@ class Engine:
         """Put a freshly read pull request in place of every cached copy of it."""
         key = (pr["repo"], pr["id"])
         with self.lock:
-            for person in self.data["people"].values():
+            for person in [*self.data["people"].values(), {"open": self.data.get("asked")}]:
                 for name in ("open", "merged", "declined"):
                     items = person.get(name) or []
                     for i, old in enumerate(items):
@@ -364,13 +411,16 @@ class Engine:
                 for pr in person.get("open", []) + person.get("merged", []):
                     if pr["repo"] == repo and pr["id"] == pr_id:
                         return pr
+            for pr in self.data.get("asked") or []:
+                if pr["repo"] == repo and pr["id"] == pr_id:
+                    return pr
         return None
 
     def detail(self, repo, pr_id, force=False):
         key = f"{repo}#{pr_id}"
         pr = self.find_pr(repo, pr_id)
         if pr is None:
-            pr = model.slim_pr(self.client.pull_request(repo, pr_id))
+            pr = self.host.pull_request(repo, pr_id)
         with self.lock:
             cached = self.data["details"].get(key)
         fresh = (
@@ -380,14 +430,12 @@ class Engine:
         )
         if fresh and not force:
             return {**cached, "pr": pr}
-        raw = self.client.pull_request(repo, pr_id)
-        full = model.slim_pr(raw)
-        threads = model.build_threads(self.client.comments(repo, pr_id), full["author"]["uuid"])
-        tasks = model.slim_tasks(self.client.tasks(repo, pr_id))
+        read = self.host.detail(repo, pr_id)
+        full, threads, tasks = read["pr"], read["threads"], read["tasks"]
         entry = {
             "change_key": model.change_key(pr),
             "fetched_at": time.time(),
-            "description": raw.get("description") or "",
+            "description": read["description"],
             "threads": threads,
             "tasks": tasks,
             "attention": model.attention_of(threads, tasks),
@@ -412,7 +460,7 @@ class Engine:
         for pr in entry.get("merged", []):
             if not self.in_scope(pr):
                 continue
-            if done >= budget or self.client.calls_last_hour() > BACKGROUND_CEILING:
+            if done >= budget or self.host.busy():
                 break
             if (pr.get("updated_on") or "") < since:
                 break
@@ -420,18 +468,10 @@ class Engine:
             if key in store:
                 continue
             try:
-                events = self.client.activity(pr["repo"], pr["id"])
-            except BitbucketError:
+                asked_for = self.host.changes_requested(pr["repo"], pr["id"])
+            except HostError:
                 break
-            store[key] = {
-                "changes_requested": [
-                    {"name": (e["changes_requested"].get("user") or {}).get("display_name"),
-                     "uuid": (e["changes_requested"].get("user") or {}).get("uuid"),
-                     "at": e["changes_requested"].get("date")}
-                    for e in events if isinstance(e.get("changes_requested"), dict)
-                ],
-                "fetched_at": time.time(),
-            }
+            store[key] = {"changes_requested": asked_for, "fetched_at": time.time()}
             done += 1
         if done:
             self._save()
@@ -446,7 +486,7 @@ class Engine:
         key = self._pr_key(repo, pr_id)
         if key in cache:
             return cache[key]
-        text, cut = self.client.text(f"/repositories/{self.client.workspace}/{repo}/pullrequests/{int(pr_id)}/diff")
+        text, cut = self.host.diff(repo, pr_id)
         result = {"files": model.parse_diff(text), "cut": cut, "fetched_at": time.time()}
         if len(cache) > 24:
             cache.pop(next(iter(cache)))
@@ -458,17 +498,8 @@ class Engine:
         key = self._pr_key(repo, pr_id)
         if key in cache:
             return cache[key]
-        base = f"/repositories/{self.client.workspace}/{repo}/pullrequests/{int(pr_id)}"
-        commits = []
-        for c in self.client.paged(base + "/commits", {"pagelen": 50}, max_pages=4):
-            author = c.get("author") or {}
-            commits.append({
-                "sha": (c.get("hash") or "")[:8],
-                "subject": (c.get("message") or "").split("\n", 1)[0],
-                "author": (author.get("user") or {}).get("display_name") or (author.get("raw") or "").split(" <")[0],
-                "at": c.get("date"),
-            })
-        events = model.timeline(self.client.activity(repo, pr_id))
+        commits = self.host.commits(repo, pr_id)
+        events = self.host.timeline(repo, pr_id)
         result = {"commits": commits, "timeline": events[:60], "fetched_at": time.time()}
         if len(cache) > 48:
             cache.pop(next(iter(cache)))
@@ -487,7 +518,7 @@ class Engine:
         for pr in entry.get("open", []):
             if not self.in_scope(pr):
                 continue
-            if budget <= 0 or self.client.calls_last_hour() > BACKGROUND_CEILING:
+            if budget <= 0 or self.host.busy():
                 return
             cached = self.data["details"].get(f"{pr['repo']}#{pr['id']}")
             if cached and cached.get("change_key") == model.change_key(pr) \
@@ -496,7 +527,7 @@ class Engine:
             try:
                 self.detail(pr["repo"], pr["id"], force=True)
                 budget -= 3
-            except BitbucketError:
+            except HostError:
                 return
 
     # ---- local git ------------------------------------------------------
@@ -505,8 +536,8 @@ class Engine:
         if not force and time.time() - self._pushed["at"] < 120:
             return self._pushed["items"]
         me = self.me()
-        if not me:
-            return []
+        if not me or not self.host.writes:
+            return []  # the pushed list opens pull requests through Bitbucket's API
         entry = self.person(me["uuid"]) or {}
         covered = {(p["repo"], p["source"]) for p in entry.get("open", []) + entry.get("merged", [])}
         email = gitscan.my_email(self.root)
@@ -542,14 +573,15 @@ class Engine:
         return {
             "synced_at": synced, "open_at": open_at, "next_at": max(time.time(), owed) if synced else None,
             "tick": TICK, "team_at": max(team_at) if team_at else None,
-            "paused": self.client.calls_last_hour() > BACKGROUND_CEILING,
+            "paused": self.host.busy(),
         }
 
     def _env_mtime(self):
         return config.mtime()
 
     def tick(self):
-        if self.client.calls_last_hour() > BACKGROUND_CEILING:
+        self.use_host()  # the settings may name another code host since the last tick
+        if self.host.busy():
             return
         if self.auth.get("ok") is False:
             # A rejected token is retried once a minute, or at once when the env file changes.
@@ -585,7 +617,7 @@ class Engine:
                 for mate in self.team():
                     if self.warm_history(mate["uuid"], budget=4):
                         break
-        except BitbucketError:
+        except HostError:
             pass
 
     def run_forever(self, interval=None):
@@ -599,7 +631,7 @@ class Engine:
         return thread
 
     def budget(self):
-        return {"used": self.client.calls_last_hour(), "limit": HOURLY_LIMIT}
+        return self.host.budget()
 
     # ---- project scope ----------------------------------------------------
 
@@ -608,9 +640,7 @@ class Engine:
         cache = self.data.get("projects") or {}
         if cache.get("items") and time.time() - cache.get("at", 0) < PROJECT_LIST_MAX_AGE:
             return cache["items"]
-        raw = self.client.paged(f"/workspaces/{self.client.workspace}/projects", {"pagelen": 100}, max_pages=5)
-        items = sorted(({"key": p.get("key"), "name": p.get("name")} for p in raw if p.get("key")),
-                       key=lambda p: (p["name"] or "").lower())
+        items = self.host.projects()
         with self.lock:
             self.data["projects"] = {"items": items, "at": time.time()}
         self._save()
@@ -635,12 +665,11 @@ class Engine:
         if offline:
             return None
         try:
-            raw = self.client.paged(f"/repositories/{self.client.workspace}",
-                                    {"q": f'project.key="{key}"', "pagelen": 100, "fields": "values.slug,next"},
-                                    max_pages=10)
-            slugs = sorted(r["slug"] for r in raw if r.get("slug"))
-        except BitbucketError:
+            slugs = self.host.project_repos(key)
+        except HostError:
             return set(cache["slugs"]) if cache.get("slugs") is not None else None
+        if slugs is None:
+            return None
         with self.lock:
             self.data.setdefault("project_repos", {})[key] = {"slugs": slugs, "at": time.time()}
         self._save()

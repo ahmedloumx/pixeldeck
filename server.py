@@ -45,10 +45,12 @@ import jira  # noqa: E402
 import launcher  # noqa: E402
 import lyrics  # noqa: E402
 import screenlock  # noqa: E402
+import youtube  # noqa: E402
 import terminals  # noqa: E402
 import opener  # noqa: E402
 import proposals  # noqa: E402
-from bitbucket import BitbucketError  # noqa: E402
+import hosts  # noqa: E402
+from codehost import HostError  # noqa: E402
 from engine import Engine  # noqa: E402
 
 import config  # noqa: E402
@@ -65,8 +67,9 @@ AGENT_KEY = secrets.token_urlsafe(32)
 AGENT_ROUTES = {("POST", "propose"), ("GET", "proposal")}
 PROPOSALS = proposals.Proposals()
 FEATURES = ["merge", "sync", "drop", "proposals", "snapshots", "reviews", "events", "status", "settings", "merge-options", "jira",
-            "restore", "ui-state", "open-link", *account.FEATURES, *desktop.FEATURES, *repos.FEATURES, *spotify.FEATURES, *spotifyd.FEATURES, "lyrics", "jira-settings", *screenlock.FEATURES]
-ROUTE_MODULES = (account, desktop, repos, spotify, spotifyd, lyrics, screenlock)  # each answers its own routes, or None
+            "restore", "ui-state", "open-link", *account.FEATURES, *desktop.FEATURES, *repos.FEATURES, *spotify.FEATURES, *spotifyd.FEATURES, "lyrics", "jira-settings", *screenlock.FEATURES,
+            *youtube.FEATURES]
+ROUTE_MODULES = (account, desktop, repos, spotify, spotifyd, lyrics, screenlock, youtube)  # each answers its own routes, or None
 JIRA = jira.Jira()
 SNAPSHOT_MAX = 4 * 1024 * 1024
 MIN_COLS, MIN_ROWS = 20, 4  # a collapsed panel must not squeeze a program into a sliver
@@ -236,6 +239,8 @@ class Desk(BaseHTTPRequestHandler):
             "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; "
                                        "style-src 'self' 'unsafe-inline'; "
                                        "script-src 'self'; font-src 'self'; connect-src 'self'; "
+                                       # YouTube's own player, in the Music panel and the floating TV
+                                       "frame-src https://www.youtube-nocookie.com; "
                                        "frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
         })
 
@@ -252,6 +257,9 @@ class Desk(BaseHTTPRequestHandler):
 
     def _api(self, method, route, query, body):
         engine = self.engine
+        host = self._host()
+        if not host.serves(route):  # a stale page asking a read-only host to write
+            return self._error(HTTPStatus.NOT_IMPLEMENTED, host.refusal(route))
         try:
             if method == "GET" and route == "bootstrap":
                 return self._send(200, self._bootstrap())
@@ -359,7 +367,7 @@ class Desk(BaseHTTPRequestHandler):
             if method == "POST" and route == "settings-test":
                 try:
                     engine.refresh_identity()
-                except BitbucketError:
+                except HostError:
                     pass  # the report carries the refusal
                 return self._send(200, {**connections.report(engine, self.port, config.workspace_root(), terminals.UNAVAILABLE), "jira": JIRA.check()})
             if method == "GET" and route == "merge-options":
@@ -397,11 +405,13 @@ class Desk(BaseHTTPRequestHandler):
                 if not isinstance(url, str):
                     raise ValueError("url required")
                 return self._send(200, {"browser": opener.open_url(url)})
-        except BitbucketError as exc:
+        except HostError as exc:
             return self._error(HTTPStatus.BAD_GATEWAY, exc.message, upstream=exc.status, auth=engine.auth)
         except spotify.SpotifyError as exc:
             return self._error(HTTPStatus.BAD_GATEWAY, exc.message, upstream=exc.status)
         except lyrics.LyricsError as exc:
+            return self._error(HTTPStatus.BAD_GATEWAY, exc.message, upstream=exc.status)
+        except youtube.YouTubeError as exc:
             return self._error(HTTPStatus.BAD_GATEWAY, exc.message, upstream=exc.status)
         except jira.JiraError as exc:
             return self._error(HTTPStatus.BAD_GATEWAY, exc.message, upstream=exc.status, jira=JIRA.status())
@@ -420,12 +430,16 @@ class Desk(BaseHTTPRequestHandler):
 
     # ---- handlers -------------------------------------------------------
 
+    def _host(self):
+        """The engine's code host; an engine without one (a test's stand-in) is Bitbucket."""
+        return getattr(self.engine, "host", None) or hosts.BitbucketHost(self.engine)
+
     def _bootstrap(self):
         engine = self.engine
         if engine.auth.get("ok") is None and not engine.me():
             try:
                 engine.refresh_identity()
-            except BitbucketError:
+            except HostError:
                 pass
         return {
             "me": engine.me(),
@@ -437,7 +451,8 @@ class Desk(BaseHTTPRequestHandler):
             "root": str(config.workspace_root()),
             "platform": sys.platform,
             "terminal": terminals.UNAVAILABLE or "",
-            "features": FEATURES,
+            "features": self._host().features(FEATURES),
+            "host": self._host().public(),
             "setup_needed": account.status()["needed"],
             "restore": self.keeper.public_offer() if self.keeper else None,
             "version": version.VERSION,
@@ -548,7 +563,7 @@ class Desk(BaseHTTPRequestHandler):
         if entry is None and engine.auth.get("ok") is not False:
             try:
                 entry = engine.refresh_person(uuid)
-            except BitbucketError as exc:
+            except HostError as exc:
                 entry = {"open": [], "merged": [], "error": exc.message}
         entry = entry or {"open": [], "merged": []}
         out = {
@@ -582,6 +597,9 @@ class Desk(BaseHTTPRequestHandler):
                 mine = next((r for r in pr.get("reviews", []) if r["uuid"] == my_uuid), None)
                 if mine and mine.get("reviewer") and mine["state"] in ("pending", "commented"):
                     out.append(pr)
+        # A host that searches for them also finds the ones from outside your team.
+        seen = {(p["repo"], p["id"]) for p in out}
+        out += [pr for pr in self._scoped(getattr(self.engine, "asked", list)()) if (pr["repo"], pr["id"]) not in seen]
         out.sort(key=lambda p: p.get("updated_on") or "")
         return out
 
