@@ -31,7 +31,7 @@ import spotifyd
 import version
 import opener
 
-FEATURES = ["spotify"]
+FEATURES = ["spotify", "spotify-client-id"]
 
 AUTHORIZE_URL = "https://accounts.spotify.com/authorize"
 TOKEN_URL = "https://accounts.spotify.com/api/token"
@@ -950,6 +950,23 @@ POSTS = {
 }
 
 
+def save_client_id(body, port):
+    """Save the Client ID of your own Spotify app, from the settings, so nobody edits the file.
+
+    A different Client ID signs the old account out: its token belongs to the app that issued
+    it. With "clear" the Client ID goes too."""
+    raw = body.get("client_id")
+    value = "" if body.get("clear") else raw.strip() if isinstance(raw, str) else None
+    if value is None or (not body.get("clear") and not CLIENT_ID_RE.fullmatch(value)):
+        raise ValueError("The Client ID is the line of letters and digits under your app's name at developer.spotify.com/dashboard.")
+    if value != CLIENT.client_id():
+        with CLIENT.lock:
+            CLIENT.pending.clear()
+        CLIENT.forget()
+        config.save({SETTING: value})
+    return _status(port)
+
+
 def route(handler, engine, method, name, query, body):
     """Answer a route this module owns, or None. A dict or list goes out as JSON; a
     (bytes, content type) pair goes out as is."""
@@ -960,6 +977,8 @@ def route(handler, engine, method, name, query, body):
         return _status(handler.port)
     if method == "POST" and name == "spotify-login":
         return _login(handler.port)
+    if method == "POST" and name == "spotify-client-id":
+        return save_client_id(body, handler.port)
     if method == "POST" and name == "spotify-logout":
         with CLIENT.lock:
             CLIENT.pending.clear()

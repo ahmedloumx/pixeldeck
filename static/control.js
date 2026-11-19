@@ -22,6 +22,12 @@ const ControlCenter = (() => {
     jira: [[".....bb.....", "....bbbb....", "...bb..bb...", "..bb.bb.bb..", ".bb.bbbb.bb.", "bb.bb..bb.bb", ".bb.bbbb.bb.", "..bb.bb.bb..", "...bb..bb...", "....bbbb....", ".....bb....."], { b: "#2684ff" }],
     spotify: [["....gggg....", "..gggggggg..", ".gggggggggg.", ".gkkkkkkggg.", "gggggggkkggg", "ggkkkkkkgggg", "gggggggkkggg", "gggkkkkkgggg", ".ggggggkggg.", ".gggggggggg.", "..gggggggg..", "....gggg...."], { g: "#1ed760", k: "#0a2a15" }],
     claude: [[".....c.....", ".c...c...c.", "..c..c..c..", "...c.c.c...", "....ccc....", "ccccccccccc", "....ccc....", "...c.c.c...", "..c..c..c..", ".c...c...c.", ".....c....."], { c: "#d97757" }],
+    git: [["....o.......", "....o.......", "....o...o...", "....o..o....", "....o.o.....", "....oo......", "....o.......", "...ooo......", "..ooooo.....", "...ooo......"], { o: "#f05032" }],
+    github: [[".L........L.", ".LL......LL.", ".LLLLLLLLLL.", "LLLLLLLLLLLL", "LLkkLLLLkkLL", "LLkkLLLLkkLL", "LLLLLLLLLLLL", ".LLLLLLLLLL.", "..LLLLLLLL..", "..L.LLLL.L..", "...LLLLLL..."], { L: "#c9d1d9", k: "#0d1117" }],
+    gitlab: [[".o........o.", ".oo......oo.", "ooo......ooo", "oooOOOOOOooo", "ooOOOOOOOOoo", ".oOOOOOOOOo.", "..oOOOOOOo..", "...oOOOOo...", "....oOOo....", ".....oo....."], { o: "#fc6d26", O: "#e24329" }],
+    gemini: [[".....v.....", ".....v.....", "....vvv....", "....vvv....", "..vvvvvvv..", "vvvvVvvvvvv", "..vvvvvvv..", "....vvv....", "....vvv....", ".....v.....", ".....v....."], { v: "#7aa7ff", V: "#c58cff" }],
+    codex: [["kkkkkkkkkkk", "kWWWWWWWWWk", "kWkWWWWWWWk", "kWWkWWWWWWk", "kWkWWWWWWWk", "kWWWWkkkWWk", "kWWWWWWWWWk", "kkkkkkkkkkk"], { k: "#9aa3b2", W: "#161b22" }],
+    youtube: [["............", "..rrrrrrrr..", ".rrrrrrrrrr.", ".rrrrwrrrrr.", ".rrrrwwrrrr.", ".rrrrwwwrrr.", ".rrrrwwrrrr.", ".rrrrwrrrrr.", ".rrrrrrrrrr.", "..rrrrrrrr.."], { r: "#ff2a2a", w: "#ffffff" }],
   };
   // Toggle glyphs, drawn in the current ink: # is a lit pixel.
   const GLYPHS = {
@@ -58,14 +64,18 @@ const ControlCenter = (() => {
   const musicOn = () => typeof Music !== "undefined" && !!Music.status()?.connected;
   const APPS = [
     { id: "bitbucket", label: "Bitbucket", live: () => (state.auth?.ok === false ? false : state.auth?.ok === true || !!state.me),
-      yes: () => (state.me ? `connected as ${state.me.name}` : "connected"), no: "not connected", open: () => Settings.open(state.setupNeeded ? "setup" : "connections") },
+      yes: () => (state.me ? `connected as ${state.me.name}` : "connected"), no: "not connected", open: () => Settings.open(state.setupNeeded ? "setup" : "connections", { app: "bitbucket" }) },
     { id: "jira", label: "Jira", live: () => (report?.jira ? !!(report.jira.site && report.jira.token_set) : null),
-      yes: () => "set up", no: "not set up yet", open: () => Settings.open("connections") },
+      yes: () => "set up", no: "not set up yet", open: () => Settings.open("connections", { app: "jira" }) },
     { id: "spotify", label: "Spotify", live: () => (typeof Music === "undefined" ? false : Music.status() ? musicOn() : null),
       yes: () => (typeof Music !== "undefined" && !Music.syncOn() ? "connected, sync off" : "connected"), no: "not connected",
-      open: () => { if (Layout.visibility().find((v) => v.id === "music")?.hidden) Layout.show("music"); Layout.activate("music"); } },
+      open: () => {
+        if (!musicOn()) return Settings.open("connections", { app: "spotify" });
+        if (Layout.visibility().find((v) => v.id === "music")?.hidden) Layout.show("music");
+        Layout.activate("music");
+      } },
     { id: "claude", label: "Claude Code", live: () => (report?.claude ? !!report.claude.ok : null),
-      yes: () => (report?.claude?.version ? `ready, ${report.claude.version}` : "ready"), no: "not found", open: () => Settings.open("connections") },
+      yes: () => (report?.claude?.version ? `ready, ${report.claude.version}` : "ready"), no: "not found", open: () => Settings.open("connections", { app: "claude" }) },
   ];
   const appTip = (a) => { const l = a.live(); return `${a.label}: ${l === true ? a.yes() : l === false ? a.no : "checking"}. Click to open, drag to move it`; };
 
