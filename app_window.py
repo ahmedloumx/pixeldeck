@@ -14,6 +14,7 @@ the dashboard opens in the default browser instead of inside the window.
 
 import argparse
 import json
+import signal
 import sys
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -357,6 +358,10 @@ def main():
         selftest = {"seconds": args.seconds, "snapshot": args.snapshot,
                     "script": Path(args.script).read_text() if args.script else None}
     app = DeskApp(args.url, selftest)
+    # A stop (SIGTERM from a restart, Ctrl+C) quits like closing the window does, so WebKit ends
+    # its page process itself instead of leaving it to abort ten seconds later.
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, sig, lambda *_: (app.quit(), GLib.SOURCE_REMOVE)[1])
     code = app.run([sys.argv[0]])
     sys.exit(app.status or code)
 

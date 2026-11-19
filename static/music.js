@@ -39,6 +39,25 @@ const Music = (() => {
   let pendingSeek = null, pendingVol = null;
   let lastFilled = -1, paintedItem = null, endAsked = false, trackSeen = null, lastOn = null;
   // A short stepped flourish on a change: the class is put back on so its animation runs again.
+  // The 125 ms beat every looping animation steps on (music.css). Each one starts when its element
+  // does (the panel shown, a song started, a list built), so once running its start is snapped
+  // onto the page-wide grid: then all of them change on the same frames.
+  const BEAT = 125;
+  const onBeat = new WeakSet();
+  function syncBeat() {
+    if (!document.getAnimations) return;
+    for (const a of document.getAnimations()) {
+      if (onBeat.has(a)) continue;
+      onBeat.add(a);
+      const t = a.effect?.getComputedTiming?.();
+      if (!t || t.iterations !== Infinity) continue;
+      a.ready.then(() => {
+        if (a.startTime == null) return;
+        const off = (((a.startTime + (t.delay || 0)) % BEAT) + BEAT) % BEAT;
+        if (off > 0.5) a.startTime -= off;
+      }).catch(() => {});
+    }
+  }
   function flash(el, cls, ms) {
     if (!el || still()) return;
     el.classList.remove(cls);
@@ -352,7 +371,7 @@ const Music = (() => {
   function deckHtml() {
     const eqLevels = [37.5, 25, 50, 12.5, 37.5, 62.5, 25, 50, 37.5, 62.5, 50, 75, 62.5, 75];
     const eq = Array.from({ length: EQ_BARS }, (_, i) =>
-      `<i class="mu-eq-${"abc"[i % 3]}" style="--d:${440 + ((i * 7) % 5) * 90}ms;--o:-${(i * 173) % 700}ms;--rest:${eqLevels[i]}%"></i>`).join("");
+      `<i class="mu-eq-${"abc"[i % 3]}" style="--o:-${((i * 5) % 6) * BEAT}ms;--rest:${eqLevels[i]}%"></i>`).join("");
     const blocks = "<i></i>".repeat(BLOCKS);
     const vol = Array.from({ length: VOL_BLOCKS }, (_, i) => `<i style="--h:${28 + i * 8}%"></i>`).join("");
     const woofer = speaker(26, 4, "mu-woofer"), tweeter = speaker(10, 4, "mu-tweeter");
@@ -448,11 +467,12 @@ const Music = (() => {
     const box = el.clientWidth, width = first.getBoundingClientRect().width;
     const run = box > 0 && width > box + 1 && !still();
     if (run) {
-      const dist = Math.round(width + 48);
+      // 4 px a beat (32 px a second), so every step lands on the beat
+      const steps = Math.max(1, Math.round((width + 48) / 4)), dist = steps * 4;
       if (track.style.getPropertyValue("--mq-dist") !== `${dist}px`) {
         track.style.setProperty("--mq-dist", `${dist}px`);
-        track.style.setProperty("--mq-steps", String(Math.max(1, Math.round(dist / 2))));
-        track.style.setProperty("--mq-dur", `${(dist / 30).toFixed(2)}s`);
+        track.style.setProperty("--mq-steps", String(steps));
+        track.style.setProperty("--mq-dur", `${steps * BEAT}ms`);
       }
     }
     el.classList.toggle("is-running", run);
@@ -507,7 +527,7 @@ const Music = (() => {
       loadUpNext();
     }
     const on = playing();
-    if (on !== lastOn) { if (lastOn !== null) { flash(els.play, "is-flip", 200); flash(miniEls.play, "is-flip", 200); } lastOn = on; }
+    if (on !== lastOn) { if (lastOn !== null) { flash(els.play, "is-flip", 200); flash(miniEls.play, "is-flip", 200); } lastOn = on; requestAnimationFrame(syncBeat); }
     paintDevices();
     for (const v of views) v.paint?.();
     if (view !== "deck" || !els.lcd) return;
@@ -1141,6 +1161,7 @@ const Music = (() => {
     new ResizeObserver(() => {
       const now = shown();
       refit();
+      if (now && !wasShown) requestAnimationFrame(syncBeat);
       if (now && !wasShown && (mode === "live" || mode === "demo")) { poll(); loadDevices(); }
       if (now && !wasShown && els.art && player) { els.art.dataset.art = ""; drawArt(els.art, artKey(player.item), artCss()); }
       if (now) loadUpNext();
@@ -1170,12 +1191,23 @@ const Music = (() => {
       finally { b.disabled = false; }
     });
     // The local clock: time, blocks and the end of a song, four times a second while it plays.
-    setInterval(async () => {
+    // Another window has the focus: the decorations stop (music.css) and the clock slows to a
+    // second, so music playing behind your editor costs next to nothing.
+    const away = () => document.documentElement.classList.toggle("is-away", !document.hasFocus());
+    addEventListener("blur", away);
+    addEventListener("focus", () => { away(); requestAnimationFrame(syncBeat); });
+    away();
+    let slowTick = 0;
+    const clockTick = async () => {
+      setTimeout(clockTick, 2 * BEAT - (performance.now() % (2 * BEAT)));
       if (document.hidden || !playing() || !anyShown()) return;
+      if (!document.hasFocus() && slowTick++ % 4) return;
+      syncBeat();
       if (mode === "demo" && performance.now() >= holdUntil) accept(await MusicDemo.source.now());
       const item = player?.item;
       if ((item?.id ?? item?.name ?? null) !== paintedItem || trackSeen !== (item?.id ?? item?.name ?? null)) paint(); else tick();
-    }, 250);
+    };
+    setTimeout(clockTick, 2 * BEAT - (performance.now() % (2 * BEAT)));
     const calm = () => { refit(); if (view === "deck") paint(); };
     reducedQuery.addEventListener?.("change", calm);
     if (typeof Prefs !== "undefined") Prefs.onChange(calm);

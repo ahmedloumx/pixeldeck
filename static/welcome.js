@@ -65,45 +65,75 @@ const PixelWords = (() => {
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (data[(y * W + x) * 4 + 3] > 110) on.push([x, y]);
     return on;
   }
-  function draw(ctx, on, colors, reveal = Infinity, broken = 0, rtl = false, from = 0, to = W) {
-    ctx.clearRect(0, 0, W * P, H * P);
+  // A word is drawn once into its own canvas, glow included: one blur for the whole word. The
+  // reveal then only copies a slice of it each frame. Blurring every pixel on every frame (as
+  // this did first) froze WebKitGTK's page for up to half a second at a time.
+  function render(on, colors) {
+    const c = Object.assign(document.createElement("canvas"), { width: W * P, height: H * P });
+    const ctx = c.getContext("2d");
+    const path = new Path2D();
+    for (const [x, y] of on) path.rect(x * P, y * P, P - 1, P - 1);
     const g = ctx.createLinearGradient(0, 0, W * P, 0);
     g.addColorStop(0, colors[0]);
     g.addColorStop(1, colors[1]);
     ctx.fillStyle = g;
     ctx.shadowColor = colors[0];
     ctx.shadowBlur = 16;
+    ctx.fill(path);
+    return { canvas: c, fill: g };
+  }
+  // The word breaking into falling pixels: one path, one fill, no blur, a few frames only.
+  function crumble(ctx, on, fill, broken) {
+    const path = new Path2D();
     for (const [x, y] of on) {
-      // Right-to-left words appear from the right.
-      if (rtl ? x < to - (reveal - from) : x > reveal) continue;
       const seed = (x * 7 + y * 13) % 100;
       if (seed < broken) continue;
-      const fall = broken ? Math.max(0, broken - seed) * 0.6 : 0;
-      ctx.fillRect(x * P, y * P + fall, P - 1, P - 1);
+      path.rect(x * P, y * P + Math.max(0, broken - seed) * 0.6, P - 1, P - 1);
     }
+    ctx.clearRect(0, 0, W * P, H * P);
+    ctx.fillStyle = fill;
+    ctx.fill(path);
   }
   /** Cycle words on a canvas (960 x 240) until the returned stop() is called. onWord(i) tells
-      which word shows, for a label beside it. */
+      which word shows, for a label beside it. Nothing is drawn while the page is hidden. */
   function cycle(canvas, words, { onWord, hold = 1500, shift = 0, breakUp = true } = {}) {
     canvas.width = W * P;
     canvas.height = H * P;
     const ctx = canvas.getContext("2d");
     let live = true, i = 0;
+    const frame = () => new Promise((r) => requestAnimationFrame(() => r()));
     (async () => {
       try { await document.fonts.ready; } catch { /* draw with what is there */ }
       while (live) {
+        while (live && document.hidden) await sleep(500);
         const word = words[i % words.length], colors = PALETTES[(i + shift) % PALETTES.length];
         onWord?.(i % words.length);
         const on = pixels(word);
-        const xs = on.map((p) => p[0]), from = Math.min(...xs), to = Math.max(...xs);
-        const rtl = /[֐-ࣿ]/.test(word);
-        if (still()) { draw(ctx, on, colors); await sleep(hold + 1200); }
-        else {
-          for (let k = 0; k <= 24 && live; k++) { draw(ctx, on, colors, from + ((to - from) * k) / 24 + 1, 0, rtl, from, to); await sleep(22); }
+        if (!on.length) { i++; continue; }
+        const xs = on.map((p) => p[0]);
+        const from = Math.min(...xs) * P, to = (Math.max(...xs) + 1) * P;
+        const rtl = /[\u0590-\u08ff]/.test(word);
+        const { canvas: word2, fill } = render(on, colors);
+        if (still()) {
+          ctx.clearRect(0, 0, W * P, H * P);
+          ctx.drawImage(word2, 0, 0);
+          await sleep(hold + 1200);
+        } else {
+          // Right-to-left words appear from the right. The 16 px margin keeps the glow.
+          const start = performance.now(), REVEAL = 520;
+          for (let t = 0; live && t < 1;) {
+            t = Math.min(1, (performance.now() - start) / REVEAL);
+            const w = (to - from) * t + 16;
+            const sx = rtl ? Math.max(0, to + 16 - w) : 0, sw = rtl ? W * P - sx : Math.min(W * P, from + w);
+            ctx.clearRect(0, 0, W * P, H * P);
+            if (sw > 0) ctx.drawImage(word2, sx, 0, sw, H * P, sx, 0, sw, H * P);
+            await frame();
+          }
           if (!live) return;
-          draw(ctx, on, colors);
+          ctx.clearRect(0, 0, W * P, H * P);
+          ctx.drawImage(word2, 0, 0);
           await sleep(hold);
-          if (breakUp) for (let b = 0; b <= 100 && live; b += 5) { draw(ctx, on, colors, Infinity, b); await sleep(16); }
+          if (breakUp) for (let b = 0; b <= 100 && live; b += 5) { crumble(ctx, on, fill, b); await frame(); }
         }
         i++;
       }
@@ -179,9 +209,24 @@ const Welcome = (() => {
       ${s.html()}
       <div class="wl-foot">${stage > 0 ? '<button class="btn btn--quiet" type="button" data-wl-step="-1">Back</button>' : ""}
         ${stage < STAGES.length - 1 ? '<button class="btn btn--primary" type="button" data-wl-step="1">Next</button>' : ""}</div></div>`;
+    fit();
     el.querySelector(stage < STAGES.length - 1 ? "[data-wl-step='1']" : "[data-wl-finish]")?.focus({ preventScroll: true });
     if (typeof RetroSelect !== "undefined") RetroSelect.enhanceAll?.(el);
   }
+
+  // A stage taller or wider than the window is zoomed down to fit it, never cut or scrolled.
+  function fit() {
+    const host = el?.querySelector(".wl-setup"), st = el?.querySelector(".wl-stage");
+    if (!host || !st || host.hidden) return;
+    st.style.zoom = "";
+    const cs = getComputedStyle(host);
+    const h = host.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+    const w = host.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    const k = Math.min(1, h / st.scrollHeight, w / st.scrollWidth);
+    if (k < 0.995) st.style.zoom = Math.max(0.45, k).toFixed(3);
+  }
+  let fitQueued = false;
+  const onResize = () => { if (!fitQueued) { fitQueued = true; requestAnimationFrame(() => { fitQueued = false; fit(); }); } };
 
   /* ---------------------------------------------------------------- the coin */
   function insertCoin() {
@@ -216,6 +261,7 @@ const Welcome = (() => {
     el = null;
     setTimeout(() => gone.remove(), 360);
     removeEventListener("keydown", onKey, true);
+    removeEventListener("resize", onResize);
     const resolve = done;
     done = null;
     // "app": an app's guide was asked for, so the caller leaves the next screen to it
@@ -265,6 +311,7 @@ const Welcome = (() => {
     stop = PixelWords.cycle(el.querySelector(".wl-canvas"), HELLO.map(([w]) => w), { onWord: (i) => { const l = el?.querySelector(".wl-lang"); if (l) l.textContent = HELLO[i][1]; } });
     el.querySelector(".wl-insert").focus();
     addEventListener("keydown", onKey, true);
+    addEventListener("resize", onResize);
     if ((state.features || []).includes("settings")) api("settings").then((r) => { report = r; if (el && stage >= 0) showStage(stage); }).catch(() => {});
     return new Promise((resolve) => { done = resolve; });
   }

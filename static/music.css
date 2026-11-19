@@ -148,6 +148,10 @@
 .mu-mq-text + .mu-mq-text { display: none; }
 .mu-mq:not(.is-running) .mu-mq-track { display: block; overflow: hidden; text-overflow: ellipsis; }
 .mu-mq.is-running .mu-mq-text + .mu-mq-text { display: inline; }
+/* Every playing animation steps on one 125 ms beat (durations are multiples of it, and music.js
+   snaps each one's start onto the page-wide grid), so the window redraws at most 8 times a second:
+   on WebKitGTK each redraw composites the whole window, and animations each on their own clock
+   made that nearly every frame. */
 .mu-mq.is-running .mu-mq-track { animation: mu-scroll var(--mq-dur, 10s) steps(var(--mq-steps, 100), end) infinite; }
 .mu-mq--title { font-size: 16px; line-height: 1.35; }
 .mu-mq--sub { font-size: 10px; line-height: 1.5; }
@@ -174,6 +178,7 @@
   background: linear-gradient(var(--mu-lcd-bg) 2px, transparent 2px) 0 0 / 100% 7px,
     linear-gradient(to top, var(--mu-lcd-ink) 0 62.5%, var(--sprite-yellow) 62.5% 87.5%, var(--sprite-red) 87.5%) 0 0 / 100% 100% no-repeat; }
 .mu.is-idle .mu-eq i::after { clip-path: inset(100% 0 0 0); }
+.mu-eq i.mu-eq-a { --d: 750ms; } .mu-eq i.mu-eq-b { --d: 625ms; } .mu-eq i.mu-eq-c { --d: 500ms; }
 .mu.is-playing .mu-eq i::after { animation: mu-eq-a var(--d, 500ms) steps(1, end) var(--o, 0ms) infinite; }
 .mu.is-playing .mu-eq i.mu-eq-b::after { animation-name: mu-eq-b; }
 .mu.is-playing .mu-eq i.mu-eq-c::after { animation-name: mu-eq-c; }
@@ -253,7 +258,7 @@
   background: oklch(30% 0.012 250); clip-path: polygon(9% 0, 91% 0, 100% 100%, 0 100%); }
 .mu-tape-foot i { width: 5px; height: 5px; background: var(--sprite-dark); }
 .mu-tape.is-on { box-shadow: inset 0 2px 0 oklch(36% 0.012 250), 0 0 0 var(--pixel) var(--tape), 4px 4px 0 var(--color-paper-3); }
-.mu.is-playing .mu-tape.is-on .mu-reel { animation: mu-reel 540ms steps(3, end) infinite; }
+.mu.is-playing .mu-tape.is-on .mu-reel { animation: mu-reel 375ms steps(3, end) infinite; }
 
 /* ------------------------------------------------------------ setup */
 .mu-setup { display: grid; gap: var(--space-md); max-width: 46rem; margin: 0 auto; padding: var(--space-lg);
@@ -297,9 +302,9 @@
 .st-music .mm-mq { width: 150px; }
 .st-music .mm-eq { display: flex; align-items: flex-end; gap: 1px; width: 10px; height: 12px; }
 .st-music .mm-eq i { flex: 1; height: 25%; background: var(--mu-lcd-ink); }
-.st-music.is-playing .mm-eq i { animation: mm-eq 600ms steps(1, end) infinite; }
-.st-music.is-playing .mm-eq i:nth-child(2) { animation-duration: 450ms; animation-delay: -200ms; }
-.st-music.is-playing .mm-eq i:nth-child(3) { animation-duration: 520ms; animation-delay: -90ms; }
+.st-music.is-playing .mm-eq i { animation: mm-eq 500ms steps(1, end) infinite; }
+.st-music.is-playing .mm-eq i:nth-child(2) { animation-duration: 1000ms; animation-delay: -250ms; }
+.st-music.is-playing .mm-eq i:nth-child(3) { animation-duration: 500ms; animation-delay: -125ms; }
 @media (max-width: 1280px) { .st-music .mm-mq { width: 96px; } }
 @media (max-width: 1000px) { .st-music .mm-title .mm-mq, .st-music .mm-eq { display: none; } }
 
@@ -359,7 +364,7 @@
 .ml-eq i { width: 3px; height: 40%; background: var(--mu-now-bar); }
 .ml-row.is-current .ml-n { display: none; }
 .ml-row.is-current .ml-eq { display: flex; }
-.is-playing .ml-row.is-current .ml-eq i { animation: mm-eq 600ms steps(1, end) infinite; }
+.is-playing .ml-row.is-current .ml-eq i { animation: mm-eq 500ms steps(1, end) infinite; }
 .is-playing .ml-row.is-current .ml-eq i:nth-child(2) { animation-duration: 450ms; animation-delay: -200ms; }
 .is-playing .ml-row.is-current .ml-eq i:nth-child(3) { animation-duration: 520ms; animation-delay: -90ms; }
 .ml-thumb { width: 32px; height: 32px; image-rendering: pixelated; background: var(--sprite-dark); box-shadow: 0 0 0 1px var(--sprite-dark), 2px 2px 0 var(--color-paper); }
@@ -576,13 +581,13 @@
 /* ------------------------------------------------------------ the crew dances while it plays */
 /* A calm 100 beats a minute: the slime hops on one beat, the bot on the next. Each hop is a
    squash, a small lift while stretched, a half settle, then rest; all in whole steps. */
-.mu.is-playing .mu-slime { animation: mu-hop 1200ms steps(1, end) infinite; }
-.mu.is-playing .mu-slime svg { animation: mu-squash-slime 1200ms steps(1, end) infinite; }
-.mu.is-playing .mu-bot { animation: mu-hop 1200ms steps(1, end) -600ms infinite; }
-.mu.is-playing .mu-bot svg { animation: mu-squash-bot 1200ms steps(1, end) -600ms infinite; }
-.mu.is-playing .mu-cone { animation: mu-thump 600ms steps(1, end) infinite; }
+.mu.is-playing .mu-slime { animation: mu-hop 1000ms steps(1, end) infinite; }
+.mu.is-playing .mu-slime svg { animation: mu-squash-slime 1000ms steps(1, end) infinite; }
+.mu.is-playing .mu-bot { animation: mu-hop 1000ms steps(1, end) -500ms infinite; }
+.mu.is-playing .mu-bot svg { animation: mu-squash-bot 1000ms steps(1, end) -500ms infinite; }
+.mu.is-playing .mu-cone { animation: mu-thump 500ms steps(1, end) infinite; }
 /* the bot in the terminal bar bobs along, gently, while music plays */
-body.is-music-playing .term-mascot .spr { animation: mu-bob-small 1200ms steps(1, end) -600ms infinite; }
+body.is-music-playing .term-mascot .spr { animation: mu-bob-small 1000ms steps(1, end) -500ms infinite; }
 
 @keyframes mu-scroll { to { transform: translateX(calc(-1 * var(--mq-dist, 0px))); } }
 @keyframes mu-blink { 50% { opacity: 0; } }
@@ -661,7 +666,7 @@ body.is-music-playing .term-mascot .spr { animation: mu-bob-small 1200ms steps(1
 .md-btn-kind, .md-card-kind { margin-top: 2px; font-size: 8px; color: var(--mu-deck-muted); }
 .md-caret { color: var(--mu-deck-muted); font-size: 10px; }
 .md-eq { display: none; align-items: flex-end; gap: 2px; height: 12px; }
-.md-eq i { width: 3px; height: 3px; background: var(--mu-lcd-ink); box-shadow: 0 0 4px var(--mu-lcd-glow); animation: md-eq 0.9s steps(4, end) infinite; }
+.md-eq i { width: 3px; height: 3px; background: var(--mu-lcd-ink); box-shadow: 0 0 4px var(--mu-lcd-glow); animation: md-eq 1s steps(4, end) infinite; }
 .md-eq i:nth-child(2) { animation-delay: -0.3s; } .md-eq i:nth-child(3) { animation-delay: -0.6s; }
 @keyframes md-eq { 0% { height: 3px; } 25% { height: 11px; } 50% { height: 6px; } 75% { height: 12px; } 100% { height: 3px; } }
 /* playing: the deck's phosphor green, glowing */
@@ -753,3 +758,7 @@ button.ly-line:hover { color: oklch(85% 0.14 145 / 0.8); }
 .mu-cid-input { flex: 1 1 18rem; min-width: 0; min-height: 34px; padding: 0 10px; border: var(--rule-hair) solid var(--color-rule-2); background: var(--color-paper); color: var(--color-ink);
   font: 400 var(--text-sm) var(--font-term); }
 .mu-cid-input:focus-visible { outline: var(--pixel) solid var(--color-focus); outline-offset: 1px; }
+
+/* Another window has the focus: the looping decorations hold still (music.js sets is-away). */
+:root.is-away .mu *, :root.is-away .mu *::before, :root.is-away .mu *::after, :root.is-away .st-music *, :root.is-away .mc *,
+:root.is-away .md-btn *, :root.is-away .ml *, :root.is-away .ly *, :root.is-away .term-mascot .spr { animation-play-state: paused !important; }

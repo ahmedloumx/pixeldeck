@@ -13,9 +13,9 @@
   background: radial-gradient(ellipse at 50% 40%, #121726 0%, #050608 70%); }
 .wl-cabinet::after, .lk-cabinet::after { content: ""; position: absolute; inset: 0; z-index: 20; pointer-events: none;
   background: repeating-linear-gradient(0deg, rgb(0 0 0 / 0.16) 0 1px, transparent 1px 3px), radial-gradient(ellipse at center, transparent 55%, rgb(0 0 0 / 0.55)); }
-.wl-scene, .lk-scene { position: absolute; inset: 0; display: grid; place-items: center; align-content: center; gap: 18px; padding: 70px 24px 40px; }
+.wl-scene, .lk-scene { position: absolute; inset: 0; display: grid; place-items: center; align-content: center; gap: clamp(8px, 2.2vh, 18px); padding: clamp(48px, 9vh, 70px) 24px clamp(16px, 5vh, 40px); }
 .wl-scene[hidden] { display: none; }
-.wl-canvas, .lk-canvas { width: min(82vw, 1000px); height: auto; aspect-ratio: 4 / 1; image-rendering: pixelated; }
+.wl-canvas, .lk-canvas { width: min(82vw, 1000px, 300vh); height: auto; aspect-ratio: 4 / 1; image-rendering: pixelated; }
 .wl-lang, .lk-lang { margin: -8px 0 0; color: var(--cab-muted); font-size: var(--num-9); letter-spacing: 0.22em; text-align: center; min-height: 1.4em; }
 .wl-skip { position: absolute; top: 16px; left: 18px; z-index: 30; padding: 7px 11px; border: 1px solid var(--cab-rule); background: none; color: var(--cab-muted); font: 400 var(--num-9) var(--font-num); cursor: pointer; }
 .wl-skip:hover, .wl-skip:focus-visible { color: var(--cab-ink); border-color: var(--cab-acc); outline: none; }
@@ -48,7 +48,7 @@
 .wl-stage { width: min(980px, 100%); margin: 0 auto; animation: wl-stage-in 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
 @keyframes wl-stage-in { from { opacity: 0; transform: translateX(40px); } }
 .wl-stage-name { margin: 0 0 10px; color: var(--cab-acc); font: 400 var(--num-9) var(--font-num); letter-spacing: 0.15em; text-align: center; }
-.wl-stage-title { margin: 0 0 8px; font: 600 clamp(24px, 3vw, 34px) var(--font-pixel); letter-spacing: 0; text-align: center; }
+.wl-stage-title { max-width: none; margin: 0 auto 8px; font: 600 clamp(24px, 3vw, 34px) var(--font-pixel); letter-spacing: 0; text-align: center; }
 .wl-stage-sub { max-width: 64ch; margin: 0 auto 26px; color: var(--cab-ink-2); text-align: center; }
 .wl-foot { display: flex; justify-content: center; gap: 10px; margin-top: 28px; }
 .wl .btn--quiet { color: var(--cab-ink-2); }
