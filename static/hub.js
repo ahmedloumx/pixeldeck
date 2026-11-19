@@ -132,6 +132,8 @@ const StatusBar = (() => {
     if (api) {
       api.classList.toggle("is-low", left <= 3);
       api.dataset.tip = `${used} of ${limit} Bitbucket API calls used in the last hour, ${limit - used} left. The background refresh pauses at ${Math.round(limit * 0.8)}.`;
+      // The meter is a quick toggle, off by default; it shows itself when the calls run low.
+      if (typeof ControlCenter !== "undefined") api.hidden = !(ControlCenter.config().api || left <= 3);
     }
   }
   function connection() {
@@ -158,7 +160,8 @@ const StatusBar = (() => {
       next = secs <= 0 ? "next: now" : `next ${Math.floor(secs / 60)}:${two(secs % 60)}`;
     }
     if (nextEl) nextEl.textContent = next;
-    if (sync) sync.dataset.tip = `${tip}${synced ? ` Your pull requests were read at ${clock(synced)}.` : ""}${sched?.team_at ? ` Teammates' last read: ${clock(sched.team_at)}.` : ""} PixelDeck reads your open pull requests every minute, the rest every 5 to 15 minutes.`;
+    const { used, limit } = state.budget;
+    if (sync) sync.dataset.tip = `${tip}${synced ? ` Your pull requests were read at ${clock(synced)}.` : ""}${sched?.team_at ? ` Teammates' last read: ${clock(sched.team_at)}.` : ""} PixelDeck reads your open pull requests every minute, the rest every 5 to 15 minutes. ${used} of ${limit} API calls used this hour.`;
   }
   function paintBell() {
     const n = typeof Notify !== "undefined" ? Notify.unread() : 0;
@@ -192,8 +195,10 @@ const StatusBar = (() => {
         ? `<span class="win-max">${PixelIcon.svg("max", 1)}</span><span class="win-restore">${PixelIcon.svg("restore", 1)}</span>`
         : PixelIcon.svg(b.dataset.win === "minimize" ? "min" : "close", 1);
     }
-    $id("bell").hidden = !has("events");
+    // The bell always shows: behind it are the notifications and the quick toggles.
+    $id("bell").hidden = false;
     if (typeof Notify !== "undefined") Notify.onChange(paintBell);
+    if (typeof ControlCenter !== "undefined") ControlCenter.start();
     clearInterval(tick);
     tick = setInterval(paintSync, 1000);
     poll();

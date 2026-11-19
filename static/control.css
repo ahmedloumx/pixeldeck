@@ -1,0 +1,105 @@
+/* The control center (control.js): the app icons in the bar, the pinned toggles, and the bell's
+   second tab with the apps and the quick toggles. */
+
+/* ---------------------------------------------------------------- in the bar */
+.st-pins { display: inline-flex; align-items: center; gap: 2px; }
+.st-pins:empty { display: none; }
+.cc-pin[aria-pressed="true"] { color: var(--color-accent); }
+.cc-pin[aria-pressed="false"] { color: var(--color-muted); }
+
+.st-tray { display: inline-flex; align-items: center; gap: 2px; height: 26px; padding: 0 3px; border: var(--rule-hair) solid var(--color-rule); background: var(--color-paper-3);
+  transition: background-color var(--dur-short) var(--ease-out), box-shadow var(--dur-short) var(--ease-out); }
+.st-tray.is-empty { display: none; }
+.cc-dragging-app .st-tray.is-empty:not([hidden]) { display: inline-flex; }
+.st-tray.is-over, .cc-apps.is-over { background: var(--color-accent-soft); box-shadow: inset 0 0 0 var(--pixel) var(--color-accent); }
+.cc-tray-empty { padding: 0 6px; font: 400 var(--num-7) var(--font-num); color: var(--color-muted); white-space: nowrap; text-transform: uppercase; }
+.cc-tray-app { position: relative; display: inline-flex; cursor: grab; }
+.cc-tray-btn { position: relative; display: grid; place-items: center; width: 24px; height: 22px; padding: 0; border: 0; background: none; cursor: pointer; }
+.cc-tray-btn:hover { background: var(--color-paper-2); }
+.cc-tray-btn:focus-visible, .cc-x:focus-visible, .cc-app-btn:focus-visible, .cc-up:focus-visible, .cc-tile-btn:focus-visible, .cc-star:focus-visible, .bell-switch button:focus-visible {
+  outline: var(--pixel) solid var(--color-focus); outline-offset: 1px; }
+.cc-tray-app.is-off .cc-pix, .cc-app.is-off .cc-pix { filter: grayscale(1); opacity: 0.5; }
+.cc-tray-app.is-live .cc-tray-btn::after, .cc-app.is-live .cc-app-btn::after { content: ""; position: absolute; right: 1px; bottom: 1px; width: 4px; height: 4px; background: var(--color-ok); box-shadow: 0 0 4px var(--color-ok); }
+.cc-x { position: absolute; top: -6px; right: -6px; z-index: 1; display: none; width: 14px; height: 14px; padding: 0; border: var(--rule-hair) solid var(--color-rule-2); background: var(--color-paper); color: var(--color-ink); font: 400 11px/11px var(--font-body); cursor: pointer; }
+.cc-tray-app:hover .cc-x, .cc-tray-app:focus-within .cc-x { display: block; }
+.cc-x:hover { background: var(--color-bad); color: var(--sprite-white); border-color: var(--color-bad); }
+.is-dragging { opacity: 0.35; }
+.cc-pix { display: block; image-rendering: pixelated; }
+
+/* ---------------------------------------------------------------- the bell's two tabs */
+.bell-panel { display: flex; flex-direction: column; }
+.bell-panel > .bell-scroll { flex: 1 1 auto; min-height: 0; }
+.bell-switch { display: grid; grid-template-columns: 1fr 1fr; margin: 6px 6px 0; border-bottom: var(--pixel) solid var(--color-rule); }
+.bell-switch button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; padding: 0 10px; border: 0; background: none; color: var(--color-muted);
+  font: 500 var(--text-sm) var(--font-pixel); letter-spacing: 0; cursor: pointer; box-shadow: inset 0 -3px 0 transparent; }
+.bell-switch button:hover { color: var(--color-ink); background: var(--color-paper-2); }
+.bell-switch button[aria-selected="true"] { color: var(--color-ink); box-shadow: inset 0 -3px 0 var(--color-accent); }
+.bell-count { min-width: 16px; padding: 2px 3px; background: var(--color-bad); color: var(--sprite-white); font-size: var(--num-7); }
+
+.cc { display: grid; gap: 8px; padding: 10px var(--space-md) var(--space-md); }
+.cc-row { display: flex; align-items: center; gap: 8px; min-height: 26px; }
+.cc-title { margin: 0; font: 400 var(--num-8) var(--font-num); color: var(--color-muted); letter-spacing: 0.04em; text-transform: uppercase; }
+.cc-hint { margin: 0 0 0 auto; color: var(--color-muted); font-size: var(--text-xs); }
+.cc-hint--edit { margin: 0; }
+.cc-edit { margin-left: auto; min-height: 26px; font-size: var(--text-sm); }
+.cc-edit[aria-pressed="true"] { color: var(--color-accent-ink); background: var(--color-accent); border-color: var(--color-accent); }
+.cc-none { margin: 0; padding: 6px 2px; color: var(--color-muted); font-size: var(--text-sm); }
+
+.cc-apps { display: flex; flex-wrap: wrap; gap: 8px; min-height: 76px; padding: 8px; border: var(--rule-hair) dashed var(--color-rule-2);
+  transition: background-color var(--dur-short) var(--ease-out), box-shadow var(--dur-short) var(--ease-out); }
+.cc-app { position: relative; cursor: grab; }
+.cc-app-btn { position: relative; display: grid; justify-items: center; gap: 6px; width: 76px; padding: 9px 2px 7px; border: var(--pixel) solid var(--color-rule); background: var(--color-paper-2); color: var(--color-ink-2); cursor: pointer; }
+.cc-app-btn:hover { border-color: var(--color-rule-2); color: var(--color-ink); }
+.cc-app-btn small { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 var(--num-7) var(--font-num); text-transform: uppercase; }
+.cc-up { position: absolute; top: 3px; right: 3px; width: 16px; height: 16px; padding: 0; border: var(--rule-hair) solid var(--color-rule-2); background: var(--color-paper); color: var(--color-accent); font: 400 11px/14px var(--font-body); cursor: pointer; }
+.cc-up:hover { background: var(--color-accent); color: var(--color-accent-ink); border-color: var(--color-accent); }
+
+.cc-editbar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; font-size: var(--text-sm); color: var(--color-muted); }
+.cc-editbar .link { margin-left: auto; }
+
+.cc-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.cc-tiles.is-compact { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.cc-tiles.is-list { grid-template-columns: minmax(0, 1fr); gap: 3px; }
+.cc-tile { position: relative; min-width: 0; }
+.cc-tile.is-wide { grid-column: span 2; }
+.cc-tile-btn { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto auto; align-items: center; gap: 6px 8px; width: 100%; min-height: 64px; padding: 9px 10px;
+  border: var(--pixel) solid var(--color-rule); background: var(--color-paper-2); color: var(--color-ink-2); text-align: left; font: inherit; cursor: pointer;
+  transition: border-color var(--dur-short) var(--ease-out), background-color var(--dur-short) var(--ease-out); }
+.cc-tile-btn:hover { border-color: var(--color-rule-2); color: var(--color-ink); }
+.cc-glyph { grid-row: span 2; display: grid; place-items: center; width: 30px; height: 30px; background: var(--color-paper-3); color: var(--color-muted); box-shadow: inset 0 0 0 1px var(--color-rule); }
+.cc-tile-label { overflow: hidden; font-size: var(--text-sm); line-height: 1.2; overflow-wrap: anywhere; }
+.cc-state { color: var(--color-muted); font-size: var(--num-7); }
+.cc-tile.is-on .cc-tile-btn { border-color: var(--color-accent); color: var(--color-ink); box-shadow: 0 2px 0 var(--color-accent-deep); }
+.cc-tile.is-on .cc-glyph { background: var(--color-accent); color: var(--color-accent-ink); box-shadow: none; }
+.cc-tile.is-on .cc-state { color: var(--color-accent); }
+.cc-tile.is-pinned:not(:has(.cc-star)) .cc-tile-btn::after { content: "★"; position: absolute; top: 3px; right: 5px; color: var(--color-accent); font-size: 10px; }
+/* Compact: the glyph only, the name still read aloud; List: one row each. */
+.cc-tiles.is-compact .cc-tile.is-wide { grid-column: auto; }
+.cc-tiles.is-compact .cc-tile-btn { grid-template-columns: 1fr; justify-items: center; min-height: 50px; padding: 8px 4px; }
+.cc-tiles.is-compact .cc-glyph { grid-row: auto; }
+.cc-tiles.is-compact .cc-tile-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.cc-tiles.is-compact .cc-state { display: none; }
+.cc-tiles.is-list .cc-tile.is-wide { grid-column: auto; }
+.cc-tiles.is-list .cc-tile-btn { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: auto; min-height: 36px; padding: 4px 8px; }
+.cc-tiles.is-list .cc-glyph { grid-row: auto; width: 24px; height: 24px; }
+
+/* Edit: the tiles wiggle, can be dragged, and carry a pin. */
+.cc-tiles.is-editing .cc-tile { cursor: grab; animation: cc-wiggle 260ms steps(2, jump-none) infinite alternate; }
+.cc-tiles.is-editing .cc-tile:nth-child(2n) { animation-delay: -130ms; }
+.cc-tiles.is-editing .cc-tile-btn { pointer-events: none; }
+.cc-tile.is-over .cc-tile-btn { border-style: dashed; border-color: var(--color-accent); }
+.cc-star { position: absolute; top: 3px; right: 3px; z-index: 1; width: 20px; height: 20px; padding: 0; border: var(--rule-hair) solid var(--color-rule-2); background: var(--color-paper); color: var(--color-muted); font-size: 12px; line-height: 18px; cursor: pointer; }
+.cc-star[aria-pressed="true"] { color: var(--color-accent); border-color: var(--color-accent); }
+@keyframes cc-wiggle { from { transform: rotate(-0.8deg); } to { transform: rotate(0.8deg); } }
+:root[data-motion="calm"] .cc-tiles.is-editing .cc-tile { animation: none; }
+@media (prefers-reduced-motion: reduce) { .cc-tiles.is-editing .cc-tile { animation: none; } }
+
+/* ---------------------------------------------------------------- Spotify sync off */
+.mu-sync .mu-led { display: inline-block; }
+.mu-sync[aria-pressed="true"] .mu-led { background: var(--mu-lcd-ink); box-shadow: 0 0 0 var(--pixel) var(--sprite-dark), 0 0 8px var(--mu-lcd-glow); }
+.mu.is-sync-off .mu-box { filter: saturate(0.35) brightness(0.9); }
+.st-music.is-sync-off .mm-title { opacity: 0.7; }
+
+/* ---------------------------------------------------------------- narrow windows */
+@media (max-width: 1320px) { .bar .st-pins { display: none; } }
+@media (max-width: 1060px) { .bar .st-tray { display: none; } }

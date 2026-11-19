@@ -738,3 +738,12 @@ button.ly-line:hover { color: oklch(85% 0.14 145 / 0.8); }
 .ly--mini .ly-note { font-size: 12px; }
 .mc-lyrics[hidden] { display: none; }
 @media (prefers-reduced-motion: reduce) { .ly-lines, .ly-line { transition: none; } .md-eq i, .ly-note.is-busy { animation: none; } }
+
+/* A scrollbar you can see: WebKitGTK's overlay scrollbars stay hidden until you scroll, so a deck
+   or a library cut by the window's edge did not look like it scrolls. The page's scrollbar-color,
+   inherited, keeps WebKit on those overlay ones, so these two put it back to auto. */
+.mu-panel, .mu-col { scrollbar-color: auto; }
+.mu-panel::-webkit-scrollbar, .mu-col::-webkit-scrollbar { width: 10px; height: 10px; }
+.mu-panel::-webkit-scrollbar-track, .mu-col::-webkit-scrollbar-track { background: var(--color-paper-3); box-shadow: inset 1px 0 0 var(--color-rule); }
+.mu-panel::-webkit-scrollbar-thumb, .mu-col::-webkit-scrollbar-thumb { min-height: 32px; background: var(--color-rule-2); border: 2px solid var(--color-paper-3); }
+.mu-panel::-webkit-scrollbar-thumb:hover, .mu-col::-webkit-scrollbar-thumb:hover { background: var(--color-accent); }
