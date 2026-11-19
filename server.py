@@ -687,6 +687,9 @@ class DeskServer(ThreadingHTTPServer):
     socket bind a port another one listens on, so a second server would start next to the first."""
     daemon_threads = True
     allow_reuse_address = sys.platform != "win32"
+    # The page asks for some 30 files at once. With the default backlog of 5, Windows refuses the
+    # connections that do not fit (Linux lets them wait), and the page starts with scripts missing.
+    request_queue_size = 128
 
 
 def main():

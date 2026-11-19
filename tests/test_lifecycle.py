@@ -79,6 +79,14 @@ class OneServerPerPortTest(unittest.TestCase):
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             s.bind(("127.0.0.1", port))
 
+    def test_a_burst_of_connections_waits_instead_of_being_refused(self):
+        httpd = server.DeskServer(("127.0.0.1", 0), server.Desk)  # listening, not accepting yet
+        self.addCleanup(httpd.server_close)
+        socks = []
+        self.addCleanup(lambda: [s.close() for s in socks])
+        for _ in range(40):
+            socks.append(socket.create_connection(httpd.server_address, timeout=2))
+
     def test_a_restart_gets_the_port_back_after_traffic(self):
         httpd = server.DeskServer(("127.0.0.1", 0), server.Desk)
         port = httpd.server_address[1]
