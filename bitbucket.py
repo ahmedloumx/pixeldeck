@@ -18,6 +18,7 @@ from collections import deque
 
 import config
 import version
+from codehost import HostError
 
 API = "https://api.bitbucket.org/2.0"
 HOURLY_LIMIT = 1000
@@ -44,12 +45,10 @@ def multipart(fields, files, boundary=None):
     return boundary, b"".join(out)
 
 
-class BitbucketError(Exception):
-    def __init__(self, status, message, detail=None):
-        super().__init__(f"{status}: {message}")
-        self.status = status
-        self.message = message
-        self.detail = detail  # a 403 for a missing scope says {"required": [...], "granted": [...]}
+class BitbucketError(HostError):
+    def __init__(self, status, message, detail=None, unset=False):
+        # detail: a 403 for a missing scope says {"required": [...], "granted": [...]}
+        super().__init__(status, message, detail, unset)
 
 
 class Client:
@@ -66,11 +65,11 @@ class Client:
     def _auth_header(self):
         email, token = self._login or (config.get("BITBUCKET_EMAIL"), config.get("BITBUCKET_TOKEN"))
         if not token:
-            raise BitbucketError(0, f"No BITBUCKET_TOKEN in {config.env_path()}")
+            raise BitbucketError(0, f"No BITBUCKET_TOKEN in {config.env_path()}", unset=True)
         if not self.workspace:
             self.workspace = config.workspace()
         if not self.workspace:
-            raise BitbucketError(0, f"No BITBUCKET_WORKSPACE in {config.env_path()}")
+            raise BitbucketError(0, f"No BITBUCKET_WORKSPACE in {config.env_path()}", unset=True)
         if email:
             pair = f"{email}:{token}".encode()
             return "Basic " + base64.b64encode(pair).decode()

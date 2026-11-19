@@ -1,4 +1,5 @@
-"""What PixelDeck is connected to, for the settings panel: Bitbucket, the Claude Code CLI, git.
+"""What PixelDeck is connected to, for the settings panel: the code host (Bitbucket, GitHub or
+GitLab), the Claude Code CLI, git.
 
 The report says whether a token is set and where it lives, never the token. Program
 versions come from running them once with a short timeout and are kept a few minutes,
@@ -14,6 +15,8 @@ import time
 from pathlib import Path
 
 import config
+import github
+import gitlab
 import gitscan
 import launcher
 import version
@@ -58,21 +61,28 @@ def git():
 
 
 def bitbucket(engine):
+    # The account, the budget and the refusals are the engine's, so only while Bitbucket is in use.
+    active = getattr(getattr(engine, "host", None), "id", "bitbucket") == "bitbucket"
     return {
         "token_set": bool(config.get("BITBUCKET_TOKEN")),
         "email": config.get("BITBUCKET_EMAIL") or None,
         "workspace": config.workspace() or None,
         "env_file": str(config.env_path()),
-        "auth": engine.auth,
-        "me": engine.me(),
-        "budget": engine.budget(),
-        "project": engine.project(),
+        "active": active,
+        "auth": engine.auth if active else {"ok": None, "error": None},
+        "me": engine.me() if active else None,
+        "budget": engine.budget() if active else None,
+        "project": engine.project() if active else None,
     }
 
 
 def report(engine, port, workspace_root, terminal_problem):
+    host = getattr(engine, "host", None)
     return {
+        "host": host.public() if host else {"id": "bitbucket", "label": "Bitbucket", "writes": True},
         "bitbucket": bitbucket(engine),
+        "github": github.report(engine) if host else None,
+        "gitlab": gitlab.report(engine) if host else None,
         "claude": claude(),
         "git": git(),
         "app": {

@@ -173,10 +173,13 @@ const Welcome = (() => {
             <span class="wl-choice">${icon("gemini", 2)} Gemini CLI <small>SOON</small></span><span class="wl-choice">${icon("codex", 2)} Codex CLI <small>SOON</small></span></div></div>
       </div>`;
     } },
-    { title: "Where does your code live?", sub: "Your pull requests and your team's. Bitbucket today; GitHub and GitLab are coming.", html: () => {
-      const bb = state.me ? "CONNECTED" : "SET IT UP NEXT";
-      return `<div class="wl-hosts">${hostCard("bitbucket", "Bitbucket", "A cloud workspace and an API token", bb, 'data-wl-app="bitbucket"')}
-        ${hostCard("github", "GitHub", "github.com or Enterprise", "SOON", "disabled")}${hostCard("gitlab", "GitLab", "gitlab.com or your own server", "SOON", "disabled")}
+    { title: "Where does your code live?", sub: "Your pull requests and your team's, from one host at a time. Switch any time in Settings.", html: () => {
+      // The host in use says CONNECTED once it answers; the others are a click from their guide.
+      const inUse = state.host?.id || "bitbucket", hosts = !!report?.github;  // an older server reads Bitbucket only
+      const pill = (id) => (id === inUse ? (state.me ? "CONNECTED" : "SET IT UP NEXT") : hosts ? "SET IT UP" : "SOON");
+      const card = (id, name, line) => hostCard(id, name, line, pill(id), id === "bitbucket" || hosts ? `data-wl-app="${id}"` : "disabled");
+      return `<div class="wl-hosts">${card("bitbucket", "Bitbucket", "A cloud workspace and an API token")}
+        ${card("github", "GitHub", "github.com or Enterprise")}${card("gitlab", "GitLab", "gitlab.com or your own server")}
         ${hostCard("git", "Any git", "Clones on this computer", report?.git?.ok ? "READY" : "", 'data-wl-app="git"')}</div>`;
     } },
     { title: "Bring your tools", sub: "All optional, all later is fine. A click opens the app's guide, with the link to the page you need.", html: () => {
@@ -337,7 +340,7 @@ const Welcome = (() => {
     const app = t.closest("[data-wl-app]");
     if (app) {
       const id = app.dataset.wlApp;
-      return finish(() => (id === "bitbucket" && state.setupNeeded ? Settings.open("setup") : Settings.open("connections", { app: id })));
+      return finish(() => (id === (state.host?.id || "bitbucket") && state.setupNeeded ? Settings.open("setup") : Settings.open("connections", { app: id })));
     }
   });
 

@@ -709,9 +709,13 @@ function skeleton(rows = 5) {
 function authNotice() {
   const auth = state.auth || {};
   if (auth.ok !== false) return "";
-  const unset = /^No BITBUCKET_/.test(auth.error || "");
-  return `<section class="notice" role="alert"><h2>${unset ? "PixelDeck is not set up yet" : "Bitbucket refused the token"}</h2><p>${esc(auth.error || "Unknown error")}</p>
-    <p>Put an API token with Bitbucket read scopes (and pull request write, for the actions) in PixelDeck's <code>.env</code> as <code>BITBUCKET_TOKEN=</code>, next to <code>BITBUCKET_EMAIL=</code> and <code>BITBUCKET_WORKSPACE=</code>. See <code>.env.example</code>. It is picked up within a minute.</p>
+  const unset = auth.unset || /^No BITBUCKET_/.test(auth.error || "");
+  const host = state.host?.label || "Bitbucket";
+  const how = host === "Bitbucket"
+    ? "Put an API token with Bitbucket read scopes (and pull request write, for the actions) in PixelDeck's <code>.env</code> as <code>BITBUCKET_TOKEN=</code>, next to <code>BITBUCKET_EMAIL=</code> and <code>BITBUCKET_WORKSPACE=</code>. See <code>.env.example</code>."
+    : `Paste a ${esc(host)} token in <b>Settings, Setup</b>; its guide in <b>Settings, Connected apps</b> says which read access it needs.`;
+  return `<section class="notice" role="alert"><h2>${unset ? "PixelDeck is not set up yet" : `${esc(host)} refused the token`}</h2><p>${esc(auth.error || "Unknown error")}</p>
+    <p>${how} It is picked up within a minute.</p>
     <p><button class="btn" type="button" data-action="retry">Try again now</button></p></section>`;
 }
 
@@ -1035,9 +1039,9 @@ function prTools(pr) {
     ? tool("tool--agent", 'data-launch="fix"', buddy, "Fix", `Fix with Claude: runs in the Terminal panel, briefed with the open threads. ${shift}`)
       + tool("tool--quiet tool--push", 'data-launch="fix_push"', Sprites.svg("push", { scale: 2 }), "Fix and push", "Fix and push: Claude fixes, commits and pushes with a lease. Asks you to confirm.")
       + tool("tool--quiet", 'data-launch="summarize"', Sprites.svg("read", { scale: 2 }), "Summarize", `Read and summarize: Claude reads the threads and edits nothing. ${shift}`)
-      + `<span class="tool-sep" aria-hidden="true"></span>`
-      + mergeButton(pr)
-      + tool("tool--danger", "data-decline", Sprites.svg("decline", { scale: 2 }), "Decline", "Decline this pull request. Asks you to confirm.")
+      // A read-only code host (GitHub, GitLab for now) merges and declines on its own website.
+      + (state.host?.writes === false ? "" : `<span class="tool-sep" aria-hidden="true"></span>` + mergeButton(pr)
+        + tool("tool--danger", "data-decline", Sprites.svg("decline", { scale: 2 }), "Decline", "Decline this pull request. Asks you to confirm."))
     : tool("tool--agent", 'data-launch="review"', buddy, "Review", `Review with the rubric: Claude reviews it in the Terminal panel. ${shift}`)
       + tool("tool--quiet", 'data-launch="summarize"', Sprites.svg("read", { scale: 2 }), "Summarize", `Summarize the threads, edit nothing. ${shift}`)
       + reviewTools(pr);
@@ -1332,7 +1336,7 @@ function renderPr() {
     <div class="pr-view${state.prFolded ? " is-folded" : ""}">
       <header class="pr-head"${state.prFolded ? " inert" : ""}>
         <div class="pr-top"><span class="id">${esc(full.repo)} #${full.id}</span>${stateChip(full)}<span>${esc(full.author.name)}</span><time class="when">${esc(ago(full.updated_on))}</time>
-          <span class="spacer"></span><button class="link" type="button" data-external="${esc(full.url)}">Bitbucket</button><button class="link copy-link" type="button" data-copy-link="${esc(full.url)}" title="Copy the link to this pull request">Copy link</button>${ticket}
+          <span class="spacer"></span><button class="link" type="button" data-external="${esc(full.url)}">${esc(state.host?.label || "Bitbucket")}</button><button class="link copy-link" type="button" data-copy-link="${esc(full.url)}" title="Copy the link to this pull request">Copy link</button>${ticket}
           <button class="link" type="button" data-action="reload-pr">Reload</button><button class="btn btn--quiet" type="button" data-action="close-pr" data-tip="Back to the list">Back to the queue</button></div>
         <h2>${esc(full.title)}</h2>
         <div class="branch">${esc(full.source)} into ${esc(full.dest)}</div>
@@ -1935,7 +1939,7 @@ function renderBar() {
   MenuBar.paintScope();
   const { used, limit } = state.budget;
   StatusBar.paint();
-  $("#refresh").dataset.tip = `Refresh from Bitbucket (r). ${used} of ${limit} API calls used this hour.`;
+  $("#refresh").dataset.tip = `Refresh from ${state.host?.label || "Bitbucket"} (r). ${used} of ${limit} API calls used this hour.`;
 }
 
 // Whose pull requests and which project: the scope chip, the Team menu and Jump all set them here.
@@ -1981,6 +1985,7 @@ function applyBoot(b) {
   state.root = b.root || "";
   state.platform = b.platform || "";
   state.features = b.features || []; // an older server has none: the page skips what it lacks
+  state.host = b.host || null; // where the pull requests come from; an older server reads Bitbucket
   state.setupNeeded = !!b.setup_needed;
   if (b.restore !== undefined && state.restore === undefined) state.restore = b.restore;
   if (b.stale && !state.staleSaid) {

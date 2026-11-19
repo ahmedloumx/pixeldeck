@@ -144,7 +144,7 @@ def ensure_worktree(root, repo_dir, slug, pr):
     existing = _worktree_for(repo_dir, branch)
     if existing:
         return existing, "reused"
-    target = Path(root) / "worktrees" / "pr" / f"{slug}-{pr['id']}"
+    target = Path(root) / "worktrees" / "pr" / f"{slug.replace('/', '-')}-{pr['id']}"  # owner/name on GitHub
     if target.exists():
         raise RuntimeError(f"{target} exists but is not on {branch}; clean it up first")
     target.parent.mkdir(parents=True, exist_ok=True)

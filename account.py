@@ -1,9 +1,11 @@
-"""The setup screen: the Bitbucket account and the clones folder, saved without editing a file.
+"""The setup screen: the code host (Bitbucket, GitHub or GitLab), its account and the clones
+folder, saved without editing a file.
 
-status() says what is set and what is missing. check() tries an email and token on each
-Bitbucket endpoint PixelDeck reads, before anything is saved, and names the scope a refusal
-asks for. save() writes the settings file and puts the token in the credential store when the
-system has one; import_env() does the same from an existing .env.
+status() says what is set and what is missing. check() tries a token on each endpoint
+PixelDeck reads, before anything is saved, and names the permission a refusal asks for.
+save() writes the settings file and puts the token in the credential store when the system has
+one; import_env() does the same from an existing .env. Each host keeps its own settings, so
+switching to another and back loses nothing.
 """
 
 import os
@@ -12,7 +14,10 @@ from pathlib import Path
 
 import config
 import credentials
+import github
+import gitlab
 from bitbucket import BitbucketError, Client
+from codehost import check_base
 
 FEATURES = ["setup"]
 TOKEN = "BITBUCKET_TOKEN"
@@ -35,20 +40,44 @@ def _source(key):
     return None
 
 
+HOST_KEYS = {
+    "bitbucket": ("BITBUCKET_EMAIL", TOKEN, "BITBUCKET_WORKSPACE"),
+    "github": (github.TOKEN, "GITHUB_URL", "GITHUB_ORG"),
+    "gitlab": (gitlab.TOKEN, "GITLAB_URL", "GITLAB_GROUP"),
+}
+
+
 def status():
     token = _source(TOKEN)
+    host = config.code_host()
     fields = {"email": config.get("BITBUCKET_EMAIL"), "workspace": config.workspace(),
               "root": config.get("PIXELDECK_WORKSPACE_ROOT")}
+    hosts = {
+        "github": {"token": _source(github.TOKEN), "url": config.get("GITHUB_URL"), "url_default": github.API,
+                   "org": github.configured_org()},
+        "gitlab": {"token": _source(gitlab.TOKEN), "url": config.get("GITLAB_URL"), "url_default": gitlab.WEB,
+                   "group": gitlab.configured_group()},
+    }
+    needed = not (token and fields["workspace"]) if host == "bitbucket" else not hosts[host]["token"]
     return {
-        "needed": not (token and fields["workspace"]),
+        "needed": needed,
+        "host": host,
         **fields,
+        **hosts,
         "root_default": str(config.workspace_root()),
         "token": token,
         "store": credentials.store().name,
         "env_file": str(config.env_path()),
-        "from_environment": [k for k in ("BITBUCKET_EMAIL", TOKEN, "BITBUCKET_WORKSPACE", "PIXELDECK_WORKSPACE_ROOT")
+        "from_environment": [k for k in (*HOST_KEYS[host], "PIXELDECK_CODE_HOST", "PIXELDECK_WORKSPACE_ROOT")
                              if _source(k) == "environment"],
     }
+
+
+def _host_of(body):
+    host = str(body.get("host") or "").strip().lower()
+    if host and host not in config.CODE_HOSTS:
+        raise ValueError("The code host is bitbucket, github or gitlab.")
+    return host
 
 
 def _scope_hint(error):
@@ -65,6 +94,11 @@ def _scope_hint(error):
 
 def check(body, client_factory=Client):
     """Each endpoint PixelDeck reads, tried with the typed (or saved) email and token."""
+    host = _host_of(body) or config.code_host()
+    if host == "github":
+        return github.check(body)
+    if host == "gitlab":
+        return gitlab.check(body)
     email = str(body.get("email") or config.get("BITBUCKET_EMAIL")).strip()
     token = str(body.get("token") or config.get(TOKEN)).strip()
     workspace = str(body.get("workspace") or config.workspace()).strip()
@@ -113,7 +147,42 @@ def _put_secrets(values):
     return out
 
 
+def _save_other(host, body):
+    """GitHub or GitLab: the token, the address and the organization or group, and the clones
+    folder. The Bitbucket settings stay as they are, for a switch back."""
+    module = github if host == "github" else gitlab
+    token = str(body.get("token") or "").strip()
+    url = str(body.get("url") or "").strip()
+    scope_key, scope = ("GITHUB_ORG", "org") if host == "github" else ("GITLAB_GROUP", "group")
+    owner = str(body.get(scope) or "").strip().strip("/")
+    root = str(body.get("root") or "").strip()
+    pattern = github.ORG if host == "github" else gitlab.GROUP
+    if url:
+        url = check_base(url, "GitHub" if host == "github" else "GitLab")
+        if url == (github.API if host == "github" else gitlab.WEB):
+            url = ""  # the default is not written down, so it can move with PixelDeck
+    if owner and not pattern.fullmatch(owner):
+        raise ValueError("The organization is the name in github.com/<organization>." if host == "github"
+                         else "The group is the path in gitlab.com/<group>.")
+    if any(c.isspace() for c in token):
+        raise ValueError("A token has no spaces; paste it again.")
+    if root and not Path(root).expanduser().is_dir():
+        raise ValueError(f"No such folder: {root}")
+    if not token:
+        token = config.file_value(module.TOKEN) if credentials.store().name else ""
+    if not token and not config.get(module.TOKEN):
+        raise ValueError("Paste a token.")
+    values = {"PIXELDECK_CODE_HOST": host, f"{host.upper()}_URL": url, scope_key: owner, "PIXELDECK_WORKSPACE_ROOT": root}
+    if token:
+        values[module.TOKEN] = token
+    config.save(_put_secrets(values))
+    return status()
+
+
 def save(body):
+    host = _host_of(body)
+    if host in ("github", "gitlab"):
+        return _save_other(host, body)
     email = str(body.get("email") or "").strip()
     token = str(body.get("token") or "").strip()
     workspace = str(body.get("workspace") or "").strip()
@@ -132,6 +201,8 @@ def save(body):
     if not token and not config.get(TOKEN):
         raise ValueError("Paste an API token.")
     values = {"BITBUCKET_EMAIL": email, "BITBUCKET_WORKSPACE": workspace, "PIXELDECK_WORKSPACE_ROOT": root}
+    if host:  # an older page names no host: the choice stays as it was
+        values["PIXELDECK_CODE_HOST"] = ""  # Bitbucket is the default, so the key goes
     if token:
         values[TOKEN] = token
     config.save(_put_secrets(values))
@@ -170,4 +241,6 @@ def route(handler, engine, method, name, query, body):
     except credentials.StoreError as exc:
         raise ValueError(str(exc)) from None
     engine.root = Path(config.workspace_root())  # the next scan of your clones looks there
+    if hasattr(engine, "use_host"):
+        engine.use_host()  # a new code host: its own cache and team, read from now on
     return answer

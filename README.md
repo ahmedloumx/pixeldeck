@@ -5,7 +5,7 @@
 <h1 align="center">PixelDeck</h1>
 
 <p align="center">
-  A retro desk for your Bitbucket Cloud pull requests, with Claude Code running next to the diff.
+  A retro desk for your pull requests on Bitbucket Cloud, GitHub or GitLab, with Claude Code running next to the diff.
 </p>
 
 PixelDeck is a small local app. It shows the pull requests that need you, the diffs and review
@@ -182,7 +182,8 @@ straight to main, master or develop.
 | Terminal panel | built in | built in | `py -m pip install pywinpty` |
 
 The server uses the Python standard library only. The one extra package is `pywinpty`, on
-Windows, for the terminal panel. You also need a Bitbucket Cloud account and an API token.
+Windows, for the terminal panel. You also need an API token for Bitbucket Cloud, or a personal
+access token for GitHub or GitLab.
 
 **Platform status.** PixelDeck is developed and tested on Linux (Fedora, GNOME on Wayland).
 It also runs on Windows 11, from a git clone and as the packaged app below. The macOS code
@@ -267,6 +268,37 @@ works, yellow when it needs you, grey when it is not connected. A click opens it
 3. In **Settings, Setup**, paste it with your Atlassian email and your workspace (the part after
    `bitbucket.org/`), press **Check**, then **Save**.
 
+### Set up GitHub
+
+PixelDeck reads one code host at a time: Bitbucket unless you pick GitHub (or GitLab) in
+**Settings, Setup**. Each keeps its own settings and team, so switching back loses nothing.
+
+1. Open [github.com, Settings, Fine-grained tokens](https://github.com/settings/personal-access-tokens/new)
+   and generate a new token.
+2. Pick your organization as the **Resource owner** and the repositories, then under
+   **Repository permissions** give **Pull requests**, **Contents** and **Metadata** read access.
+   A classic token with `repo` (and `read:org`, for the team list) works too.
+3. In **Settings, Setup**, pick **GitHub**, paste the token and add your organization (optional:
+   it keeps the lists to it and offers its members for your team). On GitHub Enterprise, set
+   **API address** to `https://<your server>/api/v3`. Press **Check**, then **Save**.
+
+GitHub is read only for now: your pull requests, the ones that ask for your review (from anyone),
+your team's, the diff, the threads (resolved or not), commits and the Claude buttons. Merging,
+approving and declining stay on GitHub, so their buttons are not shown. PixelDeck reads with
+conditional requests: an unchanged answer costs nothing against GitHub's hourly limit, and the
+status bar shows GitHub's own count.
+
+### Set up GitLab
+
+1. Open [gitlab.com, Preferences, Access tokens](https://gitlab.com/-/user_settings/personal_access_tokens)
+   (the same page on your own server) and add a new token.
+2. Tick the scope `read_api` and give it an expiry date.
+3. In **Settings, Setup**, pick **GitLab**, paste the token, add your group (optional) and, off
+   gitlab.com, your server's address (`https://gitlab.example.com`). Press **Check**, then **Save**.
+
+GitLab is read only for now too: merge requests, approvals, discussions with their resolution,
+diffs and commits.
+
 ### Set up git
 
 1. Install git from [git-scm.com/downloads](https://git-scm.com/downloads).
@@ -303,13 +335,20 @@ Everything is in one settings file; [.env.example](.env.example) lists every key
 A git clone uses the `.env` next to the code. The packaged app, or a clone without one, uses
 `.env` in the config folder: `%APPDATA%\PixelDeck`, `~/Library/Application Support/PixelDeck`
 or `~/.config/pixeldeck`. `PIXELDECK_ENV` names another file. A value in the real environment
-wins over the file, the file wins over Windows Credential Manager (for `BITBUCKET_TOKEN` and
-`JIRA_TOKEN` only), and the file is re-read when it changes.
+wins over the file, the file wins over Windows Credential Manager (for `BITBUCKET_TOKEN`,
+`GITHUB_TOKEN`, `GITLAB_TOKEN` and `JIRA_TOKEN` only), and the file is re-read when it changes.
 
 | Key | What it is |
 |---|---|
 | `BITBUCKET_EMAIL`, `BITBUCKET_TOKEN` | Your Atlassian account email and API token. Required. |
 | `BITBUCKET_WORKSPACE` | The workspace slug, as in `bitbucket.org/<workspace>/<repo>`. Required. |
+| `PIXELDECK_CODE_HOST` | Where your pull requests live: `bitbucket` (the default), `github` or `gitlab`. **Settings, Setup** sets it. |
+| `GITHUB_TOKEN` | A GitHub personal access token with read access to pull requests, contents and metadata. Required on GitHub. |
+| `GITHUB_URL` | The GitHub API address. Default `https://api.github.com`; Enterprise: `https://<your server>/api/v3`. |
+| `GITHUB_ORG` | Keep to one organization, and offer its members for your team. Empty: every repository the token sees. |
+| `GITLAB_TOKEN` | A GitLab personal access token with the `read_api` scope. Required on GitLab. |
+| `GITLAB_URL` | Your GitLab's address. Default `https://gitlab.com`. |
+| `GITLAB_GROUP` | Keep to one group and its subgroups, and offer its members for your team. |
 | `BITBUCKET_PROJECT` | Start scoped to one project key. Empty: every project. |
 | `JIRA_SITE`, `TICKET_PREFIXES` | Turn ticket keys such as `ABC-123` in branches and titles into Jira links. |
 | `SPOTIFY_CLIENT_ID` | The Client ID of your own Spotify app, for the music player (see below). |
@@ -397,7 +436,11 @@ folder. Files you leave out come from `briefs/`. Placeholders such as `{source}`
 - The settings report says whether a token is set and where the settings file is, never the
   token. The Jira site comes from `.env` only, never from the page, and a ticket key must look
   like one before it reaches a URL.
-- The routes the page polls (events, status) answer from memory and never call Bitbucket.
+- The routes the page polls (events, status) answer from memory and never call the code host.
+- A GitHub or GitLab token goes to the address it was saved for and nowhere else: a redirect or
+  a next page on another server is refused, never followed with the token. The address must be
+  https (plain http only on this machine, for a local test server). On those hosts the write
+  routes are refused, so a stale page cannot send them a Bitbucket action.
 - The Repos panel checks every repository, commit and path before it reaches a URL; file
   contents are shown as text, never as markup. Its one write commits one edited file: a second
   click, never straight to main, master, develop or the repository's main branch, and always
@@ -442,8 +485,9 @@ releases and updates.
 
 Their license texts are in [licenses/](licenses/).
 
-PixelDeck is an independent project. It is not affiliated with or endorsed by Atlassian or
-Anthropic. Bitbucket and Jira are trademarks of Atlassian; Claude and Claude Code are
+PixelDeck is an independent project. It is not affiliated with or endorsed by Atlassian,
+GitHub, GitLab or Anthropic. Bitbucket and Jira are trademarks of Atlassian; GitHub is a
+trademark of GitHub, Inc.; GitLab is a trademark of GitLab Inc.; Claude and Claude Code are
 trademarks of Anthropic.
 
 ## Contributing

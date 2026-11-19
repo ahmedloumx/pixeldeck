@@ -24,7 +24,7 @@ FROZEN = bool(getattr(sys, "frozen", False))
 # Resolved: reached by a short name (C:\Users\JOHNDO~1), it would not match the long paths
 # that resolve() gives the files under it.
 APP_DIR = Path(sys._MEIPASS).resolve() if FROZEN else Path(__file__).resolve().parent
-SECRET_KEYS = ("BITBUCKET_TOKEN", "JIRA_TOKEN")
+SECRET_KEYS = ("BITBUCKET_TOKEN", "JIRA_TOKEN", "GITHUB_TOKEN", "GITLAB_TOKEN")
 APP_NAME = "PixelDeck"
 SLUG = "pixeldeck"
 # The Linux window's application id. GNOME ties a window to the launcher named <APP_ID>.desktop,
@@ -205,6 +205,16 @@ def port():
 def workspace():
     """The Bitbucket workspace slug, as in bitbucket.org/<workspace>/<repo>."""
     return get("BITBUCKET_WORKSPACE")
+
+
+CODE_HOSTS = ("bitbucket", "github", "gitlab")
+
+
+def code_host():
+    """Where your pull requests live: bitbucket (the default, so older settings keep working),
+    github or gitlab. One at a time; each keeps its own settings when you switch."""
+    value = get("PIXELDECK_CODE_HOST").strip().lower()
+    return value if value in CODE_HOSTS else "bitbucket"
 
 
 def workspace_root():
