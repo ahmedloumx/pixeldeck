@@ -204,7 +204,7 @@ const MusicYouTube = (() => {
   // Before the page goes, keep where the video was, so Play starts there next time.
   addEventListener("pagehide", () => {
     const v = tv()?.video();
-    if (v && kept.current?.id === v.id && v.time > 0) { kept.current.time = Math.floor(v.time); save(); }
+    if (v && kept.current?.id === v.id && v.time > 0) { kept.current.time = tv().ended() ? 0 : Math.floor(v.time); save(); }
   });
 
   async function find(form) {

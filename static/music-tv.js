@@ -19,6 +19,7 @@ const MusicTV = (() => {
     2: "That is not a video id YouTube knows.", 5: "This video cannot play in this player.",
     100: "This video was removed or is private.", 101: "Its owner does not let it play outside YouTube.",
     150: "Its owner does not let it play outside YouTube.", 153: "YouTube refused to play it here.",
+    [-1]: "YouTube is not answering. Check the connection, or watch it on YouTube.",
   };
   let el = null, r = {}, frame = null, slot = null;
   let st = (() => { try { return { floating: false, x: null, y: null, ...(JSON.parse(localStorage.getItem(KEY)) || {}) }; } catch { return { floating: false, x: null, y: null }; } })();
@@ -113,6 +114,8 @@ const MusicTV = (() => {
     f.setAttribute("sandbox", "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-presentation");
     // YouTube's player needs to know which page embeds it; the page itself sends no referrer.
     f.referrerPolicy = "strict-origin-when-cross-origin";
+    // a video that played to its end starts over, or it would end again at once
+    if (info.duration > 0 && info.time >= info.duration - 1) info.time = 0;
     f.src = src(video.id, info.time, autoplay);
     f.addEventListener("load", listen);
     frame = f;
@@ -132,7 +135,11 @@ const MusicTV = (() => {
     clearInterval(listening);
     let tries = 0;
     const hello = () => {
-      if (heard || !frame || ++tries > LISTEN_TRIES) { clearInterval(listening); return; }
+      if (heard || !frame || ++tries > LISTEN_TRIES) {
+        clearInterval(listening);
+        if (frame && !heard) { info = { ...info, state: -1, error: -1 }; paint(); }
+        return;
+      }
       frame.contentWindow?.postMessage(JSON.stringify({ event: "listening", id: "pixeldeck", channel: "widget" }), ORIGIN);
     };
     hello();
@@ -148,7 +155,8 @@ const MusicTV = (() => {
     if (!data || typeof data !== "object") return;
     heard = true;
     const what = data.event, said = data.info;
-    if (what === "infoDelivery" && said && typeof said === "object") {
+    // initialDelivery is the player's first word, with the title already in it
+    if ((what === "infoDelivery" || what === "initialDelivery") && said && typeof said === "object") {
       if (Number.isInteger(said.playerState)) info.state = said.playerState;
       if (Number.isFinite(said.currentTime)) info.time = said.currentTime;
       if (Number.isFinite(said.duration)) info.duration = said.duration;
@@ -365,7 +373,7 @@ const MusicTV = (() => {
   return {
     mount, play, cue, toggle, stop, float, dock,
     isFloating: () => st.floating,
-    playing, loaded: () => !!frame,
+    playing, loaded: () => !!frame, ended: () => !!frame && info.state === 0,
     video: () => (video ? { ...video, time: info.time } : null),
     onChange: (fn) => listeners.add(fn),
   };
