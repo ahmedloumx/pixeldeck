@@ -37,7 +37,7 @@ const MusicYouTube = (() => {
   const source = () => (typeof Prefs !== "undefined" && Prefs.get("musicSource") === "youtube" ? "youtube" : "spotify");
   const spotifyOn = () => typeof Music !== "undefined" && ["live", "demo"].includes(Music.core.mode);
   /** YouTube is in use: a key is saved or a video is loaded. */
-  const live = () => !!kept.current || !!status?.key_set;
+  const live = () => !!kept.current || !!status?.key_set || !!status?.signed_in;
   function setSource(next) {
     if (typeof Prefs !== "undefined" && next !== source()) Prefs.set({ musicSource: next });
   }
@@ -109,8 +109,14 @@ const MusicYouTube = (() => {
           <input class="yt-input" name="q" data-ref="input" spellcheck="false" aria-label="Search YouTube or paste a link">
           <button class="btn btn--primary" type="submit" data-ref="go">Search</button></form>
         <p class="yt-hint" data-ref="hint"></p>
+        <nav class="yt-lib" data-ref="lib" aria-label="Your YouTube" hidden>
+          <button class="yt-mini" type="button" data-tube="mine" data-what="playlists" aria-pressed="false">${g("list", 1)}<span>PLAYLISTS</span></button>
+          <button class="yt-mini" type="button" data-tube="mine" data-what="liked" aria-pressed="false">${g("plus", 1)}<span>LIKED</span></button>
+          <button class="yt-mini" type="button" data-tube="mine" data-what="subscriptions" aria-pressed="false">${g("play", 1)}<span>CHANNELS</span></button></nav>
         <p class="yt-error" data-ref="error" role="alert" hidden></p>
         <p class="yt-hint yt-notice" data-ref="notice" role="status" hidden></p>
+        <header class="yt-sub yt-res-head" data-ref="resHead" hidden><h3 class="num8" data-ref="resTitle"></h3>
+          <button class="link" type="button" data-tube="back" data-ref="back" hidden>Back</button></header>
         <ol class="yt-rows yt-rows--results" data-ref="results" aria-live="polite"></ol>
       </section>
     </div>`;
@@ -130,22 +136,42 @@ const MusicYouTube = (() => {
         <button class="yt-mini" type="button" data-tube="float" data-list="${list}" data-i="${i}" aria-label="Play it floating">${g("pop", 1)}<span>FLOAT</span></button>`}</span></li>`;
   }
 
+  // A playlist of yours, or a channel you follow: open it to see its videos, or play it all.
+  function listRowHtml(l, i) {
+    const pic = l.thumb ? `<canvas width="${THUMB_W}" height="${THUMB_H}" data-thumb="${esc(l.thumb)}" data-id="" aria-hidden="true"></canvas>`
+      : `<span class="yt-list-pic" aria-hidden="true">${g("list", 3)}</span>`;
+    const about = l.channel ? "Channel: its newest videos" : l.count != null ? `${l.count} video${l.count === 1 ? "" : "s"}` : "Playlist";
+    return `<li class="yt-row">
+      <button class="yt-row-main" type="button" data-tube="open-list" data-i="${i}" aria-label="Open ${esc(l.title)}">
+        <span class="yt-thumb">${pic}</span><span class="yt-row-text"><b>${esc(l.title)}</b><small>${esc(about)}</small></span></button>
+      <span class="yt-row-acts"><button class="yt-mini" type="button" data-tube="play-list" data-i="${i}" aria-label="Play all of ${esc(l.title)}">${g("play", 1)}<span>PLAY ALL</span></button>
+        <button class="yt-mini" type="button" data-tube="open-list" data-i="${i}" aria-label="Open ${esc(l.title)}">${g("list", 1)}<span>OPEN</span></button></span></li>`;
+  }
+
+  const canSearch = () => !!(status?.key_set || status?.signed_in);
   function paintFind() {
     if (!els.input) return;
-    const key = !!status?.key_set;
-    els.input.placeholder = key ? "Search YouTube, or paste a link" : "Paste a YouTube link or video id";
-    els.go.textContent = key ? "Search" : "Play";
+    const can = canSearch();
+    els.input.placeholder = can ? "Search YouTube, or paste a link" : "Paste a YouTube link or video id";
+    els.go.textContent = can ? "Search" : "Play";
     els.go.disabled = busy;
-    els.hint.innerHTML = key
-      ? "Searches use your free API key: 10,000 units a day, about 100 searches. The same search again is free for a few minutes."
+    els.hint.innerHTML = can
+      ? "A search costs 100 of your project's 10,000 free units a day, about 100 searches. The same search again is free for a few minutes."
       : `A pasted link plays without a key. To search YouTube, add a free API key in
         <button class="link" type="button" data-tube="settings">Settings, Connected apps, YouTube</button>.`;
+    els.lib.hidden = !status?.signed_in;
+    for (const b of els.lib.querySelectorAll("[data-what]")) b.setAttribute("aria-pressed", String(results?.what === b.dataset.what && !results?.back));
     els.error.hidden = !error;
     els.error.textContent = error;
     els.notice.hidden = !notice;
     els.notice.textContent = notice;
+    els.resHead.hidden = !results?.title;
+    els.resTitle.textContent = results?.title || "";
+    els.back.hidden = !results?.back;
     const list = results?.items || [];
-    const html = results ? (list.length ? list.map((v, i) => rowHtml(v, "results", i)).join("") : '<li class="yt-empty">No videos found. Try other words.</li>') : "";
+    const empty = results?.lists ? "Nothing here yet." : "No videos found. Try other words.";
+    const html = results ? (list.length ? list.map((v, i) => (results.lists ? listRowHtml(v, i) : rowHtml(v, "results", i))).join("")
+      : `<li class="yt-empty">${empty}</li>`) : "";
     if (els.results._html !== html) { els.results.innerHTML = html; els.results._html = html; drawThumbs(els.results); }
   }
   function paintRecent() {
@@ -207,6 +233,7 @@ const MusicYouTube = (() => {
   }
   function play(v, floating) {
     if (!v || !ID.test(v.id) || !tv()) return;
+    kept.queue = kept.queue.filter((x) => x.id !== v.id);  // playing now, so not again later
     remember(v);
     setSource("youtube");
     // A video started from the panel plays in the panel unless the TV floats already.
@@ -291,6 +318,33 @@ const MusicYouTube = (() => {
     }
   }
 
+  /* ------------------------------------------------------------ your YouTube, signed in */
+
+  const MINE_TITLES = { playlists: "YOUR PLAYLISTS", liked: "LIKED VIDEOS", subscriptions: "CHANNELS YOU FOLLOW" };
+  // A list into the results, one at a time, with its error said where the search's would be.
+  async function load(task) {
+    if (busy) return;
+    busy = true; error = ""; notice = "";
+    paintFind();
+    try { results = await task(); } catch (err) {
+      if (err.message === "reloading") return;
+      error = err.message;
+      if (err.status === 403) refresh();  // the sign-in may have ended: the tabs go with it
+    } finally { busy = false; paintFind(); }
+  }
+  const showMine = (what) => load(async () => ({ ...(await api(`youtube-mine?what=${encodeURIComponent(what)}`)), title: MINE_TITLES[what], lists: what !== "liked" }));
+  function openListView(l) {
+    if (!l) return;
+    const back = results;
+    return load(async () => ({ ...(await api(`youtube-playlist?list=${encodeURIComponent(l.list)}`)), title: l.title, back }));
+  }
+  async function playAll(l) {
+    if (!l || busy) return;
+    busy = true; error = ""; notice = "";
+    paintFind();
+    try { await openList(l.list, null); } finally { busy = false; paintFind(); }
+  }
+
   function openPanel() {
     setSource("youtube");
     if (typeof Layout === "undefined") return;
@@ -357,14 +411,14 @@ const MusicYouTube = (() => {
     const t = e.target.closest?.("[data-tube]");
     if (!t || t.disabled) return;
     const what = t.dataset.tube;
-    if (what === "play" || what === "float") {
-      const list = t.dataset.list, i = Number(t.dataset.i), v = listOf(list)[i];
-      if (list === "queue") kept.queue = TubeQueue.remove(kept.queue, i);  // played now, so no longer next
-      return play(v, what === "float" ? true : undefined);
-    }
+    if (what === "play" || what === "float") return play(listOf(t.dataset.list)[Number(t.dataset.i)], what === "float" ? true : undefined);
     if (what === "queue") return enqueue([listOf(t.dataset.list)[Number(t.dataset.i)]]);
     if (what === "unqueue") { kept.queue = TubeQueue.remove(kept.queue, Number(t.dataset.i)); save(); return paintQueue(); }
     if (what === "auto") { kept.auto = !kept.auto; save(); return paintQueue(); }
+    if (what === "mine") return showMine(t.dataset.what);
+    if (what === "open-list") return openListView(results?.lists ? results.items[Number(t.dataset.i)] : null);
+    if (what === "play-list") return playAll(results?.lists ? results.items[Number(t.dataset.i)] : null);
+    if (what === "back") { results = results?.back || null; return paintFind(); }
     if (what === "clear-queue") { kept.queue = []; save(); return paintQueue(); }
     if (what === "source") return setSource(source() === "youtube" ? "spotify" : "youtube");
     if (what === "toggle") return tv()?.toggle();
@@ -388,6 +442,8 @@ const MusicYouTube = (() => {
   /** Ask the server whether a key is saved (never the key itself). */
   async function refresh() {
     try { status = await api("youtube-status"); } catch (err) { if (err.message === "reloading") return status; status = null; }
+    // signed out: your lists are no longer yours to show
+    if (!status?.signed_in && (results?.lists || results?.what || results?.back)) results = null;
     paintPanel();
     refreshMini();
     for (const fn of listeners) fn();

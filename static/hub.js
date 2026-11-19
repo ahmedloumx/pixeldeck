@@ -283,7 +283,34 @@ const Settings = (() => {
           <p class="set-error" data-youtube-error hidden></p>
           <p class="set-actions"><button class="btn btn--primary" type="submit">Save</button>${yt?.key_set ? ' <button class="btn btn--quiet" type="button" data-youtube-clear>Remove</button>' : ""}
             <button class="btn btn--quiet" type="button" data-tube="open">Open YouTube in Music</button></p></form>
-        <p class="set-hint">The key is free and only searches: it goes to Google, never to the page. The same search again within a few minutes costs nothing. Videos play in YouTube's own player, in the Music panel or a floating pixel TV.</p></section>`;
+        <p class="set-hint">The key is free and only searches: it goes to Google, never to the page. The same search again within a few minutes costs nothing. Videos play in YouTube's own player, in the Music panel or a floating pixel TV.</p>
+        ${youtubeSignInHtml(yt)}</section>`;
+  }
+  // Sign in with Google: your playlists, liked videos and subscriptions. The client is yours, made
+  // in the same Google Cloud project; its secret and the tokens stay on the server.
+  function youtubeSignInHtml(yt) {
+    const wrap = (inner) => `<div class="set-sub"><header><h4>Sign in with Google</h4></header>${inner}</div>`;
+    if (yt?.signed_in) {
+      return wrap(`<dl class="set-rows">${row("Signed in", yt.channel ? `as ${yt.channel}` : "yes")}</dl>
+        <p class="set-actions"><button class="btn btn--quiet" type="button" data-youtube-signout>Sign out</button>
+          <button class="btn btn--quiet" type="button" data-youtube-client-clear>Remove the OAuth client</button></p>
+        <p class="set-hint">Your playlists, liked videos and channels are in the Music panel's YouTube view. PixelDeck only reads them.</p>`);
+    }
+    if (yt?.client_set) {
+      return wrap(`<dl class="set-rows">${row("OAuth client", yt.client_ok ? `saved${yt.secret_set ? ", with its secret" : ""}` : "saved, but it does not look like a Desktop app client")}</dl>
+        <p class="set-actions"><button class="btn btn--primary" type="button" data-youtube-signin>Sign in with Google</button>
+          <button class="btn btn--quiet" type="button" data-youtube-client-clear>Remove</button></p>
+        <p class="set-error" data-youtube-signin-error hidden></p>
+        <p class="set-hint">Google opens in your browser. If it says the app is not verified, it is your own client: press Advanced, then Go to it.</p>`);
+    }
+    return wrap(`<form class="set-form" data-youtube-client-form autocomplete="off">
+        <label class="field-block"><span>OAuth client (Desktop app)</span><input type="password" name="client" data-keep="youtube-client" spellcheck="false" autocomplete="new-password"
+          placeholder="Paste the downloaded JSON file, or the client ID"></label>
+        <label class="field-block"><span>Client secret</span><input type="password" name="secret" data-keep="youtube-secret" spellcheck="false" autocomplete="new-password"
+          placeholder="GOCSPX-... (not needed with the JSON file)"></label>
+        <p class="set-error" data-youtube-client-error hidden></p>
+        <p class="set-actions"><button class="btn btn--primary" type="submit">Save</button></p></form>
+      <p class="set-hint">Optional: it adds your own playlists, liked videos and channels. Search works with the key alone.</p>`);
   }
 
   /* Connected apps: what PixelDeck connects to, grouped, each with an 8-bit icon and its state.
@@ -357,14 +384,15 @@ const Settings = (() => {
           "Paste the app's <b>Client ID</b> below and save it, then press <b>Connect</b> and sign in to Spotify."] });
     }
     if (typeof MusicYouTube !== "undefined" && (state.features || []).includes("youtube")) {
-      const yt = MusicYouTube.status(), ok = !!(yt?.key_set && yt.key_ok);
+      const yt = MusicYouTube.status(), ok = !!(yt?.key_set && yt.key_ok) || !!yt?.signed_in;
       apps.push({ id: "youtube", group: "media", label: "YouTube", anchor: "set-up-youtube", card: () => youtubeHtml(yt),
         tone: !yt ? "off" : ok ? "ok" : yt.key_set ? "bad" : "off",
-        pill: !yt ? "Checking" : ok ? "Search on" : yt.key_set ? "Check the key" : "Links only",
-        line: ok ? "Search and play in a floating pixel TV" : "Pasted links play; a free key adds search",
+        pill: !yt ? "Checking" : yt.signed_in ? "Signed in" : ok ? "Search on" : yt.key_set ? "Check the key" : "Links only",
+        line: yt?.signed_in ? "Your playlists and likes, in a floating pixel TV" : ok ? "Search and play in a floating pixel TV" : "Pasted links play; a free key adds search",
         steps: [`Open ${ext("https://console.cloud.google.com/apis/library/youtube.googleapis.com", "YouTube Data API v3")} in the Google Cloud console, pick or create a project (free) and press <b>Enable</b>.`,
-          "Open <b>Credentials</b>, press <b>Create credentials</b>, then <b>API key</b> (not <em>OAuth client ID</em>: PixelDeck needs no client file), and restrict the key to <b>YouTube Data API v3</b>.",
-          "Paste the key below and save it. Playing a pasted link needs no key."] });
+          "Open <b>Credentials</b>, press <b>Create credentials</b>, then <b>API key</b>, and restrict the key to <b>YouTube Data API v3</b>. Paste it below and save it. Playing a pasted link needs no key.",
+          "Optional, to sign in for your own playlists and likes: on the <b>OAuth consent screen</b> pick <b>External</b>, add your Google account as a test user, then press <b>Publish app</b> (In production). In Testing, Google ends a sign-in after 7 days.",
+          "Then <b>Create credentials</b>, <b>OAuth client ID</b>, type <b>Desktop app</b>. Download its JSON file, paste it under <b>Sign in with Google</b> below, save, and press <b>Sign in with Google</b>."] });
     } else {
       apps.push({ id: "youtube", group: "media", label: "YouTube", soon: true, line: "Videos in a floating pixel TV" });
     }
@@ -782,6 +810,59 @@ const Settings = (() => {
       paint();
       toast("Saved.", "Search YouTube from the Music panel now.");
     } catch (ex) { err.textContent = ex.message; err.hidden = false; }
+  });
+  document.addEventListener("submit", async (e) => {
+    const form = e.target.closest?.("[data-youtube-client-form]");
+    if (!form) return;
+    e.preventDefault();
+    const b = form.querySelector("[type=submit]"), err = form.querySelector("[data-youtube-client-error]");
+    err.hidden = true;
+    try {
+      await busy(b, () => api("youtube-client", { method: "POST", body: { client: form.client.value, secret: form.secret.value } }));
+      form.client.value = ""; form.secret.value = "";
+      if (typeof MusicYouTube !== "undefined") await MusicYouTube.refresh();
+      paint();
+      toast("Saved.", "Now press Sign in with Google.");
+    } catch (ex) { err.textContent = ex.message; err.hidden = false; }
+  });
+  // After Google's page in the browser, PixelDeck learns of the sign-in when its window is back in front.
+  let ytSigningIn = 0;
+  const ytCheck = async () => {
+    if (!ytSigningIn || Date.now() > ytSigningIn || typeof MusicYouTube === "undefined") return;
+    const st = await MusicYouTube.refresh();
+    if (!st?.signed_in) return;
+    ytSigningIn = 0;
+    if (dialog()?.open) paint();
+    toast("YouTube is signed in.", st.channel ? `As ${st.channel}. Your playlists are in the Music panel.` : "Your playlists are in the Music panel.");
+  };
+  addEventListener("focus", ytCheck);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) ytCheck(); });
+  document.addEventListener("click", async (e) => {
+    const t = e.target.closest?.("#settings-dialog [data-youtube-signin], #settings-dialog [data-youtube-signout], #settings-dialog [data-youtube-client-clear]");
+    if (!t) return;
+    try {
+      if (t.matches("[data-youtube-signin]")) {
+        const out = await busy(t, () => api("youtube-signin", { method: "POST", body: {} }));
+        ytSigningIn = Date.now() + 10 * 60 * 1000;  // a sign-in link is good for ten minutes
+        if (!out.opened) window.open(out.url, "_blank", "noopener,noreferrer");
+        toast("Google's sign-in page is open in your browser.", "Sign in there and come back: PixelDeck notices by itself.");
+        return;
+      }
+      if (t.matches("[data-youtube-signout]")) {
+        if (!armed(t, "Sure? Sign out")) return;
+        await busy(t, () => api("youtube-signout", { method: "POST", body: {} }));
+        toast("Signed out of YouTube.", "Search and pasted links still work.");
+      } else {
+        if (!armed(t, "Sure? Remove it")) return;
+        await busy(t, () => api("youtube-client", { method: "POST", body: { clear: true } }));
+        toast("The OAuth client is removed.", "You are signed out of YouTube.");
+      }
+      if (typeof MusicYouTube !== "undefined") await MusicYouTube.refresh();
+      paint();
+    } catch (err) {
+      const box = t.closest(".set-card")?.querySelector("[data-youtube-signin-error]");
+      if (box) { box.textContent = err.message; box.hidden = false; } else toast("Not done.", err.message, true);
+    }
   });
   document.addEventListener("click", async (e) => {
     const b = e.target.closest?.("#settings-dialog [data-youtube-clear]");

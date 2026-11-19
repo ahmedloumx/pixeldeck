@@ -27,12 +27,17 @@ from html.parser import HTMLParser
 import config
 import credentials
 import version
+import youtube_signin
 
-FEATURES = ["youtube", "youtube-key", "youtube-playlist"]
+FEATURES = ["youtube", "youtube-key", "youtube-playlist", "youtube-mine", *youtube_signin.FEATURES]
 
 SETTING = "YOUTUBE_API_KEY"
 SEARCH_URL = "https://www.googleapis.com/youtube/v3/search"
 PLAYLIST_URL = "https://www.googleapis.com/youtube/v3/playlistItems"
+MY_PLAYLISTS_URL = "https://www.googleapis.com/youtube/v3/playlists"
+VIDEOS_URL = "https://www.googleapis.com/youtube/v3/videos"
+SUBSCRIPTIONS_URL = "https://www.googleapis.com/youtube/v3/subscriptions"
+CHANNEL_ID_RE = re.compile(r"UC[0-9A-Za-z_-]{22}")
 PLAYLIST_PAGE = 50          # the most one call may ask for
 PLAYLIST_MAX = 200          # four calls at most, so a huge playlist costs 4 units, not 100
 TIMEOUT = 10
@@ -70,6 +75,8 @@ RESTRICTED = ("This key may not call YouTube Data API v3 from here. In the Googl
               "use YouTube Data API v3, with no website or IP address restriction.")
 NO_KEY_LIST = "Queueing a playlist needs a free API key: Settings, Connected apps, YouTube. A link to one video plays without one."
 PRIVATE_LIST = "That playlist is private, or it does not exist."
+NO_CHANNEL = "This Google account has no YouTube channel yet, so it has no playlists or likes to show."
+SCOPE_MISSING = "PixelDeck's sign-in may not read your YouTube account: sign in again and allow it."
 
 
 class YouTubeError(Exception):
@@ -101,10 +108,11 @@ def where():
 
 
 def status():
-    """What the page may know: whether a key is saved and where, never the key."""
+    """What the page may know: whether a key is saved and where, and whether you are signed in;
+    never the key, the client or a token."""
     key = api_key()
     return {"key_set": bool(key), "key_ok": bool(KEY_RE.fullmatch(key)), "setting": SETTING, "where": where(),
-            "store": credentials.store().name, "env_file": str(config.env_path())}
+            "store": credentials.store().name, "env_file": str(config.env_path()), **youtube_signin.ACCOUNT.status()}
 
 
 def save_key(body):
@@ -122,8 +130,8 @@ def save_key(body):
         # An OAuth client (its ID, its secret, or its downloaded JSON) is the other choice under
         # Create credentials, and the easy one to take by mistake: say so, never echo it.
         if OAUTH_RE.search(key):
-            raise ValueError("That is an OAuth client, not an API key: PixelDeck does not need one. In the Google Cloud "
-                             "console, Credentials, press Create credentials, then API key, and paste that.")
+            raise ValueError("That is an OAuth client, not an API key: it goes under Sign in with Google, below. For this "
+                             "field, in the Google Cloud console, Credentials, press Create credentials, then API key.")
         raise ValueError("A YouTube API key starts with AIza (A, capital I, z, a) and has 39 letters, digits, - and _. "
                          "Copy it again from the Google Cloud console, Credentials.")
     if store.name:
@@ -287,6 +295,10 @@ def refusal(status, raw, key=""):
         return YouTubeError(status, NOT_ENABLED)
     if reasons & {"playlistNotFound", "playlistItemsNotAccessible", "playlistForbidden"}:
         return YouTubeError(status, PRIVATE_LIST)
+    if reasons & {"youtubeSignupRequired", "channelNotFound"}:
+        return YouTubeError(status, NO_CHANNEL)
+    if reasons & {"insufficientPermissions", "ACCESS_TOKEN_SCOPE_INSUFFICIENT"}:
+        return YouTubeError(status, SCOPE_MISSING)
     if reasons & {"API_KEY_SERVICE_BLOCKED", "API_KEY_HTTP_REFERRER_BLOCKED", "API_KEY_IP_ADDRESS_BLOCKED",
                   "API_KEY_ANDROID_APP_BLOCKED", "API_KEY_IOS_APP_BLOCKED", "ipRefererBlocked"}:
         return YouTubeError(status, RESTRICTED)
@@ -304,9 +316,10 @@ class Client:
     """Search and thumbnails. The transport, the key and the clock can be swapped in tests, so
     nothing there talks to Google."""
 
-    def __init__(self, transport=None, key=None, clock=time.monotonic):
+    def __init__(self, transport=None, key=None, clock=time.monotonic, account=None):
         self.transport = transport or urllib_transport
         self._key = key
+        self._account = account
         self.clock = clock
         self.lock = threading.Lock()
         self.cache = OrderedDict()   # query -> (when, answer)
@@ -316,16 +329,46 @@ class Client:
     def key(self):
         return (self._key if self._key is not None else api_key()).strip()
 
+    @property
+    def account(self):
+        return self._account or youtube_signin.ACCOUNT
+
+    def can_ask(self):
+        """Whether the API can be asked at all, without asking anyone yet."""
+        return self.account.signed_in() or bool(self.key())
+
+    def auth(self):
+        """How to call the API: ("bearer", token) when you are signed in, else ("key", key), else
+        None. A sign-in Google ended falls back to the key when there is one."""
+        if self.account.signed_in():
+            try:
+                return "bearer", self.account.access()
+            except youtube_signin.NotSignedIn:
+                if not self.key():
+                    raise
+        key = self.key()
+        return ("key", key) if key else None
+
     def forget(self):
         with self.lock:
             self.cache.clear()
 
-    def _get(self, base, params, key):
-        """One Data API call with the key, answered as parsed JSON, or a YouTubeError."""
-        url = f"{base}?{urllib.parse.urlencode({**params, 'key': key})}"
-        status, _headers, raw = self.transport("GET", url, {"Accept": "application/json", "User-Agent": version.USER_AGENT}, None)
+    def _get(self, base, params, auth):
+        """One Data API call, answered as parsed JSON, or a YouTubeError. A token Google refuses
+        is renewed once and the call asked again."""
+        kind, secret = auth
+        for attempt in (1, 2):
+            headers = {"Accept": "application/json", "User-Agent": version.USER_AGENT}
+            if kind == "bearer":
+                headers["Authorization"] = f"Bearer {secret}"
+            query = {**params, "key": secret} if kind == "key" else params
+            status, _headers, raw = self.transport("GET", f"{base}?{urllib.parse.urlencode(query)}", headers, None)
+            if status == 401 and kind == "bearer" and attempt == 1:
+                secret = self.account.access(stale=secret)
+                continue
+            break
         if status != 200:
-            raise refusal(status, raw, key)
+            raise refusal(status, raw, secret)
         if len(raw or b"") > READ_MAX:
             raise YouTubeError(502, "YouTube sent more than an answer should be.")
         try:
@@ -358,16 +401,16 @@ class Client:
             raise ValueError("Type something to search for, or paste a YouTube link.")
         if len(query) > QUERY_MAX:
             raise ValueError(f"A search is at most {QUERY_MAX} characters.")
-        key = self.key()
-        # With a key, a lone word of 11 letters ("programming") is a search; an id has a digit, - or _
-        # nine times in ten, and YouTube finds the rest by their id anyway.
-        ident = video_id(query, bare=not key or any(c.isdigit() or c in "-_" for c in query))
+        can = self.can_ask()
+        # Able to search, a lone word of 11 letters ("programming") is a search; an id has a digit,
+        # - or _ nine times in ten, and YouTube finds the rest by their id anyway.
+        ident = video_id(query, bare=not can or any(c.isdigit() or c in "-_" for c in query))
         listed = playlist_id(query)
         if ident or listed:
             out = {"query": query, "link": True, "cached": False,
                    "items": [{"id": ident, "title": None, "channel": None, "thumb": thumb_for(ident), "live": False}] if ident else []}
             return {**out, "list": listed} if listed else out
-        if not key:
+        if not can:
             raise NoKey(NO_KEY)
         folded = query.casefold()
         hit = self._cached(folded)
@@ -375,7 +418,7 @@ class Client:
             return {**hit, "query": query, "cached": True}
         now = self.clock()
         payload = self._get(SEARCH_URL, {"part": "snippet", "type": "video", "maxResults": RESULTS, "safeSearch": "moderate",
-                                         "videoEmbeddable": "true", "q": query}, key)
+                                         "videoEmbeddable": "true", "q": query}, self.auth())
         answer = {"query": query, "link": False, "cached": False, "items": trim(payload)}
         self._keep(folded, answer, now)
         return answer
@@ -385,28 +428,56 @@ class Client:
         at most PLAYLIST_MAX; "more" says it has others past that."""
         if not isinstance(ident, str) or not PLAYLIST_ID_RE.fullmatch(ident):
             raise ValueError("That is not a YouTube playlist id.")
-        key = self.key()
-        if not key:
+        if not self.can_ask():
             raise NoKey(NO_KEY_LIST)
-        slot = f"LIST {ident}"  # searches are kept casefolded, so an upper-case prefix never meets one
+        # Upper case, as searches are kept casefolded; the account's mark, as a signed-in answer may
+        # hold its private videos.
+        slot = f"LIST {ident} {self.account.fingerprint()}"
         hit = self._cached(slot)
         if hit:
             return {**hit, "cached": True}
-        now, items, token = self.clock(), [], None
-        # pages, not videos, bound the cost: a list of private videos would otherwise page on
-        for _page in range(PLAYLIST_MAX // PLAYLIST_PAGE):
-            params = {"part": "snippet,status", "playlistId": ident, "maxResults": PLAYLIST_PAGE}
-            if token:
-                params["pageToken"] = token
-            payload = self._get(PLAYLIST_URL, params, key)
-            items += trim_playlist(payload)
-            token = payload.get("nextPageToken") if isinstance(payload, dict) else None
-            if not isinstance(token, str) or not token:
-                token = None
-                break
-        answer = {"list": ident, "items": items, "more": bool(token), "cached": False}
+        now = self.clock()
+        items, more = self._pages(PLAYLIST_URL, {"part": "snippet,status", "playlistId": ident}, trim_playlist)
+        answer = {"list": ident, "items": items, "more": more, "cached": False}
         self._keep(slot, answer, now)
         return answer
+
+    MINE = {
+        "playlists": (MY_PLAYLISTS_URL, {"part": "snippet,contentDetails", "mine": "true"}),
+        "liked": (VIDEOS_URL, {"part": "snippet", "myRating": "like"}),
+        "subscriptions": (SUBSCRIPTIONS_URL, {"part": "snippet", "mine": "true", "order": "alphabetical"}),
+    }
+
+    def mine(self, what):
+        """{"what", "items", "more", "cached"}: your playlists, liked videos or subscriptions, from
+        your sign-in. A playlist or a subscription answers a list id to open with playlist()."""
+        if what not in self.MINE:
+            raise ValueError("what must be playlists, liked or subscriptions")
+        if not self.account.signed_in():
+            raise youtube_signin.NotSignedIn(youtube_signin.NOT_SIGNED_IN)
+        slot = f"MINE {what} {self.account.fingerprint()}"
+        hit = self._cached(slot)
+        if hit:
+            return {**hit, "cached": True}
+        now = self.clock()
+        base, params = self.MINE[what]
+        trimmer = {"playlists": trim_my_playlists, "liked": trim_videos, "subscriptions": trim_subscriptions}[what]
+        items, more = self._pages(base, params, trimmer)
+        answer = {"what": what, "items": items, "more": more, "cached": False}
+        self._keep(slot, answer, now)
+        return answer
+
+    def _pages(self, base, params, trimmer):
+        """(items, more): up to PLAYLIST_MAX // PLAYLIST_PAGE pages of 50. Pages, not items, bound
+        the cost: a list of private videos would otherwise page on."""
+        items, token, auth = [], None, self.auth()
+        for _page in range(PLAYLIST_MAX // PLAYLIST_PAGE):
+            payload = self._get(base, {**params, "maxResults": PLAYLIST_PAGE, **({"pageToken": token} if token else {})}, auth)
+            items += trimmer(payload)
+            token = payload.get("nextPageToken") if isinstance(payload, dict) else None
+            if not isinstance(token, str) or not token:
+                return items, False
+        return items, True
 
     def thumb(self, url):
         url = thumb_url(url)
@@ -430,21 +501,65 @@ class Client:
         return raw, ctype
 
 
+def _items(payload):
+    found = payload.get("items") if isinstance(payload, dict) else None
+    return [(item, item["snippet"] if isinstance(item.get("snippet"), dict) else {}) for item in found or [] if isinstance(item, dict)]
+
+
+def _thumb(snip):
+    """The snippet's medium picture, else another size, when it is a video picture on i.ytimg.com."""
+    pics = snip.get("thumbnails") if isinstance(snip.get("thumbnails"), dict) else {}
+    return next((p.get("url") for p in (pics.get(size) for size in ("medium", "high", "default"))
+                 if isinstance(p, dict) and isinstance(p.get("url"), str) and THUMB_RE.fullmatch(p["url"])), None)
+
+
+def _video(ident, snip, channel_key="channelTitle"):
+    return {"id": ident, "title": _text(snip.get("title")) or "Untitled", "channel": _text(snip.get(channel_key)),
+            "thumb": _thumb(snip) or thumb_for(ident), "live": snip.get("liveBroadcastContent") == "live"}
+
+
 def trim(payload):
     """Search results as {id, title, channel, thumb, live}: only videos with a usable id."""
     out = []
-    for item in (payload.get("items") if isinstance(payload, dict) else None) or []:
-        if not isinstance(item, dict):
-            continue
+    for item, snip in _items(payload):
         ident = (item.get("id") or {}).get("videoId") if isinstance(item.get("id"), dict) else None
-        if not isinstance(ident, str) or not VIDEO_ID_RE.fullmatch(ident):
+        if isinstance(ident, str) and VIDEO_ID_RE.fullmatch(ident):
+            out.append(_video(ident, snip))
+    return out
+
+
+def trim_videos(payload):
+    """A videos.list answer (your liked videos) as search results: there the id is the item's own."""
+    return [_video(item["id"], snip) for item, snip in _items(payload)
+            if isinstance(item.get("id"), str) and VIDEO_ID_RE.fullmatch(item["id"])]
+
+
+def trim_my_playlists(payload):
+    """Your playlists as {list, title, count, thumb, channel: False}."""
+    out = []
+    for item, snip in _items(payload):
+        ident = item.get("id")
+        if not isinstance(ident, str) or not PLAYLIST_ID_RE.fullmatch(ident):
             continue
-        snip = item.get("snippet") if isinstance(item.get("snippet"), dict) else {}
-        pics = snip.get("thumbnails") if isinstance(snip.get("thumbnails"), dict) else {}
-        thumb = next((p.get("url") for p in (pics.get(size) for size in ("medium", "high", "default"))
-                      if isinstance(p, dict) and isinstance(p.get("url"), str) and THUMB_RE.fullmatch(p["url"])), None)
-        out.append({"id": ident, "title": _text(snip.get("title")) or "Untitled", "channel": _text(snip.get("channelTitle")),
-                    "thumb": thumb or thumb_for(ident), "live": snip.get("liveBroadcastContent") == "live"})
+        details = item.get("contentDetails") if isinstance(item.get("contentDetails"), dict) else {}
+        count = details.get("itemCount")
+        out.append({"list": ident, "title": _text(snip.get("title")) or "Untitled", "channel": False,
+                    "count": count if isinstance(count, int) and not isinstance(count, bool) and count >= 0 else None,
+                    "thumb": _thumb(snip)})
+    return out
+
+
+def trim_subscriptions(payload):
+    """Your subscriptions as lists to open: a channel's uploads are the playlist UU + the rest of
+    its id (UC...), so no call is spent to find it. Channel pictures live on a host the page may
+    not load from, so there is no thumb."""
+    out = []
+    for _item, snip in _items(payload):
+        res = snip.get("resourceId") if isinstance(snip.get("resourceId"), dict) else {}
+        cid = res.get("channelId")
+        if res.get("kind") != "youtube#channel" or not isinstance(cid, str) or not CHANNEL_ID_RE.fullmatch(cid):
+            continue
+        out.append({"list": "UU" + cid[2:], "title": _text(snip.get("title")) or "A channel", "channel": True, "count": None, "thumb": None})
     return out
 
 
@@ -452,21 +567,16 @@ def trim_playlist(payload):
     """A playlist page as {id, title, channel, thumb, live}: only videos that can play, so not
     the private or deleted ones a playlist keeps a place for."""
     out = []
-    for item in (payload.get("items") if isinstance(payload, dict) else None) or []:
-        snip = item.get("snippet") if isinstance(item, dict) and isinstance(item.get("snippet"), dict) else {}
-        status = item.get("status") if isinstance(item, dict) and isinstance(item.get("status"), dict) else {}
+    for item, snip in _items(payload):
+        status = item.get("status") if isinstance(item.get("status"), dict) else {}
         res = snip.get("resourceId") if isinstance(snip.get("resourceId"), dict) else {}
         ident = res.get("videoId")
         if res.get("kind") != "youtube#video" or not isinstance(ident, str) or not VIDEO_ID_RE.fullmatch(ident):
             continue
         if status.get("privacyStatus") not in ("public", "unlisted"):
             continue
-        pics = snip.get("thumbnails") if isinstance(snip.get("thumbnails"), dict) else {}
-        thumb = next((p.get("url") for p in (pics.get(size) for size in ("medium", "high", "default"))
-                      if isinstance(p, dict) and isinstance(p.get("url"), str) and THUMB_RE.fullmatch(p["url"])), None)
         # channelTitle is the playlist's owner; the video's own channel is videoOwnerChannelTitle
-        out.append({"id": ident, "title": _text(snip.get("title")) or "Untitled", "channel": _text(snip.get("videoOwnerChannelTitle")),
-                    "thumb": thumb or thumb_for(ident), "live": False})
+        out.append({**_video(ident, snip, "videoOwnerChannelTitle"), "live": False})
     return out
 
 
@@ -496,4 +606,9 @@ def route(handler, engine, method, name, query, body):
         return CLIENT.thumb(_arg(query, "url"))
     if method == "GET" and name == "youtube-playlist":
         return CLIENT.playlist(_arg(query, "list"))
+    if method == "GET" and name == "youtube-mine":
+        return CLIENT.mine(_arg(query, "what"))
+    signed = youtube_signin.route(handler, method, name, body)
+    if signed is not None:
+        return signed
     return None

@@ -46,6 +46,7 @@ import launcher  # noqa: E402
 import lyrics  # noqa: E402
 import screenlock  # noqa: E402
 import youtube  # noqa: E402
+import youtube_signin  # noqa: E402
 import terminals  # noqa: E402
 import opener  # noqa: E402
 import proposals  # noqa: E402
@@ -180,6 +181,9 @@ class Desk(BaseHTTPRequestHandler):
             })
         if url.path == "/spotify/callback":  # the browser comes back here from Spotify; no page token
             status, page = spotify.callback(parse_qs(url.query))
+            return self._send(status, page.encode("utf-8"), "text/html; charset=utf-8")
+        if url.path == "/youtube/callback":  # the browser comes back here from Google; no page token
+            status, page = youtube_signin.callback(parse_qs(url.query))
             return self._send(status, page.encode("utf-8"), "text/html; charset=utf-8")
         if url.path in ("/", "/index.html"):
             return self._index()
@@ -412,6 +416,8 @@ class Desk(BaseHTTPRequestHandler):
         except lyrics.LyricsError as exc:
             return self._error(HTTPStatus.BAD_GATEWAY, exc.message, upstream=exc.status)
         except youtube.YouTubeError as exc:
+            return self._error(HTTPStatus.BAD_GATEWAY, exc.message, upstream=exc.status)
+        except youtube_signin.SignInError as exc:
             return self._error(HTTPStatus.BAD_GATEWAY, exc.message, upstream=exc.status)
         except jira.JiraError as exc:
             return self._error(HTTPStatus.BAD_GATEWAY, exc.message, upstream=exc.status, jira=JIRA.status())

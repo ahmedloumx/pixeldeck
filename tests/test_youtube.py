@@ -23,6 +23,7 @@ _START = "BITBUCKET_WORKSPACE=acme\n# a comment that stays\n"
 os.environ.setdefault("PIXELDECK_ENV", str(_ENV))
 
 import youtube  # noqa: E402
+import youtube_signin  # noqa: E402
 
 KEY = "AIza" + "Sy0123456789abcdefghijklmnopqrstu_-"  # made up: the shape of a key, 39 characters
 OTHER = "AIza" + "Zz9876543210ZYXWVUTSRQPONMLKJIHGF-_"
@@ -98,6 +99,11 @@ class Base(unittest.TestCase):
         self.saved = youtube.CLIENT
         youtube.CLIENT = youtube.Client(transport=self.fake, clock=lambda: self.now[0])
         self.addCleanup(setattr, youtube, "CLIENT", self.saved)
+        # nobody signed in, in a token file of the test's own: never your real state folder
+        tokens = Path(tempfile.mkdtemp(prefix="pixeldeck-test-")) / "youtube.json"
+        patcher = mock.patch.object(youtube_signin, "ACCOUNT", youtube_signin.Account(transport=self.fake, store=tokens))
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def route(self, method, name, query=None, body=None):
         return youtube.route(HANDLER, None, method, name, query or {}, body)
@@ -136,6 +142,7 @@ class KeyTest(Base):
             with self.subTest(pasted=pasted[:12]), self.assertRaises(ValueError) as caught:
                 self.save(pasted)
             self.assertIn("OAuth client, not an API key", str(caught.exception))
+            self.assertIn("Sign in with Google", str(caught.exception), "it says where the client goes instead")
             self.assertNotIn(secret, str(caught.exception))
             self.assertNotIn(client_id, str(caught.exception))
         self.assertEqual(_ENV.read_text(), _START)

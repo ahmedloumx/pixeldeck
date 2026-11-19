@@ -369,14 +369,31 @@ Searching, and queueing the videos of a pasted playlist, need a free API key:
    in the Google Cloud console, pick or create a project (free) and press **Enable**.
 2. Open **Credentials**, press **Create credentials**, then **API key**, and restrict the key to
    **YouTube Data API v3** (no website or IP address restriction: the search runs from the
-   PixelDeck server). Not **OAuth client ID**: PixelDeck needs no client file. The key starts
-   with `AIza` (a capital I, not an L).
+   PixelDeck server). The key starts with `AIza` (a capital I, not an L).
 3. Paste the key in **Settings, Connected apps, YouTube** and save it.
 
 The free quota is 10,000 units a day and a search costs 100, so about 100 searches a day; the
 same search again within a few minutes is answered from memory and costs nothing. A playlist
 costs 1 unit for each 50 videos, and PixelDeck reads its first 200 at most. Playing costs
 nothing. The key is kept like the other tokens and never reaches the page.
+
+**Sign in with Google (optional)** adds your own playlists, liked videos and the channels you
+follow to the YouTube view (PLAYLISTS, LIKED, CHANNELS), and lets your private playlists play.
+PixelDeck asks for read access only (`youtube.readonly`). In the same Google Cloud project:
+
+1. Open the **OAuth consent screen**, pick **External**, fill in the app name and your email,
+   and add your Google account as a test user. Then press **Publish app** (In production): while
+   it is in Testing, Google ends a sign-in after 7 days. Google then calls the app unverified;
+   it is your own, so on the sign-in page press **Advanced**, then go to it.
+2. Open **Credentials**, press **Create credentials**, then **OAuth client ID**, type
+   **Desktop app**. Download its JSON file.
+3. Paste the file's text under **Sign in with Google** in **Settings, Connected apps, YouTube**,
+   save, and press **Sign in with Google**. Google opens in your browser and comes back to
+   PixelDeck at `http://127.0.0.1:8642/youtube/callback`.
+
+The client ID goes to the settings file, its secret where the key goes, and the sign-in's tokens
+to the state folder (readable by you only); none of them reach the page. Sign out, or remove the
+client, from the same card: Google is told to end the sign-in too.
 
 ## Configuration
 
@@ -402,6 +419,7 @@ wins over the file, the file wins over Windows Credential Manager (for `BITBUCKE
 | `JIRA_SITE`, `TICKET_PREFIXES` | Turn ticket keys such as `ABC-123` in branches and titles into Jira links. |
 | `SPOTIFY_CLIENT_ID` | The Client ID of your own Spotify app, for the music player (see below). |
 | `YOUTUBE_API_KEY` | A free YouTube Data API v3 key, for searching YouTube in the Music panel (see [Set up YouTube](#set-up-youtube)). Pasted links play without it. |
+| `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET` | Your own OAuth client (Desktop app), to sign in with Google for your playlists and likes. Saved from the settings; the secret goes to the credential store when there is one. |
 | `JIRA_TOKEN`, `JIRA_EMAIL` | An Atlassian API token with Jira access, to show and move a ticket's status in the merge popup. Classic and scoped tokens both work; the Bitbucket token is never sent to Jira. `JIRA_EMAIL` defaults to `BITBUCKET_EMAIL`. **Settings, Connected apps, Jira** sets all three without editing the file, and tries them at once; the token is never shown back. |
 | `SPOTIFYD`, `SPOTIFYD_PATH`, `SPOTIFYD_DEVICE_NAME` | PixelDeck's own Spotify player (see below): `SPOTIFYD=off` turns it off, `SPOTIFYD_PATH` names the program when it is not on the PATH or in `~/.local/bin`, the device name defaults to `PixelDeck`. |
 | `PIXELDECK_WORKSPACE_ROOT` | The folder with your local clones. Default: the folder PixelDeck sits in. |
