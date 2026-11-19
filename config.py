@@ -207,6 +207,16 @@ def workspace():
     return get("BITBUCKET_WORKSPACE")
 
 
+CODE_HOSTS = ("bitbucket",)
+
+
+def code_host():
+    """Where your pull requests live: bitbucket, the default, so older settings keep working.
+    One host at a time; each keeps its own settings when you switch."""
+    value = get("PIXELDECK_CODE_HOST").strip().lower()
+    return value if value in CODE_HOSTS else "bitbucket"
+
+
 def workspace_root():
     """The folder that holds your local clones. A git clone of PixelDeck defaults to the folder
     it sits in; the packaged app to your home folder, until the setup screen sets it."""
