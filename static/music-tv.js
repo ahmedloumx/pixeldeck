@@ -28,6 +28,7 @@ const MusicTV = (() => {
   let info = { state: -1, time: 0, duration: 0, error: 0 };
   let listening = 0, heard = false, drag = null, seen = "";
   let skip = null;                           // what the Next button does: set while a queue waits
+  let failedFor = null;                      // the video whose error was already passed on
   const listeners = new Set(), endedListeners = new Set();
   const g = (name, px = 2) => (typeof Music !== "undefined" ? Music.core.glyph(name, px) : "");
   const still = () => matchMedia("(prefers-reduced-motion: reduce)").matches || document.documentElement.dataset.motion === "calm";
@@ -119,6 +120,7 @@ const MusicTV = (() => {
     // a video that played to its end starts over, or it would end again at once
     if (info.duration > 0 && info.time >= info.duration - 1) info.time = 0;
     f.src = src(video.id, info.time, autoplay);
+    failedFor = null;
     f.addEventListener("load", listen);
     frame = f;
     heard = false;
@@ -178,7 +180,12 @@ const MusicTV = (() => {
       info.error = Number(said) || 5;
     }
     paint();
-    if (info.state === 0 && was !== 0) for (const fn of endedListeners) fn();
+    // ended, or cannot play here at all (its owner's choice, removed, private): either way it is over
+    if (what === "onError" && failedFor !== video?.id) {  // once per video, however often the player says it
+      failedFor = video?.id;
+      for (const fn of endedListeners) fn(ERRORS[info.error] || ERRORS[5]);
+    }
+    else if (info.state === 0 && was !== 0) for (const fn of endedListeners) fn(null);
   }
 
   /* ------------------------------------------------------------ painting */
@@ -291,6 +298,7 @@ const MusicTV = (() => {
     video = { id: nextVideo.id, title: nextVideo.title || null, channel: nextVideo.channel || null };
     info = { state: 3, time: 0, duration: 0, error: 0 };
     frame.title = video.title ? `YouTube: ${video.title}` : "YouTube video";
+    failedFor = null;
     command("loadVideoById", [video.id, 0]);
     paint();
   }
@@ -390,6 +398,7 @@ const MusicTV = (() => {
     mount, play, next, cue, toggle, stop, float, dock,
     /** What Next does, or null to hide it: the queue sets it while it holds videos. */
     setSkip: (fn) => { skip = typeof fn === "function" ? fn : null; paint(); },
+    /** fn(why) when a video ends (why is null) or cannot play (why says so). */
     onEnded: (fn) => endedListeners.add(fn),
     isFloating: () => st.floating,
     playing, loaded: () => !!frame, ended: () => !!frame && info.state === 0,

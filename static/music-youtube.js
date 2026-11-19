@@ -212,7 +212,11 @@ const MusicYouTube = (() => {
       tv().mount(els.dock);
       if (kept.current) tv().cue(kept.current);
       tv().onChange(onTv);
-      tv().onEnded(() => { if (kept.auto) playNext(); });
+      tv().onEnded((why) => {
+        if (!kept.auto || !kept.queue.length) return;
+        if (why) { notice = `Skipped "${tv().video()?.title || "a video"}": ${why}`; paintFind(); }
+        playNext();
+      });
     }
     applySource();
     paintPanel();
