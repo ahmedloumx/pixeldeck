@@ -390,15 +390,20 @@ nothing. The key is kept like the other tokens and never reaches the page.
 follow to the YouTube view (PLAYLISTS, LIKED, CHANNELS), and lets your private playlists play.
 PixelDeck asks for read access only (`youtube.readonly`). In the same Google Cloud project:
 
-1. Open the **OAuth consent screen**, pick **External**, fill in the app name and your email,
-   and add your Google account as a test user. Then press **Publish app** (In production): while
-   it is in Testing, Google ends a sign-in after 7 days. Google then calls the app unverified;
-   it is your own, so on the sign-in page press **Advanced**, then go to it.
-2. Open **Credentials**, press **Create credentials**, then **OAuth client ID**, type
-   **Desktop app**. Download its JSON file.
-3. Paste the file's text under **Sign in with Google** in **Settings, Connected apps, YouTube**,
-   save, and press **Sign in with Google**. Google opens in your browser and comes back to
-   PixelDeck at `http://127.0.0.1:8642/youtube/callback`.
+1. Open [Google Auth platform, Audience](https://console.cloud.google.com/auth/audience) (the
+   **OAuth consent screen**), pick **External**, fill in the app name and your email, and add
+   your Google account under **Test users**. Then press **Publish app** (In production): while
+   it is in Testing, Google ends a sign-in after 7 days.
+2. Open [Clients](https://console.cloud.google.com/auth/clients), press **Create client**, type
+   **Desktop app**, and download its JSON file.
+3. Under **Sign in with Google** in **Settings, Connected apps, YouTube**, press **Choose the
+   client file** and pick it (or paste its text and save). When the file is still in your
+   Downloads folder, the card offers it by name: **Use it**. Delete the downloaded file
+   afterwards if you like; PixelDeck keeps what it needs and never changes or removes it.
+4. Press **Sign in with Google**, here or in the Music panel. Google opens in your browser and
+   says **Google hasn't verified this app**: it is your own, so press **Continue** (on some
+   screens, **Advanced**, then go to it). It comes back to PixelDeck at
+   `http://127.0.0.1:8642/youtube/callback`, and the card shows who is signed in.
 
 The client ID goes to the settings file, its secret where the key goes, and the sign-in's tokens
 to the state folder (readable by you only); none of them reach the page. Sign out, or remove the

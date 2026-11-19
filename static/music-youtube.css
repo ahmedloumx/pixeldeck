@@ -152,3 +152,19 @@
 
 @media (prefers-reduced-motion: reduce) { .ytv, .ytv * { animation: none !important; } }
 :root[data-motion="calm"] .ytv, :root[data-motion="calm"] .ytv * { animation: none !important; }
+
+/* ------------------------------------------------------------ Sign in with Google: the client file and the wait */
+.set-found { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin: var(--space-xs) 0; padding: 8px 10px;
+  border: var(--rule-hair) dashed var(--color-rule-2); background: var(--color-paper-2); font-size: var(--text-sm); }
+.set-found code { overflow-wrap: anywhere; }
+.yt-file-btn { cursor: pointer; }
+.yt-file-btn:focus-within { outline: var(--pixel) solid var(--color-focus); outline-offset: 1px; }
+.set-wait, .yt-wait { display: flex; align-items: center; gap: 8px; font-size: var(--text-sm); }
+.set-wait { margin: var(--space-xs) 0; padding: 8px 10px; border: var(--rule-hair) solid var(--color-rule-2); background: var(--color-paper-3); }
+/* the light blinks on the music's 125 ms beat, and rests when another window has the focus */
+.set-wait-led, .yt-wait-led { flex: none; width: 8px; height: 8px; background: var(--yt-red); box-shadow: 0 0 0 var(--pixel) var(--sprite-dark);
+  animation: yt-wait 1000ms steps(1, end) infinite; }
+@keyframes yt-wait { 50% { background: var(--mu-box-lo); } }
+:root.is-away .set-wait-led, :root.is-away .yt-wait-led { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) { .set-wait-led, .yt-wait-led { animation: none; } }
+:root[data-motion="calm"] .set-wait-led, :root[data-motion="calm"] .yt-wait-led { animation: none; }

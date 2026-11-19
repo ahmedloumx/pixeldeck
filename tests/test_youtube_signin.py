@@ -80,7 +80,9 @@ class Base(unittest.TestCase):
     def setUp(self):
         _ENV.write_text("BITBUCKET_WORKSPACE=acme\n")
         env = {k: v for k, v in os.environ.items() if k not in (youtube.SETTING, youtube_signin.ID_SETTING, youtube_signin.SECRET_SETTING)}
-        env.update(PIXELDECK_ENV=str(_ENV), PIXELDECK_CREDENTIALS="off")
+        # Downloads is a temp folder of its own: never yours, nor a client file in it
+        self.down = Path(tempfile.mkdtemp(prefix="pixeldeck-test-downloads-"))
+        env.update(PIXELDECK_ENV=str(_ENV), PIXELDECK_CREDENTIALS="off", PIXELDECK_DOWNLOADS_DIR=str(self.down))
         patcher = mock.patch.dict(os.environ, env, clear=True)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -337,6 +339,76 @@ class NotSignedInTest(Base):
         desk._send = lambda code, body, *rest: sent.append((int(code), body))
         desk._api("GET", "youtube-mine", {"what": ["liked"]}, None)
         self.assertEqual((sent[-1][0], sent[-1][1]["error"]), (403, youtube_signin.NOT_SIGNED_IN))
+
+
+
+class ClientFileTest(Base):
+    """A client file in Downloads is offered by its name, and read only when you choose it."""
+
+    def setUp(self):
+        super().setUp()
+        self.name = f"client_secret_{CLIENT_ID}.json"
+        blob = json.dumps({"installed": {"client_id": CLIENT_ID, "client_secret": SECRET, "project_id": "p"}})
+        (self.down / self.name).write_text(blob)
+        (self.down / "notes.json").write_text("{}")
+        self.folder = f"client_secret_{CLIENT_ID.replace('123', '999')}.json"
+        (self.down / self.folder).mkdir()
+        self.link = f"client_secret_{CLIENT_ID.replace('123', '777')}.json"
+        elsewhere = self.tokens.parent / "elsewhere.json"
+        elsewhere.write_text(blob)
+        try:
+            os.symlink(elsewhere, self.down / self.link)
+        except OSError:
+            pass  # no links here: the folder and the other names still show what is listed
+        self.reads = []
+        real = os.open
+
+        def opening(path, *args, **kwargs):  # the files opened in Downloads, by name
+            if Path(path).parent == self.down:
+                self.reads.append(Path(path).name)
+            return real(path, *args, **kwargs)
+        p = mock.patch.object(youtube_signin.os, "open", side_effect=opening)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_downloads_lists_names_only_and_opens_nothing(self):
+        out = self.route("GET", "youtube-client-files")
+        self.assertEqual(out, {"files": [self.name]}, "a plain file of that name: no folder, no link, nothing else")
+        self.assertEqual(self.reads, [])
+        self.assertNotIn(SECRET, json.dumps(out))
+
+    def test_use_it_reads_that_one_file_and_saves_it_as_if_pasted(self):
+        out = self.route("POST", "youtube-client-file", body={"name": self.name})
+        self.assertEqual(out, {"client_set": True, "client_ok": True, "secret_set": True, "signed_in": False, "channel": None})
+        self.assertEqual(self.reads, [self.name])
+        text = _ENV.read_text()
+        self.assertIn(f"{youtube_signin.ID_SETTING}={CLIENT_ID}", text)
+        self.assertIn(f"{youtube_signin.SECRET_SETTING}={SECRET}", text)
+        self.assertTrue((self.down / self.name).exists(), "your file stays where it is")
+        self.assertEqual(self.route("GET", "youtube-client-files"), {"files": []}, "with a client saved, Downloads is not looked at")
+        for value in (SECRET, CLIENT_ID):
+            self.assertNotIn(value, json.dumps(out))
+            self.assertNotIn(value, json.dumps(youtube.status()))
+        self.assertEqual(self.google.calls, [])
+
+    def test_only_a_listed_file_is_read(self):
+        for name in ("../.env", str(self.down / self.name), "notes.json", self.folder, self.link, "", None, ["x"]):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                self.route("POST", "youtube-client-file", body={"name": name})
+        self.assertEqual(self.reads, [])
+        self.assertNotIn(youtube_signin.ID_SETTING, _ENV.read_text())
+
+    def test_a_file_that_is_not_a_desktop_client_says_so_and_echoes_nothing(self):
+        for content, said in ((json.dumps({"web": {"client_id": CLIENT_ID, "client_secret": SECRET}}), "Web application"),
+                              (b"\xff\xfe not text", "not an OAuth client file"), ("x" * (youtube_signin.READ_MAX + 1), "not an OAuth client file")):
+            with self.subTest(said=said):
+                (self.down / self.name).write_bytes(content if isinstance(content, bytes) else content.encode())
+                with self.assertRaises(ValueError) as caught:
+                    self.route("POST", "youtube-client-file", body={"name": self.name})
+                self.assertIn(said, str(caught.exception))
+                for value in (SECRET, CLIENT_ID):
+                    self.assertNotIn(value, str(caught.exception))
+        self.assertNotIn(youtube_signin.ID_SETTING, _ENV.read_text())
 
 
 if __name__ == "__main__":

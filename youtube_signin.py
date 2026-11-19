@@ -15,6 +15,7 @@ The setup guide says to publish it (In production) so a sign-in lasts.
 import hashlib
 import html
 import json
+import os
 import re
 import threading
 import time
@@ -29,7 +30,7 @@ import oauth
 import opener
 import version
 
-FEATURES = ["youtube-signin"]
+FEATURES = ["youtube-signin", "youtube-client-file"]
 
 SCOPE = "https://www.googleapis.com/auth/youtube.readonly"
 AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -47,6 +48,8 @@ EARLY_REFRESH = 60          # renew a little before Google's hour is up
 CLIENT_ID_RE = re.compile(r"[0-9]{4,20}-[0-9a-z]{16,64}\.apps\.googleusercontent\.com")
 # GOCSPX-... today; older secrets had no prefix
 SECRET_RE = re.compile(r"[0-9A-Za-z_-]{16,64}")
+# The file the Google Cloud console downloads for a client, named after its client ID.
+CLIENT_FILE_RE = re.compile(r"client_secret_[0-9A-Za-z_.-]{1,200}\.apps\.googleusercontent\.com\.json")
 
 NOT_SIGNED_IN = "Sign in with Google first: Settings, Connected apps, YouTube."
 ENDED = ("Google ended PixelDeck's sign-in: sign in again from Settings, Connected apps, YouTube. If this happens every "
@@ -92,6 +95,44 @@ def read_client(text, secret=""):
     if secret and not SECRET_RE.fullmatch(secret):
         raise ValueError("That client secret does not look like one: it starts with GOCSPX-.")
     return text, secret
+
+
+def downloads():
+    """Where a browser saves the client file; PIXELDECK_DOWNLOADS_DIR moves it (tests use their own)."""
+    override = config.get("PIXELDECK_DOWNLOADS_DIR")
+    return Path(override).expanduser() if override else Path.home() / "Downloads"
+
+
+def client_files():
+    """The client files in Downloads, by name only, newest first. Listing them opens none."""
+    try:
+        entries = list(os.scandir(downloads()))
+    except OSError:
+        return []
+    found = []
+    for entry in entries:
+        try:
+            if CLIENT_FILE_RE.fullmatch(entry.name) and entry.is_file(follow_symlinks=False):
+                found.append((entry.stat(follow_symlinks=False).st_mtime, entry.name))
+        except OSError:
+            continue
+    return [name for _at, name in sorted(found, reverse=True)][:5]
+
+
+def read_client_file(name):
+    """The text of one file client_files() lists, read now that you chose it, as if pasted. A link,
+    a folder or any other name is refused, and the file itself is never changed."""
+    if not isinstance(name, str) or name not in client_files():
+        raise ValueError("That file is no longer in Downloads: choose the client file instead.")
+    fd = os.open(downloads() / name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
+    with os.fdopen(fd, "rb") as fh:
+        raw = fh.read(READ_MAX + 1)
+    try:
+        if len(raw) > READ_MAX:
+            raise ValueError
+        return raw.decode("utf-8")
+    except ValueError:
+        raise ValueError("That file is not an OAuth client file.") from None
 
 
 def redirect_uri(port):
@@ -326,6 +367,10 @@ def route(handler, method, name, body):
     body = body if isinstance(body, dict) else {}
     if method == "POST" and name == "youtube-client":
         return ACCOUNT.save_client(body)
+    if method == "GET" and name == "youtube-client-files":
+        return {"files": [] if ACCOUNT.client()[0] else client_files()}
+    if method == "POST" and name == "youtube-client-file":
+        return ACCOUNT.save_client({"client": read_client_file(body.get("name"))})
     if method == "POST" and name == "youtube-signin":
         return _signin(handler.port)
     if method == "POST" and name == "youtube-signout":

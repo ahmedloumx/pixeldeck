@@ -155,10 +155,13 @@ const MusicYouTube = (() => {
     els.input.placeholder = can ? "Search YouTube, or paste a link" : "Paste a YouTube link or video id";
     els.go.textContent = can ? "Search" : "Play";
     els.go.disabled = busy;
-    els.hint.innerHTML = can
+    const hint = can
       ? "A search costs 100 of your project's 10,000 free units a day, about 100 searches. The same search again is free for a few minutes."
-      : `A pasted link plays without a key. To search YouTube, add a free API key in
-        <button class="link" type="button" data-tube="settings">Settings, Connected apps, YouTube</button>.`;
+      : signingIn()
+        ? '<span class="yt-wait"><span class="yt-wait-led" aria-hidden="true"></span>Waiting for you in the browser: sign in with Google there.</span>'
+        : `A pasted link plays without signing in. <button class="btn btn--primary" type="button" data-tube="signin">Sign in with Google to search</button>
+          or add a free API key in <button class="link" type="button" data-tube="settings">Settings, Connected apps, YouTube</button>.`;
+    if (els.hint._html !== hint) { els.hint.innerHTML = hint; els.hint._html = hint; }
     els.lib.hidden = !status?.signed_in;
     for (const b of els.lib.querySelectorAll("[data-what]")) b.setAttribute("aria-pressed", String(results?.what === b.dataset.what && !results?.back));
     els.error.hidden = !error;
@@ -432,6 +435,7 @@ const MusicYouTube = (() => {
     }
     if (what === "dock") return tv()?.dock();
     if (what === "settings") return openSettings();
+    if (what === "signin") return signIn().catch((err) => { if (err.message !== "reloading") toast("Could not start the sign-in.", err.message, true); });
     if (what === "open") { const d = t.closest("dialog"); if (d?.open) d.close(); return openPanel(); }
     if (what === "forget") { kept.recent = []; save(); paintRecent(); }
   });
@@ -442,6 +446,42 @@ const MusicYouTube = (() => {
     find(form);
   });
   if (typeof Prefs !== "undefined") Prefs.onChange((_p, patch) => { if ("musicSource" in patch) { applySource(); refreshMini(); for (const fn of listeners) fn(); } });
+
+  /* ------------------------------------------------------------ Sign in with Google */
+
+  // From the panel or the settings: Google's page opens in the browser, and this page asks how it
+  // went every 2 s for 5 minutes, then when its window is back in front while the link still
+  // works (10 minutes). It stops as soon as you are signed in; nothing runs otherwise.
+  const WAIT_EVERY = 2000, POLL_MAX = 300000, LINK_LIFE = 600000;
+  let waitTimer = 0, pollUntil = 0, linkUntil = 0;
+  const signingIn = () => linkUntil > Date.now();
+  const signInListeners = new Set();
+  const told = () => { paintFind(); for (const fn of signInListeners) fn(); };
+  async function signIn() {
+    if (!status?.client_set) return openSettings();
+    const out = await api("youtube-signin", { method: "POST", body: {} });
+    if (!out.opened) window.open(out.url, "_blank", "noopener,noreferrer");
+    toast("Google's sign-in page is open in your browser.", "Sign in there and come back: PixelDeck notices by itself.");
+    pollUntil = Date.now() + POLL_MAX;
+    linkUntil = Date.now() + LINK_LIFE;
+    clearTimeout(waitTimer);
+    waitTimer = setTimeout(look, WAIT_EVERY);
+    told();
+  }
+  async function look() {
+    clearTimeout(waitTimer);
+    if (!signingIn()) return;
+    const st = await refresh();
+    if (st?.signed_in) {
+      linkUntil = pollUntil = 0;
+      toast("YouTube is signed in.", st.channel ? `As ${st.channel}. Your playlists are in the Music panel.` : "Your playlists are in the Music panel.");
+    } else if (Date.now() < pollUntil) {
+      waitTimer = setTimeout(look, WAIT_EVERY);
+    }
+    told();
+  }
+  addEventListener("focus", () => { if (signingIn()) look(); });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && signingIn()) look(); });
 
   /** Ask the server whether a key is saved (never the key itself). */
   async function refresh() {
@@ -458,6 +498,7 @@ const MusicYouTube = (() => {
     mountPanel, paintMini, refresh, openPanel, openSettings, play, playNext, enqueue, thumb,
     queue: () => kept.queue.slice(),
     status: () => status, live, source, setSource,
+    signIn, signingIn, onSignIn: (fn) => signInListeners.add(fn),
     current: () => kept.current,
     onChange: (fn) => listeners.add(fn),
   };
