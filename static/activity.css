@@ -1,0 +1,24 @@
+/* The Activity panel: the team's pull request activity as one timeline (the .tl of prview.css),
+   with its filters above it. */
+
+.feed { max-width: 64rem; }
+.feed-head { flex-wrap: wrap; }
+.feed-head .panel-title { margin: 0; }
+.feed-status { margin: 0 0 var(--space-sm); color: var(--color-muted); font-size: var(--text-sm); }
+.feed-filters { display: flex; flex-wrap: wrap; gap: var(--space-xs); margin: 0 0 var(--space-sm); }
+.feed-filters .rs-button { width: auto; min-width: 10rem; max-width: 18rem; min-height: 30px; }
+.feed-notes { display: grid; gap: var(--space-2xs); margin: 0 0 var(--space-sm); }
+.feed-notes:empty { display: none; }
+.feed-note { margin: 0; padding: 4px 10px; border-left: 2px solid var(--color-wait); background: var(--color-paper-2); color: var(--color-ink-2); font-size: var(--text-xs); }
+.feed-note.is-bad { border-left-color: var(--color-bad); }
+
+/* The panel sits on paper, not on the PR view's side panel: the nodes cut the line in its colour. */
+.feed-tl .tl-node { box-shadow: 0 0 0 3px var(--color-paper); }
+.feed-tl .tl-item { padding: 0; }
+.feed-card { display: grid; gap: 1px; width: 100%; padding: 4px 8px 6px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.feed-card:hover { background: var(--color-paper-2); }
+.feed-card:hover .feed-pr { text-decoration: underline; text-underline-offset: 3px; }
+.feed-card:focus-visible { outline: var(--pixel) solid var(--color-focus); outline-offset: -2px; }
+.feed-card .tl-line { display: block; }
+.feed-pr { color: var(--color-ink); font-family: var(--font-outlier); font-size: 0.9em; overflow-wrap: anywhere; }
+.feed-title { overflow: hidden; color: var(--color-muted); font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }

@@ -102,6 +102,15 @@ Full documentation, with the architecture, security model and measured performan
   mascots.
 - **Team and insights.** Your teammates' queues, review load and merge history. Insights pick a
   range, from 7 days to 120; a month or less is charted per day.
+- **Team activity (Bitbucket).** The Activity tab, beside Insights (key `a`), is one timeline
+  across the pull requests of you and your team, newest first: who commented, approved, asked
+  for changes, pushed, merged, declined or opened which pull request, and when. Filter it by
+  person, project, repository, kind and date (today, 7 days, 30 days or a range); the filters
+  are kept. A click opens the pull request. It reads each repository's activity log on
+  Bitbucket only while the panel is open, at most every 10 minutes per repository (sooner
+  when a team pull request there moved), and keeps the last 30 days, so the poll itself costs
+  no calls. See [team-activity-feed.md](docs/team-activity-feed.md) for the call budget. On
+  GitHub and GitLab the tab is not there.
 - **Repos.** A tab beside the queue, split into a side menu and a pane: the project's repositories
   with a search and a filter (services, helm charts, other), each service stacked with its helm
   chart, the ones you open most and the pinned ones first; the open repository's file tree; and

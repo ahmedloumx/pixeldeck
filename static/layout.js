@@ -11,12 +11,12 @@ const Layout = (() => {
   const SLOTS = ["left", "main", "right", "bottom"];
   const PRESETS = {
     split: {
-      slots: { left: ["repos"], main: ["queue", "insights"], right: [], bottom: ["terminal"] },
+      slots: { left: ["repos"], main: ["queue", "insights", "activity"], right: [], bottom: ["terminal"] },
       active: { left: "repos", main: "queue", right: "", bottom: "terminal" },
       size: { left: 30, right: 30, bottom: 34 }, collapsed: {}, hidden: ["music"],
     },
     compact: {
-      slots: { left: [], main: ["queue", "repos", "insights", "terminal"], right: [], bottom: [] },
+      slots: { left: [], main: ["queue", "repos", "insights", "activity", "terminal"], right: [], bottom: [] },
       active: { left: "", main: "queue", right: "", bottom: "" },
       size: { left: 30, right: 30, bottom: 34 }, collapsed: {}, hidden: ["music"],
     },
@@ -36,6 +36,7 @@ const Layout = (() => {
     queue: [".#.....#.", "###...###", ".#.....#.", ".#....#..", ".#...#...", ".#..#....", ".#.#.....", "###......", ".#......."],
     repos: [".........", ".###.....", "#...####.", "#########", "#.......#", "#.......#", "#.......#", "#########", "........."],
     insights: [".......##", ".......##", "....##.##", "....##.##", ".##.##.##", ".##.##.##", ".##.##.##", ".........", "#########"],
+    activity: ["##.######", "##.......", ".#.......", "##.####..", "##.......", ".#.......", "##.######", "##.......", "........."],
     terminal: ["#########", "#.......#", "#.#.....#", "#..#....#", "#.#..##.#", "#.......#", "#########", ".........", "........."],
     music: ["...######", "...######", "...#....#", "...#....#", "...#....#", ".###..###", "####.####", ".##...##.", "........."],
   };
@@ -368,6 +369,14 @@ const Layout = (() => {
     paint();
   }
   function show(id) { if (state.hidden.includes(id)) move(id, "main"); }
+  // A panel this server does not offer (another code host's) leaves as if it was never
+  // registered: its tab, its View menu entry, its place, which a later save forgets.
+  function retire(id) {
+    if (!panels[id] || isCopy(id) || solo) return;
+    delete panels[id];
+    normalize();
+    paint();
+  }
 
   const isCopy = (id) => !!panels[id] && panels[id].base !== id;
   const canCopy = (id) => !!panels[id] && !!panels[panels[id].base].copyable && !solo;
@@ -437,6 +446,6 @@ const Layout = (() => {
   const isShown = (id) => { const s = slotOf(id); return !!s && state.active[s] === id && !state.collapsed[s]; };
   const visibility = () => Object.keys(panels).map((id) => ({ id, title: panels[id].label || panels[id].title, hidden: state.hidden.includes(id), copy: isCopy(id), copyable: canCopy(id), base: panels[id].base }));
 
-  return { init, body, activate, hide, show, preset, popout, setBadge, isShown, visibility, isSolo: () => !!solo,
+  return { init, body, activate, hide, show, retire, preset, popout, setBadge, isShown, visibility, isSolo: () => !!solo,
     duplicate, remove, params, setParams, setLabel, isCopy, instances, baseOf: (id) => panels[id]?.base };
 })();

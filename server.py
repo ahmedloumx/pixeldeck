@@ -45,6 +45,7 @@ import jira  # noqa: E402
 import launcher  # noqa: E402
 import lyrics  # noqa: E402
 import screenlock  # noqa: E402
+import teamfeed  # noqa: E402
 import youtube  # noqa: E402
 import youtube_signin  # noqa: E402
 import terminals  # noqa: E402
@@ -69,8 +70,8 @@ AGENT_ROUTES = {("POST", "propose"), ("GET", "proposal")}
 PROPOSALS = proposals.Proposals()
 FEATURES = ["merge", "sync", "drop", "proposals", "snapshots", "reviews", "events", "status", "settings", "merge-options", "jira",
             "restore", "ui-state", "open-link", *account.FEATURES, *desktop.FEATURES, *repos.FEATURES, *spotify.FEATURES, *spotifyd.FEATURES, "lyrics", "jira-settings", *screenlock.FEATURES,
-            *youtube.FEATURES]
-ROUTE_MODULES = (account, desktop, repos, spotify, spotifyd, lyrics, screenlock, youtube)  # each answers its own routes, or None
+            *youtube.FEATURES, *teamfeed.FEATURES]
+ROUTE_MODULES = (account, desktop, repos, spotify, spotifyd, lyrics, screenlock, youtube, teamfeed)  # each answers its own routes, or None
 JIRA = jira.Jira()
 SNAPSHOT_MAX = 4 * 1024 * 1024
 MIN_COLS, MIN_ROWS = 20, 4  # a collapsed panel must not squeeze a program into a sliver

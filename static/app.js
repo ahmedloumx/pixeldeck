@@ -1,7 +1,7 @@
 "use strict";
 
 /* PixelDeck. Plain DOM, no build step, every asset served locally.
-   Panels (queue, pull request, insights, terminal) live in the Layout workspace. */
+   Panels (queue, pull request, insights, activity, terminal) live in the Layout workspace. */
 
 const TOKEN = document.querySelector('meta[name="desk-token"]').content;
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -2021,6 +2021,7 @@ function applyBoot(b) {
   state.features = b.features || []; // an older server has none: the page skips what it lacks
   state.host = b.host || null; // where the pull requests come from; an older server reads Bitbucket
   state.setupNeeded = !!b.setup_needed;
+  TeamActivity.ready();
   if (b.restore !== undefined && state.restore === undefined) state.restore = b.restore;
   if (b.stale && !state.staleSaid) {
     state.staleSaid = true;
@@ -2268,6 +2269,7 @@ async function loadView({ silent = false } = {}) {
   } finally {
     if (!silent) setSyncing(false);
     if (changed) renderAll(); else renderBar();
+    TeamActivity.poll();
   }
 }
 async function refreshNow() {
@@ -2367,6 +2369,7 @@ function onKey(e) {
   else if (k === "t") { Layout.activate("terminal"); setTimeout(() => Term.fit(), 50); }
   else if (k === "q") Layout.activate("queue");
   else if (k === "i") Layout.activate("insights");
+  else if (k === "a") Layout.activate("activity");
   else if (state.pr && "12345".includes(k)) setPrTab(["overview", "files", "threads", "commits", "tasks"][Number(k) - 1]);
   else if (state.pr && k === "f") applyFold(!state.prFolded);
   else if (state.pr?.tab === "files" && state.pr.diff && (k === "n" || k === "b")) { const i = currentFileIndex(); gotoFile(Math.max(0, Math.min(state.pr.diff.files.length - 1, i + (k === "n" ? 1 : -1)))); }
@@ -2652,10 +2655,10 @@ async function boot() {
   Layout.init({
     panels: [
       { id: "queue", title: "Pull Requests", copyable: true },
-      { id: "insights", title: "Insights", copyable: true }, { id: "terminal", title: "Terminal" },
+      { id: "insights", title: "Insights", copyable: true }, { id: "activity", title: "Activity" }, { id: "terminal", title: "Terminal" },
       { id: "repos", title: "Repos", place: "left" }, { id: "music", title: "Music", place: "hidden" },
     ],
-    onChange: () => { for (const b of $$(".chart-box")) b.dataset.drawn = ""; paintCharts(); Term.fit(); },
+    onChange: () => { for (const b of $$(".chart-box")) b.dataset.drawn = ""; paintCharts(); Term.fit(); TeamActivity.onLayout(); },
     paramsFor: (id) => { const v = viewOf(id); return { who: v.who, section: v.section, range: v.range }; },
     onCreate: (id) => { state.animate[id] = true; renderPanel(id); renderBar(); loadView({ silent: true }); },
     onRemove: (id) => { delete state.animate[id]; renderBar(); },
@@ -2664,6 +2667,7 @@ async function boot() {
   Arcade.attach(Layout.body("terminal"));
   Repos.mount(Layout.body("repos"));
   Music.mount(Layout.body("music"));
+  TeamActivity.mount(Layout.body("activity"));
   RetroSelect.enhanceAll();
   Prefs.onChange((p, patch) => { if ("titlebar" in patch) PixelChrome.send("titlebar", { system: p.titlebar === "system" }); if ("theme" in patch) { Term.retheme(); for (const b of $$(".chart-box")) b.dataset.drawn = ""; paintCharts(); } });
   bind();

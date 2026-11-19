@@ -7,12 +7,16 @@ every 15, comment threads only when a PR's update signature moves.
 
 The pull requests come from one code host at a time (see hosts.py): Bitbucket unless the
 settings say GitHub or GitLab. Each host keeps its own cache and team files.
+
+The team activity feed (teamfeed.py) reads each repository's activity log only while the page
+shows it, and keeps it in a file of its own: it is larger than the rest and changes apart.
 """
 
 import json
 import os
 import threading
 import time
+import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -21,6 +25,7 @@ import events
 import gitscan
 import hosts
 import model
+import teamfeed
 from bitbucket import Client
 from codehost import HostError
 
@@ -37,6 +42,18 @@ HISTORY_WINDOW_DAYS = 30
 PROJECT_LIST_MAX_AGE = 24 * 3600
 DECLINED_WINDOW_DAYS = 90
 TICK = 30  # the refresh loop wakes this often
+# The team activity feed: see teamfeed.py and docs/team-activity-feed.md for the call budget.
+ACTIVITY_WINDOW_DAYS = 30  # how far back the feed goes
+ACTIVITY_EVERY = 600  # a repository's log is read again after this, or sooner when a team pull request in it moved
+ACTIVITY_FLOOR = 60  # ... but never sooner than this
+ACTIVITY_FIRST_PAGES = 4  # a first read: up to 200 entries back into the window
+ACTIVITY_PAGES = 2  # a later read: up to 100 new entries; more than that leaves a gap, and says so
+ACTIVITY_CALLS = 30  # calls one read from the page may spend
+ACTIVITY_TICK_CALLS = 2  # calls the refresh loop spends per tick while the page shows the feed
+ACTIVITY_WATCHED = 300  # the page asked for the feed this recently: it is on screen
+ACTIVITY_REPOS_MAX = 30  # repositories read, the most recently active first
+ACTIVITY_KEEP = 500  # entries kept per repository
+ACTIVITY_SLACK = 600  # a later read goes back this far before the newest entry kept
 
 
 def _atomic_write(path, payload):
@@ -67,7 +84,8 @@ class Engine:
         self.auth = {"ok": None, "error": None}
         self._pushed = {"at": 0, "items": []}
         self._seed_tried = False
-        for name in ("_person_locks", "_diff_cache", "_extra_cache", "_behind_at", "_env_seen", "_auth_try_at"):
+        for name in ("_person_locks", "_diff_cache", "_extra_cache", "_behind_at", "_env_seen", "_auth_try_at",
+                     "_feed_data", "_feed_file", "_feed_mutex", "_activity_asked"):
             self.__dict__.pop(name, None)
         self._load()
         self.events = events.Log(self.data, self._save)
@@ -617,6 +635,7 @@ class Engine:
                 for mate in self.team():
                     if self.warm_history(mate["uuid"], budget=4):
                         break
+            self.warm_activity()
         except HostError:
             pass
 
@@ -632,6 +651,196 @@ class Engine:
 
     def budget(self):
         return self.host.budget()
+
+    # ---- team activity feed ---------------------------------------------
+
+    def _feed_path(self):
+        path = self.__dict__.get("_feed_file")
+        if path is None:
+            path = hosts.file_for(config.folder("cache") / "activity.json", self.__dict__.get("host_id", "bitbucket"))
+            path = self.__dict__.setdefault("_feed_file", path)
+        return path
+
+    def _feed(self):
+        """The kept logs, {"repos": {slug: {"entries", "read_at", "complete_from", "error"}}},
+        read from their file once."""
+        feed = self.__dict__.get("_feed_data")
+        if feed is None:
+            try:
+                feed = json.loads(self._feed_path().read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                feed = None
+            if not isinstance(feed, dict) or not isinstance(feed.get("repos"), dict):
+                feed = {"repos": {}}
+            feed = self.__dict__.setdefault("_feed_data", feed)
+        return feed
+
+    def _feed_lock(self):
+        """One read of the logs at a time: the tick's and a window's would read the same pages twice."""
+        return self.__dict__.setdefault("_feed_mutex", threading.Lock())
+
+    def _feed_project(self, project, offline):
+        """The project the feed covers: the bar's own when none is asked for, every project for
+        teamfeed.EVERY_PROJECT, else a project the workspace has."""
+        if project is None:
+            return self.config.get("project") or None
+        if project == teamfeed.EVERY_PROJECT:
+            return None
+        known = {p.get("key") for p in (self.data.get("projects") or {}).get("items", [])}
+        if project not in known and not offline:
+            known = {p.get("key") for p in self.projects()}
+        if project not in known:
+            raise ValueError(f"unknown project {project!r}")
+        return project
+
+    def _feed_prs(self):
+        """Your pull requests and your team's that the feed covers: the open ones, and those
+        merged or declined within its window."""
+        since = time.time() - ACTIVITY_WINDOW_DAYS * 86400
+        found = {}
+        for uuid in [self._me_uuid(), *(m["uuid"] for m in self.team())]:
+            entry = (self.person(uuid) or {}) if uuid else {}
+            for name in ("open", "merged", "declined"):
+                for pr in entry.get(name) or []:
+                    if name == "open" or model.stamp(pr.get("updated_on")) >= since:
+                        found[(pr["repo"], pr["id"])] = pr
+        return list(found.values())
+
+    def activity_repos(self, key, prs=None, offline=True):
+        """The repositories whose logs the feed reads: where those pull requests are, within
+        project key when there is one, the ACTIVITY_REPOS_MAX most recently active. Answers
+        {"repos", "moved": {slug: when a team pull request there last moved}, "cut", "known"};
+        known is False when the project's repositories are not known yet (offline)."""
+        prs = self._feed_prs() if prs is None else prs
+        scope = self.repos_of(key, offline=offline) if key else None
+        if key and scope is None:
+            return {"repos": [], "moved": {}, "cut": 0, "known": False}
+        moved = {}
+        for pr in prs:
+            if scope is None or pr["repo"] in scope:
+                moved[pr["repo"]] = max(moved.get(pr["repo"], 0.0), model.stamp(pr.get("updated_on")))
+        ranked = sorted(moved, key=lambda r: (-moved[r], r))
+        return {"repos": sorted(ranked[:ACTIVITY_REPOS_MAX]), "moved": moved,
+                "cut": max(0, len(ranked) - ACTIVITY_REPOS_MAX), "known": True}
+
+    def read_activity(self, project=None, force=False, budget=ACTIVITY_CALLS):
+        """Read the logs that are due, the longest unread first, within budget calls. A log is due
+        ACTIVITY_EVERY after its last read, or sooner when a team pull request in it moved since
+        (force: whatever its age), never within ACTIVITY_FLOOR. Answers the calls spent, or None
+        when the host keeps no such log or another read runs (it covers this one)."""
+        if not self.host.serves("team-activity"):
+            return None
+        lock = self._feed_lock()
+        if not lock.acquire(blocking=False):
+            return None
+        spent = 0
+        try:
+            feed, path = self._feed(), self._feed_path()
+            try:
+                scope = self.activity_repos(self._feed_project(project, offline=False), offline=False)
+                logs, now, due = feed["repos"], time.time(), []
+                for repo in scope["repos"]:
+                    read_at = (logs.get(repo) or {}).get("read_at") or 0
+                    if now - read_at < ACTIVITY_FLOOR:
+                        continue
+                    if force or now - read_at >= ACTIVITY_EVERY or scope["moved"].get(repo, 0) > read_at:
+                        due.append((read_at, repo))
+                for _, repo in sorted(due):
+                    if spent >= budget or self.host.busy():
+                        break
+                    spent += self._read_log(logs, repo, budget - spent)
+            finally:
+                if spent:
+                    try:
+                        _atomic_write(path, feed)
+                    except OSError:
+                        pass  # held open elsewhere (a virus scan): still in memory, the next read writes it
+        finally:
+            lock.release()
+        return spent
+
+    def _read_log(self, logs, repo, budget):
+        """Read one repository's log back to the newest entry kept (less ACTIVITY_SLACK, for
+        entries that land a little out of order), or to the window's start on a first read.
+        Answers the calls spent. complete_from is when the kept entries have no hole from."""
+        now = time.time()
+        window = model.iso(now - ACTIVITY_WINDOW_DAYS * 86400)
+        state = logs.get(repo) or {}
+        kept = state.get("entries") or []
+        first = "complete_from" not in state
+        newer_than = window
+        if kept and not first:
+            newer_than = model.iso(max(model.stamp(kept[0]["at"]) - ACTIVITY_SLACK, model.stamp(window)))
+        pages = ACTIVITY_FIRST_PAGES if first else ACTIVITY_PAGES
+        try:
+            got = self.host.repo_activity(repo, newer_than=newer_than, max_pages=max(1, min(pages, budget)))
+        except HostError as exc:
+            if exc.status == 401:
+                self._note(exc)
+            if exc.status in (0, 401):
+                raise  # offline or signed out: the next repository would fail the same way
+            logs[repo] = {**state, "read_at": now, "error": exc.message}
+            return 1
+        if got is None:
+            return 0
+        fresh = got["entries"]
+        if got["reached"]:
+            complete = window if first else state["complete_from"]
+        else:
+            complete = min((e["at"] for e in fresh), key=model.stamp) if fresh else newer_than
+        logs[repo] = {"entries": teamfeed.merge(kept, fresh, window, ACTIVITY_KEEP), "read_at": now,
+                      "complete_from": complete, "error": None}
+        return got["pages"]
+
+    def warm_activity(self):
+        """While the page shows the feed, the tick keeps it warm, ACTIVITY_TICK_CALLS at a time."""
+        asked = self.__dict__.get("_activity_asked")
+        if not asked or time.time() - asked["at"] > ACTIVITY_WATCHED:
+            return 0
+        try:
+            return self.read_activity(asked["project"], budget=ACTIVITY_TICK_CALLS) or 0
+        except HostError:
+            raise
+        except ValueError:
+            return 0  # the project it asked for is gone
+        except Exception:  # noqa: BLE001 - the feed must never stop the pull request refreshes
+            traceback.print_exc()
+            return 0
+
+    def team_activity(self, who=None, project=None, repo=None, kind=None, since=None, until=None, limit=teamfeed.LIMIT):
+        """The feed as the page shows it, from what is kept: no call to Bitbucket here."""
+        key = self._feed_project(project, offline=True)
+        self._activity_asked = {"at": time.time(), "project": project}
+        me = self.me() or {}
+        people = ([{"uuid": me["uuid"], "name": me.get("name"), "is_me": True}] if me.get("uuid") else [])
+        people += [{"uuid": m["uuid"], "name": m.get("name")} for m in self.team()]
+        prs = self._feed_prs()
+        scope = self.activity_repos(key, prs, offline=True)
+        logs = self._feed()["repos"]
+        states = {r: logs.get(r) or {} for r in scope["repos"]}
+        window = time.time() - ACTIVITY_WINDOW_DAYS * 86400
+        entries = [e for s in states.values() for e in s.get("entries") or []]
+        entries += [e for e in teamfeed.opened([p for p in prs if p["repo"] in states]) if model.stamp(e["at"]) >= window]
+        found = teamfeed.select(teamfeed.join(entries, prs), [p["uuid"] for p in people], who=who, repo=repo,
+                                kind=kind, since=since, until=until, limit=limit)
+        start = max(since or 0, window)
+        shown = [r for r in states if not repo or r == repo]
+        name = next((p.get("name") for p in (self.data.get("projects") or {}).get("items", []) if p.get("key") == key), key)
+        return {
+            **found,
+            "people": people,
+            "repos": scope["repos"],
+            "project": {"key": key, "name": name} if key else None,
+            "scope_known": scope["known"],
+            "repos_cut": scope["cut"],
+            "unread": [r for r in shown if "complete_from" not in states[r]],
+            "partial": [r for r in shown if "complete_from" in states[r] and model.stamp(states[r]["complete_from"]) > start + 1],
+            "errors": [{"repo": r, "error": states[r]["error"]} for r in shown if states[r].get("error")],
+            "read_at": max((s.get("read_at") or 0 for s in states.values()), default=0) or None,
+            "reading": self._feed_lock().locked(),
+            "window_days": ACTIVITY_WINDOW_DAYS,
+            "budget": self.budget(),
+        }
 
     # ---- project scope ----------------------------------------------------
 
@@ -656,7 +865,11 @@ class Engine:
     def project_repos(self, offline=False):
         """Repository slugs of the chosen project, cached for a day. None means every project.
         `offline` answers from the cache only, however old: the polled routes never call Bitbucket."""
-        key = self.config.get("project")
+        return self.repos_of(self.config.get("project"), offline)
+
+    def repos_of(self, key, offline=False):
+        """Repository slugs of project key, as project_repos() reads them; None for no key, and
+        for one whose list is not known (offline, or the read failed)."""
         if not key:
             return None
         cache = (self.data.get("project_repos") or {}).get(key) or {}

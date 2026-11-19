@@ -1,6 +1,7 @@
 """Turn raw Bitbucket payloads into the small shapes the page renders."""
 
 import re
+from datetime import datetime, timezone
 
 import config
 
@@ -296,3 +297,56 @@ def timeline(events):
                         "state": u.get("state")})
     out.sort(key=lambda x: x.get("at") or "", reverse=True)
     return out
+
+
+def stamp(iso):
+    """An ISO 8601 time (Bitbucket's +00:00, or a Z) as seconds since the epoch; 0 when unreadable."""
+    if not isinstance(iso, str) or not iso:
+        return 0.0
+    try:
+        when = datetime.fromisoformat(iso[:-1] + "+00:00" if iso.endswith("Z") else iso)
+    except ValueError:
+        return 0.0
+    return (when if when.tzinfo else when.replace(tzinfo=timezone.utc)).timestamp()
+
+
+def iso(seconds):
+    return datetime.fromtimestamp(seconds, timezone.utc).isoformat()
+
+
+def feed_entry(raw, repo):
+    """One entry of a repository's activity log, for the team feed: who did what on which pull
+    request, and when. None for what the feed leaves out (a deleted comment, an unknown kind).
+    The id is stable across reads, so an entry read twice is kept once."""
+    pr = raw.get("pull_request") or {}
+    pr_id = pr.get("id")
+    if not isinstance(pr_id, int):
+        return None
+    base = {"repo": repo, "pr_id": pr_id, "pr_title": pr.get("title") or ""}
+
+    def who(user):
+        user = _user(user)
+        return {"uuid": user["uuid"], "name": user["name"]}
+
+    for kind, mark in (("approval", "a"), ("changes_requested", "r")):
+        if isinstance(raw.get(kind), dict):
+            e = raw[kind]
+            if not e.get("date"):
+                return None
+            person = who(e.get("user"))
+            return {**base, "id": f"{mark}:{repo}:{pr_id}:{person['uuid']}:{e['date']}",
+                    "kind": "approved" if kind == "approval" else "changes_requested", "who": person, "at": e["date"]}
+    if isinstance(raw.get("comment"), dict):
+        c = raw["comment"]
+        if c.get("deleted") or c.get("pending") or not c.get("created_on"):
+            return None
+        return {**base, "id": f"c:{repo}:{c.get('id')}", "kind": "commented", "who": who(c.get("user")), "at": c["created_on"],
+                "where": (c.get("inline") or {}).get("path") or None, "text": ((c.get("content") or {}).get("raw") or "")[:160]}
+    if isinstance(raw.get("update"), dict):
+        u = raw["update"]
+        if not u.get("date"):
+            return None
+        state = u.get("state")
+        kind = {"MERGED": "merged", "DECLINED": "declined"}.get(state, "updated")
+        return {**base, "id": f"u:{repo}:{pr_id}:{u['date']}:{state}", "kind": kind, "who": who(u.get("author")), "at": u["date"]}
+    return None

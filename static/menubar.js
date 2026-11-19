@@ -18,7 +18,7 @@ const MenuBar = (() => {
   const mineOpen = () => isOpenPr() && isMeUuid(openPrNow().author?.uuid);
   const press = (sel) => { const b = document.querySelector(sel); if (b && !b.disabled) b.click(); };
   const exists = (sel) => !!document.querySelector(sel);
-  const KEYS = { queue: "Q", insights: "I", terminal: "T" };
+  const KEYS = { queue: "Q", insights: "I", activity: "A", terminal: "T" };
 
   function model() {
     const p = Prefs.get();

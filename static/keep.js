@@ -8,7 +8,8 @@
 
 const Keep = (() => {
   const KEYS = ["prdesk.layout.v2", "prdesk.prefs.v1", "prdesk.termnames.v1", "prdesk.termorder.v1", "prdesk.termtitles.v1",
-    "prdesk.insights.range.v1", "prdesk.datefilter.v1", "prdesk.notify.v1", "prdesk.dock.width.v1", "prdesk.restore.v1", "prdesk.welcome.v1"];
+    "prdesk.insights.range.v1", "prdesk.datefilter.v1", "prdesk.notify.v1", "prdesk.dock.width.v1", "prdesk.restore.v1", "prdesk.welcome.v1",
+    "prdesk.activity.v1"];
   const STAMP = "prdesk.keep.stamp.v1";
   const get = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
   const set = (k, v) => { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch { /* storage blocked */ } };

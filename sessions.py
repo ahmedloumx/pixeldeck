@@ -24,7 +24,7 @@ SAVE_EVERY = 5
 SCREEN_MAX = 200_000          # characters of a saved screen, per terminal
 UI_KEYS = ("prdesk.layout.v2", "prdesk.prefs.v1", "prdesk.termnames.v1", "prdesk.termorder.v1", "prdesk.termtitles.v1",
            "prdesk.insights.range.v1", "prdesk.datefilter.v1", "prdesk.notify.v1", "prdesk.dock.width.v1", "prdesk.restore.v1",
-           "prdesk.welcome.v1")
+           "prdesk.welcome.v1", "prdesk.activity.v1")
 UI_VALUE_MAX = 64 * 1024
 UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 # The only parts of Claude Code's command line carried to its resumed self: how it asks for

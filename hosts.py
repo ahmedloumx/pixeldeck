@@ -12,6 +12,8 @@ questions about pull requests, in the shapes model.py gives the page:
   changes_requested(repo, id)            who asked for changes, for the insights
   behind(pr), commenters(repo, id, n)    for the notifications
   projects(), project_repos(key)         Bitbucket's project scope; other hosts have none
+  repo_activity(repo, newer_than, ...)   one repository's pull request activity, newest first,
+                                         for the team feed; None on a host without such a log
   budget(), busy()                       the status bar's meter, and when to stop polling
 
 A person is a uuid the host chooses (Bitbucket's {uuid}, a GitHub or GitLab login), a
@@ -26,12 +28,14 @@ import model
 from bitbucket import HOURLY_LIMIT
 
 BACKGROUND_SHARE = 0.8
+ACTIVITY_PAGELEN = 50
+ORDER_SLACK = 120  # seconds an activity entry may sit out of time order before the log is taken as unordered
 
 # Routes only Bitbucket answers: the writes, and the panels built on its API.
 BITBUCKET_ROUTES = {"merge", "merge-options", "decline", "review", "sync", "pr-sync", "pr-create", "branch",
-                    "branch-diff", "branch-delete", "propose", "proposal-decide"}
+                    "branch-diff", "branch-delete", "propose", "proposal-decide", "team-activity"}
 # Page features that need those routes: a host without them does not offer them.
-BITBUCKET_FEATURES = {"merge", "sync", "merge-options", "reviews", "proposals", "repos", "repo-commit"}
+BITBUCKET_FEATURES = {"merge", "sync", "merge-options", "reviews", "proposals", "repos", "repo-commit", "team-activity"}
 
 
 def file_for(path, host_id):
@@ -83,6 +87,9 @@ class Host:
         return []
 
     def project_repos(self, key):
+        return None
+
+    def repo_activity(self, repo, newer_than=None, max_pages=2):
         return None
 
 
@@ -189,6 +196,35 @@ class BitbucketHost(Host):
         raw = self.client.paged(f"/workspaces/{self.client.workspace}/projects", {"pagelen": 100}, max_pages=5)
         return sorted(({"key": p.get("key"), "name": p.get("name")} for p in raw if p.get("key")),
                       key=lambda p: (p["name"] or "").lower())
+
+    def repo_activity(self, repo, newer_than=None, max_pages=2):
+        """The repository's activity log across all its pull requests, as feed entries, read from
+        the newest back to newer_than (an ISO time) or for max_pages pages, whichever comes first.
+
+        Answers {"entries", "reached", "pages"}: reached says nothing between newer_than and now
+        was skipped (the walk got there, or to the log's end); pages is the calls spent. The docs
+        do not promise an order, so the walk stops early only while the log reads newest first."""
+        url = f"/repositories/{self.client.workspace}/{repo}/pullrequests/activity"
+        query = {"pagelen": ACTIVITY_PAGELEN}
+        limit = model.stamp(newer_than) if newer_than else None
+        entries, pages, oldest, ordered = [], 0, None, True
+        while pages < max_pages:
+            page = self.client.get(url, query)
+            pages += 1
+            got = [e for e in (model.feed_entry(raw, repo) for raw in page.get("values") or []) if e is not None]
+            for entry in got:  # the whole page is checked before its entries may end the walk
+                at = model.stamp(entry["at"])
+                if oldest is not None and at > oldest + ORDER_SLACK:
+                    ordered = False
+                oldest = at if oldest is None else min(oldest, at)
+            for entry in got:
+                if limit is not None and ordered and model.stamp(entry["at"]) < limit:
+                    return {"entries": entries, "reached": True, "pages": pages}
+                entries.append(entry)
+            url, query = page.get("next"), None
+            if not url:
+                return {"entries": entries, "reached": True, "pages": pages}
+        return {"entries": entries, "reached": False, "pages": pages}
 
     def project_repos(self, key):
         raw = self.client.paged(f"/repositories/{self.client.workspace}",
