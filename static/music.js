@@ -323,9 +323,11 @@ const Music = (() => {
         ${step(2, false, "Add this redirect URI", `<p>In the app's settings, paste it under Redirect URIs exactly as written, then save.</p>
           <p class="mu-code"><code>${esc(uri)}</code>${copy(uri)}</p>
           <p class="mu-hint">Spotify takes plain http only for 127.0.0.1, so it is not localhost. It follows the port PixelDeck runs on.</p>`)}
-        ${step(3, s.configured && s.client_id_ok, "Give PixelDeck the Client ID", `<p>Copy the app's Client ID into PixelDeck's settings file. No client secret, and no restart.</p>
-          <p class="mu-code"><code>SPOTIFY_CLIENT_ID=</code>${copy("SPOTIFY_CLIENT_ID=")}</p>
-          ${s.env_file ? `<p class="mu-hint">The settings file: <code>${esc(s.env_file)}</code></p>` : ""}
+        ${step(3, s.configured && s.client_id_ok, "Give PixelDeck the Client ID", `<p>Paste the app's Client ID here and save it. No client secret, and no restart.</p>
+          <form class="mu-cid" data-music-cid autocomplete="off"><input class="mu-cid-input" name="client_id" spellcheck="false" aria-label="Client ID"
+            placeholder="${s.configured ? "Saved: paste another to change it" : "Client ID"}"><button class="btn" type="submit">Save</button></form>
+          <p class="mu-warn" data-music-cid-error hidden></p>
+          ${s.env_file ? `<p class="mu-hint">It is kept as <code>SPOTIFY_CLIENT_ID</code> in <code>${esc(s.env_file)}</code>.</p>` : ""}
           ${s.configured && !s.client_id_ok ? '<p class="mu-warn">That Client ID does not look right: it is the letters and digits on the app\'s page.</p>' : ""}`)}
         ${step(4, false, "Connect", `<p>Sign in with Spotify in your browser and allow PixelDeck.</p>
           <p class="mu-actions"><button class="btn btn--primary" type="button" data-music="connect"${s.configured && s.client_id_ok ? "" : " disabled"}>Connect Spotify</button>
@@ -1152,6 +1154,21 @@ const Music = (() => {
       if (typeof MusicLibrary !== "undefined" && MusicLibrary.focusSearch()) e.preventDefault();
     });
     addEventListener("focus", () => { if (signIn || mode === "setup") refreshStatus(); });
+    // Step 3 of the setup: the Client ID saved from here, into the settings file.
+    document.addEventListener("submit", async (e) => {
+      const form = e.target.closest?.("[data-music-cid]");
+      if (!form) return;
+      e.preventDefault();
+      const err = form.parentElement.querySelector("[data-music-cid-error]"), b = form.querySelector("[type=submit]");
+      if (err) err.hidden = true;
+      b.disabled = true;
+      try {
+        await api("spotify-client-id", { method: "POST", body: { client_id: form.client_id.value } });
+        await refreshStatus();
+        toast("Saved.", "Now press Connect Spotify.");
+      } catch (ex) { if (err) { err.textContent = ex.message; err.hidden = false; } else toast("Not saved.", ex.message, true); }
+      finally { b.disabled = false; }
+    });
     // The local clock: time, blocks and the end of a song, four times a second while it plays.
     setInterval(async () => {
       if (document.hidden || !playing() || !anyShown()) return;

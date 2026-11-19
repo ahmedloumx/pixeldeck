@@ -211,7 +211,7 @@ class Player:
         Spotify sends the browser back to spotifyd, which keeps the login. Then the player starts."""
         exe = binary()
         if not exe:
-            raise ValueError("spotifyd is not installed: see Settings, Connections, Spotify player")
+            raise ValueError("spotifyd is not installed: see Settings, Connected apps, Spotify")
         with self.lock:
             if self.signin["state"] == "waiting":
                 return self.status()

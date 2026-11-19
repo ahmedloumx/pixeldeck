@@ -207,8 +207,8 @@ const StatusBar = (() => {
 })();
 
 const Settings = (() => {
-  const TABS = [["setup", "Setup"], ["connections", "Connections"], ["notifications", "Notifications"], ["look", "Personalise"], ["about", "About"]];
-  let tab = "connections", report = null, loading = false, musicHooked = false;
+  const TABS = [["setup", "Setup"], ["connections", "Connected apps"], ["notifications", "Notifications"], ["look", "Personalise"], ["about", "About"]];
+  let tab = "connections", report = null, loading = false, musicHooked = false, appOpen = null;
   // The setup form is redrawn with the rest of the pane, so what you typed lives here until saved.
   let setup = null, draft = {}, checks = null;
   let player = null, jiraOpen = false, playerPoll = 0;
@@ -218,26 +218,123 @@ const Settings = (() => {
   const row = (label, value, opts = {}) => value == null || value === "" ? "" :
     `<div class="set-row"><dt>${esc(label)}</dt><dd>${opts.code ? `<code>${esc(value)}</code>` : esc(value)}${opts.copy ? ` <button class="link" type="button" data-copy-value="${esc(value)}">Copy</button>` : ""}</dd></div>`;
 
-  function connectionsHtml() {
-    if (!report) return `<p class="set-hint">${loading ? "Asking the server…" : "This needs a newer PixelDeck server: restart it once."}</p>`;
-    const bb = report.bitbucket, cl = report.claude, git = report.git, app = report.app;
+  // The cards each app had: in the guide drawer now, under the steps.
+  function bitbucketCard() {
+    const bb = report.bitbucket;
     const bbOk = bb.auth?.ok === true ? true : bb.auth?.ok === false || !bb.token_set ? false : null;
     const used = bb.budget?.used || 0, limit = bb.budget?.limit || 1000;
-    const jira = report.jira;
     return `<section class="set-card"><header><h3>Bitbucket</h3>${pill(bbOk, bb.me ? `Connected as ${bb.me.name}` : "Connected", bb.token_set ? "Token refused" : "No token yet")}</header>
         ${bb.auth?.error ? `<p class="set-error">${esc(bb.auth.error)}</p>` : ""}
         <dl class="set-rows">${row("Workspace", bb.workspace)}${row("Account", bb.email)}${row("Project", bb.project ? bb.project.name : "Every project")}${row("Token", bb.token_set ? "set (never shown)" : "missing")}${row("Settings file", bb.env_file, { code: true, copy: true })}</dl>
         <div class="set-meter" data-tip="${used} of ${limit} calls used in the last hour"><span style="--w:${Math.min(1, used / limit).toFixed(3)}"></span></div>
         <p class="set-hint">${used} of ${limit} API calls used in the last hour. Change the account or the token in <button class="link" type="button" data-settings-tab="setup">Setup</button>.</p>
-        <p><button class="btn" type="button" data-settings-test>Test the connection</button></p></section>
-      ${jira ? jiraHtml(jira, bb) : ""}
-      <section class="set-card"><header><h3>Claude Code</h3>${pill(cl.ok, "Ready", cl.path ? "Not answering" : "Not found")}</header>
+        <p><button class="btn" type="button" data-settings-test>Test the connection</button></p></section>`;
+  }
+  function claudeCard() {
+    const cl = report.claude;
+    return `<section class="set-card"><header><h3>Claude Code</h3>${pill(cl.ok, "Ready", cl.path ? "Not answering" : "Not found")}</header>
         ${cl.error ? `<p class="set-error">${esc(cl.error)}</p>` : ""}
         <dl class="set-rows">${row("Program", cl.path, { code: true })}${row("Version", cl.version)}</dl>
-        <p class="set-hint">The Claude buttons on a pull request start it in a terminal here. Point <code>${esc(cl.setting)}</code> at it when it is not on your PATH.</p></section>
-      <section class="set-card"><header><h3>Git and terminals</h3>${pill(git.ok && !app.terminal, "Ready", git.ok ? "Terminals unavailable" : "git missing")}</header>
-        <dl class="set-rows">${row("git", git.version)}${row("Terminals", app.terminal || "ready")}${row("Your clones", app.workspace_root, { code: true })}${row("Brief templates", app.briefs_dir, { code: true })}</dl></section>
-      ${spotifyHtml()}`;
+        <p class="set-hint">The Claude buttons on a pull request start it in a terminal here. Point <code>${esc(cl.setting)}</code> at it when it is not on your PATH.</p></section>`;
+  }
+  function gitCard() {
+    const git = report.git, app = report.app;
+    return `<section class="set-card"><header><h3>Git and terminals</h3>${pill(git.ok && !app.terminal, "Ready", git.ok ? "Terminals unavailable" : "git missing")}</header>
+        <dl class="set-rows">${row("git", git.version)}${row("Terminals", app.terminal || "ready")}${row("Your clones", app.workspace_root, { code: true })}${row("Brief templates", app.briefs_dir, { code: true })}</dl></section>`;
+  }
+  // Spotify: the Client ID of your own Spotify app, saved from here. It is not shown back.
+  function spotifyIdForm(sp) {
+    if (!(state.features || []).includes("spotify-client-id")) return "";
+    return `<form class="set-form" data-spotify-form autocomplete="off">
+        <label class="field-block"><span>Client ID</span><input name="client_id" data-keep="spotify-cid" spellcheck="false" autocomplete="off"
+          placeholder="${sp?.configured ? "Saved: paste another to change it" : "The line of letters and digits under your app's name"}"></label>
+        <p class="set-error" data-spotify-error hidden></p>
+        <p class="set-actions"><button class="btn btn--primary" type="submit">Save</button>${sp?.configured ? ' <button class="btn btn--quiet" type="button" data-spotify-clear>Remove</button>' : ""}</p></form>`;
+  }
+
+  /* Connected apps: what PixelDeck connects to, grouped, each with an 8-bit icon and its state.
+     A click opens its guide beside the list: the steps, each with the link to the exact page,
+     then its fields and buttons. The same guides are in the README, for a new colleague. */
+  const GUIDE = "https://github.com/ahmedloumx/pixeldeck#";
+  const GROUPS = [["code", "Where your code lives"], ["ai", "AI helpers"], ["tickets", "Tickets"], ["media", "Music and video"]];
+  const ext = (url, label) => `<button class="link" type="button" data-external="${esc(url)}">${esc(label)}</button>`;
+  const toSetup = '<button class="link" type="button" data-settings-tab="setup">Setup</button>';
+  function appsModel() {
+    const bb = report.bitbucket, cl = report.claude, git = report.git, app = report.app, jira = report.jira;
+    const bbOk = bb.auth?.ok === true ? true : bb.auth?.ok === false ? false : null;
+    const scopes = ["read:user", "read:workspace", "read:repository", "read:pullrequest"].map((x) => `<code>${x}:bitbucket</code>`).join(", ");
+    const apps = [
+      { id: "bitbucket", group: "code", label: "Bitbucket", anchor: "set-up-bitbucket", card: bitbucketCard,
+        tone: bbOk === true ? "ok" : !bb.token_set ? "off" : bbOk === false ? "bad" : "warn",
+        pill: bbOk === true ? "Connected" : !bb.token_set ? "Not set up" : bbOk === false ? "Token refused" : "Checking",
+        line: bb.me ? `${bb.workspace}, signed in as ${bb.me.name}` : bb.workspace ? `Workspace ${bb.workspace}` : "Your pull requests and your team's",
+        steps: [`Open ${ext(TOKEN_PAGE, "id.atlassian.com, Security, API tokens")} and press <b>Create API token with scopes</b>.`,
+          `Pick the app <b>Bitbucket</b> and tick ${scopes}. Add <code>write:pullrequest:bitbucket</code> to merge from here.`,
+          `Paste it in ${toSetup} with your Atlassian email and your workspace, then press <b>Check</b> and <b>Save</b>.`] },
+      { id: "git", group: "code", label: "Git and terminals", anchor: "set-up-git", card: gitCard,
+        tone: git.ok && !app.terminal ? "ok" : git.ok ? "warn" : "bad", pill: git.ok && !app.terminal ? "Ready" : git.ok ? "No terminals" : "git missing",
+        line: git.ok ? `${git.version || "git"}, your clones and the terminals` : "Install git for the terminals and the Repos panel",
+        steps: [`Install git from ${ext("https://git-scm.com/downloads", "git-scm.com/downloads")}.`,
+          `Point <b>Your clones</b> in ${toSetup} at the folder that holds your repositories.`] },
+      { id: "github", group: "code", label: "GitHub", soon: true, line: "Pull requests from github.com" },
+      { id: "gitlab", group: "code", label: "GitLab", soon: true, line: "gitlab.com or your own server" },
+      { id: "claude", group: "ai", label: "Claude Code", anchor: "set-up-claude-code", card: claudeCard,
+        tone: cl.ok ? "ok" : cl.path ? "bad" : "off", pill: cl.ok ? "Ready" : cl.path ? "Not answering" : "Not found",
+        line: cl.ok ? `${cl.version || "Found"}: fixes and reviews in a terminal` : "Fixes and reviews pull requests in a terminal here",
+        steps: [`Install Claude Code: ${ext("https://docs.claude.com/en/docs/claude-code/overview", "docs.claude.com, Claude Code")}.`,
+          "Run <code>claude</code> once in a terminal and sign in.",
+          `Not on your PATH? Put its full path in <code>${esc(cl.setting)}</code> in the settings file.`] },
+      { id: "gemini", group: "ai", label: "Gemini CLI", soon: true, line: "Another brain for the blob" },
+      { id: "codex", group: "ai", label: "Codex CLI", soon: true, line: "Another brain for the blob" },
+    ];
+    if (jira) {
+      const setUp = !!(jira.site && jira.token_set);
+      apps.push({ id: "jira", group: "tickets", label: "Jira", anchor: "set-up-jira", card: () => jiraHtml(jira, bb),
+        tone: jira.ok === false && setUp ? "bad" : setUp ? "ok" : jira.site ? "warn" : "off",
+        // The settings read does not call Jira, so a saved token not tried yet is just set up.
+        pill: jira.ok === true ? "Connected" : setUp && jira.ok === false ? "Token refused" : setUp ? "Set up" : jira.site ? "Needs a token" : "Not set up",
+        line: jira.site ? `${jira.site.replace(/^https:\/\//, "")}${jira.me ? `, as ${jira.me}` : ""}` : "Ticket status in the merge popup",
+        steps: [`Open ${ext(TOKEN_PAGE, "id.atlassian.com, Security, API tokens")}, signed in as the account you use for Jira.`,
+          "Press <b>Create API token</b>, name it PixelDeck, and copy it.",
+          "Paste it below with your Jira address, then press <b>Save and test</b>."] });
+    }
+    if (typeof Music !== "undefined" && (state.features || []).includes("spotify")) {
+      const sp = Music.status();
+      apps.push({ id: "spotify", group: "media", label: "Spotify", anchor: "set-up-spotify", card: () => spotifyIdForm(sp) + spotifyHtml(),
+        tone: !sp ? "off" : sp.connected ? "ok" : sp.configured && !sp.client_id_ok ? "bad" : sp.configured ? "warn" : "off",
+        pill: !sp ? "Checking" : sp.connected ? "Connected" : sp.configured && !sp.client_id_ok ? "Check the ID" : sp.configured ? "Not signed in" : "Not set up",
+        line: sp?.connected ? `${sp.user ? `${sp.user.name}, ` : ""}${sp.user?.premium ? "Premium" : "the boombox"}` : "The boombox and the mini player",
+        steps: [`Open ${ext("https://developer.spotify.com/dashboard", "developer.spotify.com/dashboard")}, create an app (any name) and tick <b>Web API</b>.`,
+          `Add this redirect URI to it: <code>${esc(sp?.redirect_uri || "")}</code>${sp?.redirect_uri ? ` <button class="link" type="button" data-copy-value="${esc(sp.redirect_uri)}">Copy</button>` : ""}.`,
+          "Paste the app's <b>Client ID</b> below and save it, then press <b>Connect</b> and sign in to Spotify."] });
+    }
+    apps.push({ id: "youtube", group: "media", label: "YouTube", soon: true, line: "Videos in a floating pixel TV" });
+    return apps;
+  }
+  const appIcon = (id, px) => (typeof ControlCenter !== "undefined" ? ControlCenter.appIcon(id, px) : "");
+  function appCard(a) {
+    const text = `<span class="capp-icon">${appIcon(a.id, 2.6)}</span><span class="capp-text"><b>${esc(a.label)}</b><small>${esc(a.line)}</small></span>`;
+    if (a.soon) return `<div class="capp is-soon" aria-disabled="true">${text}<span class="set-pill is-off">Soon</span></div>`;
+    return `<button class="capp is-${a.tone}" type="button" data-capp="${a.id}" aria-pressed="${appOpen === a.id}">${text}<span class="set-pill is-${a.tone}">${esc(a.pill)}</span></button>`;
+  }
+  function drawerHtml(a) {
+    return `<aside class="capp-drawer" aria-label="${esc(a.label)}: how to connect it">
+        <header class="capp-drawer-head"><span class="capp-icon">${appIcon(a.id, 3.4)}</span><h3>${esc(a.label)}</h3><span class="set-pill is-${a.tone}">${esc(a.pill)}</span>
+          <button class="btn btn--quiet capp-close" type="button" data-capp-close aria-label="Close the guide">×</button></header>
+        <ol class="capp-steps">${a.steps.map((x) => `<li>${x}</li>`).join("")}</ol>
+        ${a.card()}
+        <p class="set-hint capp-more">${ext(GUIDE + a.anchor, "The whole guide, online")}</p></aside>`;
+  }
+  function connectionsHtml() {
+    if (!report) return `<p class="set-hint">${loading ? "Asking the server…" : "This needs a newer PixelDeck server: restart it once."}</p>`;
+    const apps = appsModel();
+    const open = apps.find((a) => a.id === appOpen && !a.soon);
+    const groups = GROUPS.map(([g, title]) => {
+      const list = apps.filter((a) => a.group === g);
+      return list.length ? `<h3 class="capps-title">${esc(title)}</h3><div class="capps">${list.map(appCard).join("")}</div>` : "";
+    }).join("");
+    return `<p class="set-hint">Green: working. Yellow: set up, but it needs you. Grey: not connected yet. Click one for its guide: every step links to the page it needs.</p>
+      <div class="capps-wrap${open ? " has-drawer" : ""}"><div class="capps-list">${groups}</div>${open ? drawerHtml(open) : ""}</div>`;
   }
   function setupHtml() {
     if (!(state.features || []).includes("setup")) return `<p class="set-hint">This needs a newer PixelDeck server: restart it once.</p>`;
@@ -338,7 +435,7 @@ const Settings = (() => {
     return `<section class="set-card"><header><h3>Spotify</h3><span class="set-pill is-${tone}">${esc(label)}</span></header>
         ${sp.error ? `<p class="set-error">${esc(sp.error)}</p>` : ""}
         <dl class="set-rows">${row("Plan", plan)}${row("Client ID", sp.configured ? (sp.client_id_ok ? "set" : "set, but it does not look like a Spotify client ID") : `missing: ${sp.setting}`)}${row("Redirect URI", sp.redirect_uri, { code: true, copy: true })}</dl>
-        <p class="set-hint">For the Music panel. Register the redirect URI exactly as shown in your Spotify app, and put its Client ID in <code>${esc(sp.setting)}</code>. Play, pause, skip, seek and volume need Spotify Premium, for you and for the app's owner.</p>
+        <p class="set-hint">For the Music panel. Register the redirect URI exactly as shown in your Spotify app, and save its Client ID above (it lands in <code>${esc(sp.setting)}</code>). Play, pause, skip, seek and volume need Spotify Premium, for you and for the app's owner.</p>
         <p>${buttons}</p>${playerHtml()}</section>`;
   }
   function lookHtml() {
@@ -421,8 +518,9 @@ const Settings = (() => {
     loading = false;
     if (dialog()?.open) paint();
   }
-  function open(which) {
+  function open(which, opts = {}) {
     if (which) tab = which;
+    if ("app" in opts) appOpen = opts.app;
     const d = dialog();
     paint();
     if (!d.open) d.showModal();
@@ -434,6 +532,24 @@ const Settings = (() => {
     const tabBtn = t.closest("[data-settings-tab]");
     if (tabBtn) { tab = tabBtn.dataset.settingsTab; return paint(); }
     if (t.closest("[data-settings-close]")) return dialog().close();
+    const capp = t.closest("[data-capp]");
+    if (capp) {
+      appOpen = appOpen === capp.dataset.capp ? null : capp.dataset.capp;
+      paint();
+      // stacked under a narrow dialog, the guide is above the list: bring its top into view
+      const pane = dialog().querySelector(".set-body"), dr = pane?.querySelector(".capp-drawer");
+      const above = dr ? pane.getBoundingClientRect().top - dr.getBoundingClientRect().top : 0;
+      if (above > 0) pane.scrollTop -= above + 8;
+      return;
+    }
+    if (t.closest("[data-capp-close]")) { appOpen = null; return paint(); }
+    if (t.closest("[data-spotify-clear]")) {
+      const b = t.closest("[data-spotify-clear]");
+      if (!armed(b, "Sure? Remove it")) return;
+      try { await busy(b, () => api("spotify-client-id", { method: "POST", body: { clear: true } })); await Music.refresh(); paint(); toast("Spotify's Client ID removed."); }
+      catch (err) { toast("Could not remove it.", err.message, true); }
+      return;
+    }
     if (t.closest("[data-jira-clear]")) {
       const b = t.closest("[data-jira-clear]");
       if (!armed(b, "Sure? Remove Jira")) return;
@@ -507,6 +623,20 @@ const Settings = (() => {
       paint();
       if (out.jira.ok) toast(`Jira connected${out.jira.me ? ` as ${out.jira.me}` : ""}.`, "Tickets show their status in the merge popup now.");
       else toast("Saved, but Jira refused it.", out.jira.error || "", true);
+    } catch (ex) { err.textContent = ex.message; err.hidden = false; }
+  });
+  document.addEventListener("submit", async (e) => {
+    const form = e.target.closest?.("[data-spotify-form]");
+    if (!form) return;
+    e.preventDefault();
+    const b = form.querySelector("[type=submit]"), err = form.querySelector("[data-spotify-error]");
+    err.hidden = true;
+    try {
+      await busy(b, () => api("spotify-client-id", { method: "POST", body: { client_id: form.client_id.value } }));
+      form.client_id.value = "";
+      if (typeof Music !== "undefined") await Music.refresh();
+      paint();
+      toast("Saved.", "Now press Connect and sign in to Spotify in your browser.");
     } catch (ex) { err.textContent = ex.message; err.hidden = false; }
   });
   document.addEventListener("change", (e) => {

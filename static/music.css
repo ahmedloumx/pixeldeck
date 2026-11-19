@@ -747,3 +747,9 @@ button.ly-line:hover { color: oklch(85% 0.14 145 / 0.8); }
 .mu-panel::-webkit-scrollbar-track, .mu-col::-webkit-scrollbar-track { background: var(--color-paper-3); box-shadow: inset 1px 0 0 var(--color-rule); }
 .mu-panel::-webkit-scrollbar-thumb, .mu-col::-webkit-scrollbar-thumb { min-height: 32px; background: var(--color-rule-2); border: 2px solid var(--color-paper-3); }
 .mu-panel::-webkit-scrollbar-thumb:hover, .mu-col::-webkit-scrollbar-thumb:hover { background: var(--color-accent); }
+
+/* the Client ID, pasted in the setup's third step */
+.mu-cid { display: flex; flex-wrap: wrap; gap: var(--space-xs); margin: 0 0 var(--space-2xs); }
+.mu-cid-input { flex: 1 1 18rem; min-width: 0; min-height: 34px; padding: 0 10px; border: var(--rule-hair) solid var(--color-rule-2); background: var(--color-paper); color: var(--color-ink);
+  font: 400 var(--text-sm) var(--font-term); }
+.mu-cid-input:focus-visible { outline: var(--pixel) solid var(--color-focus); outline-offset: 1px; }

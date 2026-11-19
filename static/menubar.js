@@ -39,7 +39,7 @@ const MenuBar = (() => {
         { label: "Quick toggles", run: () => Notify.toggle(null, true, "toggles") },
         "-",
         { label: "Settings…", run: () => Settings.open() },
-        { label: "Connections", run: () => Settings.open("connections") },
+        { label: "Connected apps", run: () => Settings.open("connections") },
         { label: "Personalise", run: () => Settings.open("look") },
         ...(chrome ? ["-", { label: "Close the window", run: () => PixelChrome.send("close") }] : []),
       ] },

@@ -77,6 +77,11 @@ Full documentation, with the architecture, security model and measured performan
   a grid, compact or list layout. Each app icon (Bitbucket, Jira, Spotify, Claude Code) sits in the
   bar or in the control center: drag it from one to the other, or use × and ↑. All of it is kept
   with your other settings.
+- **Connected apps.** Settings lists what PixelDeck connects to, grouped (where your code lives,
+  AI helpers, tickets, music and video), each with an 8-bit icon and its state. A click opens its
+  guide: the steps, each with the link to the exact page, then the fields to paste into. Jira and
+  Spotify are set up there without editing a file. The same guides are below, in
+  [Setup guides](#setup-guides).
 - **Themes and accents.** Two dark themes (Night, the default, and Midnight) and two light ones
   (Daylight, a warm grey, and Retro grey), with six accent colours apart. The blue bot, joystick on
   its head, is the same in every theme; the blob, the AI helper, takes each theme's colour, and has
@@ -236,6 +241,51 @@ From a git clone the token lives in `.env`, which `.gitignore` keeps out of git.
 setup screen (Settings, Setup) on Windows, it goes to Windows Credential Manager instead, and
 out of the file. PixelDeck sends it to `api.bitbucket.org` and nowhere else.
 
+## Setup guides
+
+The same steps as in **Settings, Connected apps**, where each app has a card: green when it
+works, yellow when it needs you, grey when it is not connected. A click opens its guide.
+
+### Set up Bitbucket
+
+1. Open [id.atlassian.com, Security, API tokens](https://id.atlassian.com/manage-profile/security/api-tokens)
+   and press **Create API token with scopes**.
+2. Pick the app **Bitbucket** and tick `read:user:bitbucket`, `read:workspace:bitbucket`,
+   `read:repository:bitbucket` and `read:pullrequest:bitbucket`. Add `write:pullrequest:bitbucket`
+   to open, merge and decline pull requests from PixelDeck (see [The API token](#the-api-token)).
+3. In **Settings, Setup**, paste it with your Atlassian email and your workspace (the part after
+   `bitbucket.org/`), press **Check**, then **Save**.
+
+### Set up git
+
+1. Install git from [git-scm.com/downloads](https://git-scm.com/downloads).
+2. In **Settings, Setup**, point **Your clones** at the folder that holds your repositories.
+
+### Set up Claude Code
+
+1. Install Claude Code: [docs.claude.com, Claude Code](https://docs.claude.com/en/docs/claude-code/overview).
+2. Run `claude` once in a terminal and sign in.
+3. Not on your PATH? Put its full path in `PIXELDECK_CLAUDE` in the settings file.
+
+### Set up Jira
+
+1. Open [id.atlassian.com, Security, API tokens](https://id.atlassian.com/manage-profile/security/api-tokens),
+   signed in as the account you use for Jira.
+2. Press **Create API token**, name it PixelDeck, and copy it.
+3. In **Settings, Connected apps, Jira**, paste it with your Jira address
+   (`https://your-team.atlassian.net`) and press **Save and test**. Leave the email empty when it
+   is your Bitbucket one.
+
+### Set up Spotify
+
+1. Open [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard), create an app
+   (any name) and tick **Web API**.
+2. Add the redirect URI `http://127.0.0.1:8642/spotify/callback` to it (your port, if you
+   changed `PIXELDECK_PORT`). The guide shows it with a copy button.
+3. Paste the app's **Client ID** in **Settings, Connected apps, Spotify** (or in the Music panel's
+   setup) and save it, then press **Connect** and sign in to Spotify. More in
+   [The music player and your Spotify app](#the-music-player-and-your-spotify-app).
+
 ## Configuration
 
 Everything is in one settings file; [.env.example](.env.example) lists every key with a comment.
@@ -252,7 +302,7 @@ wins over the file, the file wins over Windows Credential Manager (for `BITBUCKE
 | `BITBUCKET_PROJECT` | Start scoped to one project key. Empty: every project. |
 | `JIRA_SITE`, `TICKET_PREFIXES` | Turn ticket keys such as `ABC-123` in branches and titles into Jira links. |
 | `SPOTIFY_CLIENT_ID` | The Client ID of your own Spotify app, for the music player (see below). |
-| `JIRA_TOKEN`, `JIRA_EMAIL` | An Atlassian API token with Jira access, to show and move a ticket's status in the merge popup. Classic and scoped tokens both work; the Bitbucket token is never sent to Jira. `JIRA_EMAIL` defaults to `BITBUCKET_EMAIL`. **Settings, Connections, Jira** sets all three without editing the file, and tries them at once; the token is never shown back. |
+| `JIRA_TOKEN`, `JIRA_EMAIL` | An Atlassian API token with Jira access, to show and move a ticket's status in the merge popup. Classic and scoped tokens both work; the Bitbucket token is never sent to Jira. `JIRA_EMAIL` defaults to `BITBUCKET_EMAIL`. **Settings, Connected apps, Jira** sets all three without editing the file, and tries them at once; the token is never shown back. |
 | `SPOTIFYD`, `SPOTIFYD_PATH`, `SPOTIFYD_DEVICE_NAME` | PixelDeck's own Spotify player (see below): `SPOTIFYD=off` turns it off, `SPOTIFYD_PATH` names the program when it is not on the PATH or in `~/.local/bin`, the device name defaults to `PixelDeck`. |
 | `PIXELDECK_WORKSPACE_ROOT` | The folder with your local clones. Default: the folder PixelDeck sits in. |
 | `PIXELDECK_RELEASE_REPOS` | Glob patterns of repos whose pull requests target master or main before develop. |
@@ -287,8 +337,9 @@ Spotify gives each app its own Client ID, so everyone who runs PixelDeck uses an
    (any name) and tick **Web API**.
 2. Add the redirect URI `http://127.0.0.1:8642/spotify/callback` (your port, if you changed
    `PIXELDECK_PORT`). Spotify allows plain http only for `127.0.0.1`, never `localhost`.
-3. Put the app's Client ID in `.env` as `SPOTIFY_CLIENT_ID=`. No client secret: PixelDeck signs in
-   with PKCE, the flow made for apps that cannot keep one.
+3. Paste the app's Client ID in **Settings, Connected apps, Spotify** and save it (it lands in the
+   settings file as `SPOTIFY_CLIENT_ID=`). No client secret: PixelDeck signs in with PKCE, the flow
+   made for apps that cannot keep one.
 4. Press **Connect** in the Music panel and sign in to Spotify in your browser.
 
 Spotify Premium is needed for the app's owner (in development mode) and for play, pause, skip,
@@ -301,7 +352,7 @@ Spotify's Web API only steers a Spotify app that is open somewhere. To play with
 install [spotifyd](https://github.com/Spotifyd/spotifyd), a small open-source Spotify Connect
 player (not made by Spotify; Premium needed): the Linux file ending in `x86_64-full.tar.gz` from
 its releases, with `spotifyd` put in `~/.local/bin`. Then press **Sign in to Spotify** under
-**Settings, Connections, Spotify**: Spotify's own login page opens in your browser, and the login
+**Settings, Connected apps, Spotify**: Spotify's own login page opens in your browser, and the login
 is kept in PixelDeck's state folder, readable by you only. From then on PixelDeck starts it with
 the server, as the device **PixelDeck** playing through this computer's speakers, restarts it if
 it stops, and stops it with the server. It never announces itself on the network, so nobody on
