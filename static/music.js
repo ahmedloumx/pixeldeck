@@ -19,6 +19,14 @@ const Music = (() => {
   const LOOK_KEY = "prdesk.music.look.v1";
   const reducedQuery = matchMedia("(prefers-reduced-motion: reduce)");
   const still = () => reducedQuery.matches || document.documentElement.dataset.motion === "calm";
+  // Spotify sync: off, PixelDeck stops asking Spotify what plays (no polls, no devices, no up
+  // next) until it is on again. Playing something from here turns it back on.
+  const syncOn = () => typeof Prefs === "undefined" || Prefs.get("spotifySync") !== false;
+  function wakeSync() {
+    if (syncOn()) return;
+    Prefs.set({ spotifySync: true });
+    toast("Spotify sync is on again.", "Turn it off from the bell's quick toggles or the SYNC key.");
+  }
 
   let root = null, mini = null, els = {}, miniEls = {};
   let status = null, statusFailed = "", statusSeen = "";
@@ -349,7 +357,8 @@ const Music = (() => {
     const mq = (ref, cls) => `<div class="mu-mq ${cls}" data-ref="${ref}"><span class="mu-mq-track"><span class="mu-mq-text"></span><span class="mu-mq-text" aria-hidden="true"></span></span></div>`;
     return `<div class="mu" data-view="deck">
       <div class="mu-top"><span class="mu-kicker num8">MUSIC</span><span class="mu-from" data-ref="from"></span>
-        <span class="mu-top-tools"><button class="btn btn--quiet mu-tool" type="button" data-music="refresh" data-tip="Ask Spotify again now: what plays, the devices, the sign-in">${glyph("refresh", 2)}<span>Refresh</span></button>
+        <span class="mu-top-tools"><button class="btn btn--quiet mu-tool mu-sync" type="button" data-music="sync" data-ref="sync" aria-pressed="true" data-tip="Spotify sync: off, PixelDeck stops asking Spotify what plays"><i class="mu-led" aria-hidden="true"></i><span>Sync</span></button>
+          <button class="btn btn--quiet mu-tool" type="button" data-music="refresh" data-tip="Ask Spotify again now: what plays, the devices, the sign-in">${glyph("refresh", 2)}<span>Refresh</span></button>
           <button class="btn btn--quiet mu-tool" type="button" data-music="popout" data-tip="Float a mini player over the layout">${glyph("pop", 2)}<span>Pop out</span></button></span></div>
       <div class="mu-ribbon" data-ref="ribbon" hidden></div>
       <div class="mu-cols">
@@ -504,13 +513,16 @@ const Music = (() => {
     paintedItem = key;
     root.firstElementChild.classList.toggle("is-playing", on);
     root.firstElementChild.classList.toggle("is-idle", !item);
-    els.mode.textContent = !p ? "TUNING" : !item ? "NO TAPE" : on ? "PLAY" : "PAUSE";
+    const off = !syncOn();
+    root.firstElementChild.classList.toggle("is-sync-off", off);
+    els.sync.setAttribute("aria-pressed", String(!off));
+    els.mode.textContent = off ? "SYNC OFF" : !p ? "TUNING" : !item ? "NO TAPE" : on ? "PLAY" : "PAUSE";
     els.mode.dataset.state = !item ? "stop" : on ? "play" : "pause";
     els.dev.textContent = p?.device?.name ? p.device.name.toUpperCase() : "";
     els.from.textContent = fromText(p);
-    marquee(els.title, item ? item.name : p ? "Nothing is playing" : "Tuning in");
-    marquee(els.sub, item ? item.artists.join(", ") : p ? "Start Spotify on a phone or computer," : "");
-    marquee(els.album, item ? (item.album ? `${item.kind === "episode" ? "SHOW" : "FROM"} ${item.album}` : "") : p ? "or pick something in the library below." : "");
+    marquee(els.title, off ? "Spotify sync is off" : item ? item.name : p ? "Nothing is playing" : "Tuning in");
+    marquee(els.sub, off ? "PixelDeck is not asking Spotify what plays." : item ? item.artists.join(", ") : p ? "Start Spotify on a phone or computer," : "");
+    marquee(els.album, off ? "Press SYNC to turn it back on." : item ? (item.album ? `${item.kind === "episode" ? "SHOW" : "FROM"} ${item.album}` : "") : p ? "or pick something in the library below." : "");
     els.play.classList.toggle("is-playing", on);
     els.play.setAttribute("aria-label", on ? "Pause" : "Play");
     els.playLabel.textContent = on ? "PAUSE" : "PLAY";
@@ -584,7 +596,8 @@ const Music = (() => {
     miniEls.play.classList.toggle("is-playing", isOn);
     miniEls.play.setAttribute("aria-label", isOn ? "Pause" : "Play");
     miniEls.play.disabled = !item;
-    marquee(miniEls.mq, item ? `${item.name} · ${item.artists.join(", ")}` : player ? "Nothing playing" : "Music");
+    mini.classList.toggle("is-sync-off", !syncOn());
+    marquee(miniEls.mq, !syncOn() ? "Spotify sync off" : item ? `${item.name} · ${item.artists.join(", ")}` : player ? "Nothing playing" : "Music");
     miniEls.title.setAttribute("aria-label", item ? `Now playing: ${item.name} by ${item.artists.join(", ")}. Open the music dropdown.` : "Open the music dropdown");
     const want = artKey(player ? item : null);
     if (miniEls.art.dataset.art !== want) drawArt(miniEls.art, want, 18);
@@ -612,7 +625,14 @@ const Music = (() => {
 
   // Lyrics take the library's place, until the key is pressed again; kept across restarts.
   const LYRICS_KEY = "prdesk.music.lyrics.v1";
+  const lyricListeners = new Set();
   let lyricsOn = (() => { try { return localStorage.getItem(LYRICS_KEY) === "1"; } catch { return false; } })();
+  function setLyrics(on) {
+    lyricsOn = !!on;
+    try { localStorage.setItem(LYRICS_KEY, lyricsOn ? "1" : "0"); } catch { /* storage blocked */ }
+    applyLyrics();
+    for (const fn of lyricListeners) { try { fn(lyricsOn); } catch { /* a listener's own trouble */ } }
+  }
   function applyLyrics() {
     if (!els.lyrics || !els.lib) return;
     els.lib.hidden = lyricsOn;
@@ -627,7 +647,7 @@ const Music = (() => {
   let nextKey = "", nextAt = 0;
   const nextShown = () => !!els.upnext && els.upnext.getClientRects().length > 0;
   async function loadUpNext(force = false) {
-    if ((mode !== "live" && mode !== "demo") || !nextShown()) return;
+    if ((mode !== "live" && mode !== "demo") || !nextShown() || !syncOn()) return;
     const key = `${itemKey()}|${player?.context?.uri || ""}`;
     if (!force && key === nextKey && Date.now() - nextAt < 30000) return;
     nextKey = key;
@@ -715,12 +735,13 @@ const Music = (() => {
   }
   function schedule(ms) {
     clearTimeout(pollTimer);
-    if (mode === "live" || mode === "demo") pollTimer = setTimeout(poll, ms);
+    if ((mode === "live" || mode === "demo") && syncOn()) pollTimer = setTimeout(poll, ms);
   }
   async function poll() {
     clearTimeout(pollTimer);
     const asked = mode;
     if (asked !== "live" && asked !== "demo") return;
+    if (!syncOn()) { paint(); return; }
     try {
       const next = await source().now();
       if (mode !== asked) return;
@@ -744,6 +765,7 @@ const Music = (() => {
   /** Ask again at once: what plays, the devices, a sign-in near its end (the server renews it). */
   async function refreshNow(button) {
     if (mode !== "live" && mode !== "demo") return refreshStatus();
+    wakeSync();
     const keys = [...document.querySelectorAll("[data-music='refresh']")];
     keys.forEach((k) => k.classList.add("is-busy"));
     try {
@@ -771,7 +793,7 @@ const Music = (() => {
   }
 
   function loadDevices(force = false) {
-    if (mode !== "live" && mode !== "demo") return;
+    if ((mode !== "live" && mode !== "demo") || !syncOn()) return;
     const asked = mode, now = Date.now();
     if (!force && now - devicesAt < DEVICES_EVERY) return;
     devicesAt = now;
@@ -840,6 +862,7 @@ const Music = (() => {
 
   async function act(action, value) {
     if (mode !== "live" && mode !== "demo") return;
+    wakeSync();
     await flushPending(action);
     const before = player ? JSON.parse(JSON.stringify(player)) : null;
     const pos = position();
@@ -876,6 +899,7 @@ const Music = (() => {
 
   /** Play a playlist, album or artist, or a list of songs, from one song in it. */
   async function playFrom(opts) {
+    wakeSync();
     try {
       const device = deviceChoice();
       await source().play({ ...opts, ...(device ? { device_id: device } : {}) });
@@ -1069,11 +1093,8 @@ const Music = (() => {
     }
     if (what === "popout") { if (typeof MusicFloat !== "undefined") MusicFloat.popOut(); return; }
     if (what === "refresh") return refreshNow(t);
-    if (what === "lyrics") {
-      lyricsOn = !lyricsOn;
-      try { localStorage.setItem(LYRICS_KEY, lyricsOn ? "1" : "0"); } catch { /* storage blocked */ }
-      return applyLyrics();
-    }
+    if (what === "lyrics") return setLyrics(!lyricsOn);
+    if (what === "sync") return Prefs.set({ spotifySync: !syncOn() });
     if (what === "devices") {
       if (typeof MusicDevices === "undefined") return;
       loadDevices(true);
@@ -1141,6 +1162,14 @@ const Music = (() => {
     const calm = () => { refit(); if (view === "deck") paint(); };
     reducedQuery.addEventListener?.("change", calm);
     if (typeof Prefs !== "undefined") Prefs.onChange(calm);
+    if (typeof Prefs !== "undefined") Prefs.onChange((p, patch) => {
+      if (!("spotifySync" in patch) || (mode !== "live" && mode !== "demo")) return;
+      if (syncOn()) { poll(); loadDevices(true); return; }
+      clearTimeout(pollTimer);
+      player = null;
+      devices = [];
+      paint();
+    });
     if (typeof MusicFloat !== "undefined") MusicFloat.mount(core);
     if (typeof MusicLyrics !== "undefined") MusicLyrics.mount(core);
     demo = new URLSearchParams(location.search).has("musicdemo");
@@ -1159,6 +1188,8 @@ const Music = (() => {
     onStatus: (fn) => listeners.add(fn),
     connect, disconnect,
     preview: startDemo,
+    lyrics: () => lyricsOn, setLyrics, onLyrics: (fn) => lyricListeners.add(fn),
+    syncOn,
     core,
   };
 })();

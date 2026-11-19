@@ -68,8 +68,15 @@ Full documentation, with the architecture, security model and measured performan
   When a merge into its target leaves one of your branches behind, you hear it at once (one call
   per open pull request of yours every 3 minutes) with a Sync button, like Bitbucket's; approvals
   taken back and new tasks notify too, and every kind is on by default.
-- **Status bar.** Bitbucket API calls used this hour, when your pull requests were read and the
-  next read, the connection, the bell, settings and the guide.
+- **Status bar.** The main things only: when your pull requests were read and the next read, the
+  connection, the music player, your apps, the bell and refresh. Bitbucket API calls left this
+  hour are in the sync tooltip; the API meter is a quick toggle and shows itself when they run low.
+- **Control center.** The bell has two tabs: your notifications, and quick toggles (Spotify sync,
+  do not disturb, lyrics, the mini player, apps in the bar, the API meter, mascots, calm motion,
+  games). Edit lets you drag the tiles into your order, pin any of them to the bar with ☆, and pick
+  a grid, compact or list layout. Each app icon (Bitbucket, Jira, Spotify, Claude Code) sits in the
+  bar or in the control center: drag it from one to the other, or use × and ↑. All of it is kept
+  with your other settings.
 - **Themes and accents.** Two dark themes (Night, the default, and Midnight) and two light ones
   (Daylight, a warm grey, and Retro grey), with six accent colours apart. The blue bot, joystick on
   its head, is the same in every theme; the blob, the AI helper, takes each theme's colour, and has
@@ -111,7 +118,9 @@ Full documentation, with the architecture, security model and measured performan
   lately. It never takes focus from a terminal; switch it off in the Layout menu.
 - **Music.** A retro boombox for Spotify: pixelated album art, a green LCD with the title
   scrolling, a block progress bar to seek, chunky transport keys, volume blocks, an equalizer,
-  your devices and your playlists as cassettes; a mini player sits in the status bar. It drives
+  your devices and your playlists as cassettes; a mini player sits in the status bar. Spotify
+  sync (the SYNC key or a quick toggle) stops PixelDeck asking Spotify what plays until you turn
+  it back on; playing something from here turns it on again. It drives
   your own Spotify app (desktop or phone) through Spotify's Web API. Each person uses their own
   Spotify app, see below. **Preview** in the player shows it with made-up music.
 - **Lyrics.** The LYRICS key puts the song's lyrics beside the deck, from

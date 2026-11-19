@@ -5,7 +5,8 @@
    machine banner for news, keeps the history behind the bell, and lets you silence it:
    per kind, your own pull requests only, or snoozed for a while. Silenced news still
    lands behind the bell, it just does not spin. A burst (one refresh finding several
-   things) is one banner with a count, never a stack. */
+   things) is one banner with a count, never a stack. Do not disturb silences it until you turn
+   it off. The bell's panel has a second tab, the quick toggles (control.js). */
 
 const Notify = (() => {
   const CURSOR_KEY = "prdesk.events.cursor.v1";
@@ -43,7 +44,7 @@ const Notify = (() => {
   if (!Array.isArray(history)) history = [];
   let cursor = read(CURSOR_KEY, null);
   let epoch = read(EPOCH_KEY, null);
-  let opts = null, timer = 0, queue = [], current = null, filter = "all", polling = false;
+  let opts = null, timer = 0, queue = [], current = null, filter = "all", polling = false, tab = "notes";
   const listeners = new Set();
   const changed = () => { for (const fn of listeners) fn(); paintPanel(); };
 
@@ -77,6 +78,8 @@ const Notify = (() => {
 
   /* ---------------------------------------------------------------- silence */
   const snoozed = () => prefs.snoozeUntil > Date.now();
+  const quiet = () => snoozed() || !!prefs.dnd;
+  function setDnd(on) { setPrefs({ dnd: !!on }); if (on) { if (current) leave(current); queue = []; } }
   function setPrefs(patch) {
     prefs = { ...prefs, ...patch, kinds: { ...prefs.kinds, ...(patch.kinds || {}) } };
     write(PREFS_KEY, prefs);
@@ -89,7 +92,7 @@ const Notify = (() => {
   }
   const wake = () => setPrefs({ snoozeUntil: 0 });
   // Your own merges already get the merge moment, so they never spin twice.
-  const spins = (ev) => !snoozed() && prefs.kinds[ev.kind] !== false
+  const spins = (ev) => !quiet() && prefs.kinds[ev.kind] !== false
     && (prefs.scope === "all" || isMine(ev) || ev.kind === "review_requested")
     && !(ev.kind === "merged" && isMine(ev));
 
@@ -217,6 +220,7 @@ const Notify = (() => {
     return `<ol class="bell-list">${out}</ol>`;
   }
   function silenceHtml() {
+    if (prefs.dnd) return `<p class="bell-snoozed"><span>Do not disturb is on: no banners until you turn it off.</span><button class="btn btn--quiet" type="button" data-notify-dnd-off>Turn off</button></p>`;
     if (snoozed()) {
       const until = new Date(prefs.snoozeUntil).toLocaleString("en-GB", { weekday: "short", hour: "2-digit", minute: "2-digit" });
       return `<p class="bell-snoozed"><span>Silenced until ${esc(until)}.</span><button class="btn btn--quiet" type="button" data-notify-wake>Wake up</button></p>`;
@@ -227,14 +231,22 @@ const Notify = (() => {
       <button class="date-chip" type="button" data-notify-settings>Choose what spins</button></div>`;
   }
   function panelHtml() {
+    const cc = typeof ControlCenter !== "undefined";
+    if (!cc) tab = "notes";
+    const n = unread();
+    const top = cc ? `<div class="bell-switch" role="tablist" aria-label="Bell">
+        <button type="button" role="tab" data-bell-tab="notes" aria-selected="${tab === "notes"}">Notifications${n ? ` <span class="bell-count num8">${n > 99 ? "99+" : n}</span>` : ""}</button>
+        <button type="button" role="tab" data-bell-tab="toggles" aria-selected="${tab === "toggles"}">Quick toggles</button></div>` : "";
+    if (tab === "toggles") return `${top}<div class="bell-scroll bell-scroll--cc" role="tabpanel">${ControlCenter.html()}</div>`;
     const tabs = [["all", "All"], ["mine", "Yours"], ["team", "Team"]].map(([id, label]) => `<button class="date-chip" type="button" data-notify-filter="${id}" aria-pressed="${filter === id}">${label}</button>`).join("");
-    return `<header class="bell-head"><h2>Notifications</h2><div class="bell-tabs" role="group" aria-label="Show">${tabs}</div>
-        <button class="btn btn--quiet" type="button" data-notify-read${unread() ? "" : " disabled"}>Mark all read</button></header>
-      ${silenceHtml()}<div class="bell-scroll">${itemsHtml()}</div>`;
+    return `${top}<header class="bell-head">${cc ? "" : "<h2>Notifications</h2>"}<div class="bell-tabs" role="group" aria-label="Show">${tabs}</div>
+        <button class="btn btn--quiet" type="button" data-notify-read${n ? "" : " disabled"}>Mark all read</button></header>
+      ${silenceHtml()}<div class="bell-scroll" role="tabpanel">${itemsHtml()}</div>`;
   }
   let panel = null;
   function paintPanel() { if (panel && !panel.hidden) panel.innerHTML = panelHtml(); }
-  function toggle(anchor, open) {
+  function toggle(anchor, open, which) {
+    if (which) tab = which;
     if (!panel) {
       panel = document.createElement("section");
       panel.className = "bell-panel";
@@ -244,6 +256,7 @@ const Notify = (() => {
       document.body.append(panel);
     }
     const show = open ?? panel.hidden;
+    if (!show && panel.hidden) return;  // closing what is closed must not mark everything read
     if (show) {
       const r = (anchor || document.getElementById("bell"))?.getBoundingClientRect();
       if (r) { panel.style.top = `${Math.round(r.bottom + 8)}px`; panel.style.right = `${Math.max(8, Math.round(innerWidth - r.right - 8))}px`; }
@@ -258,6 +271,7 @@ const Notify = (() => {
     } else {
       panel.hidden = true;
       document.getElementById("bell")?.setAttribute("aria-expanded", "false");
+      if (typeof ControlCenter !== "undefined") ControlCenter.stopEditing();
       markRead();
     }
   }
@@ -296,6 +310,9 @@ const Notify = (() => {
       return;
     }
     if (t.closest("[data-notify-wake]")) return wake();
+    if (t.closest("[data-notify-dnd-off]")) return setDnd(false);
+    const bt = t.closest("[data-bell-tab]");
+    if (bt) { tab = bt.dataset.bellTab; if (typeof ControlCenter !== "undefined") ControlCenter.stopEditing(); return paintPanel(); }
     if (t.closest("[data-notify-dismiss]")) return leave(current);
     if (t.closest("[data-notify-read]")) return markRead();
     if (t.closest("[data-notify-test]")) return test();
@@ -303,7 +320,10 @@ const Notify = (() => {
     if (f) { filter = f.dataset.notifyFilter; return paintPanel(); }
     if (t.closest("[data-notify-settings]")) { toggle(null, false); if (opts?.onSettings) opts.onSettings("notifications"); return; }
     if (t.closest("[data-notify-bell]") || t.closest("#bell")) { e.preventDefault(); return toggle(t.closest("#bell")); }
-    if (panel && !panel.hidden && !t.closest(".bell-panel")) toggle(null, false);
+    if (panel && !panel.hidden) {
+      const path = e.composedPath();
+      if (!path.includes(panel) && !path.some((n) => n.id === "st-tray" || n.id === "st-pins")) toggle(null, false);
+    }
   });
   document.addEventListener("change", (e) => {
     const t = e.target;
@@ -328,6 +348,7 @@ const Notify = (() => {
     opts = o;
     poll();
   }
-  return { start, poll, unread, markRead, toggle, settingsHtml, snoozed, wake, onChange: (fn) => listeners.add(fn),
+  return { start, poll, unread, markRead, toggle, settingsHtml, snoozed: quiet, wake, onChange: (fn) => listeners.add(fn),
+    dnd: () => !!prefs.dnd, setDnd, repaint: paintPanel, tab: () => tab,
     prefs: () => prefs, sentence, kinds: KINDS };
 })();
