@@ -144,6 +144,9 @@ Full documentation, with the architecture, security model and measured performan
   play in YouTube's own player inside a pixel TV, with the bot sitting on top: in the panel, or
   floating over your work (drag it anywhere, it never covers the bar). The bar's mini player
   switches between Spotify and YouTube with its first button, and a quick toggle floats the TV.
+  QUEUE on a video puts it in **Up next**; when a video ends the next one plays (Autoplay can be
+  turned off there), and the TV's Next button skips ahead. A pasted playlist link plays its video
+  and queues the rest of the playlist after it (that part needs the API key).
 - **Lyrics.** The LYRICS key puts the song's lyrics beside the deck, from
   [LRCLIB](https://lrclib.net), a free and open lyrics database (Spotify's API has none). Timed
   lyrics follow the song and a click on a line jumps there; the small player has a LYRICS tab.
@@ -360,7 +363,7 @@ diffs and commits.
 ### Set up YouTube
 
 Playing needs no setup: paste a YouTube link (or a video id) in the Music panel's YouTube view.
-Searching needs a free API key:
+Searching, and queueing the videos of a pasted playlist, need a free API key:
 
 1. Open [YouTube Data API v3](https://console.cloud.google.com/apis/library/youtube.googleapis.com)
    in the Google Cloud console, pick or create a project (free) and press **Enable**.
@@ -371,7 +374,8 @@ Searching needs a free API key:
 3. Paste the key in **Settings, Connected apps, YouTube** and save it.
 
 The free quota is 10,000 units a day and a search costs 100, so about 100 searches a day; the
-same search again within a few minutes is answered from memory and costs nothing. Playing costs
+same search again within a few minutes is answered from memory and costs nothing. A playlist
+costs 1 unit for each 50 videos, and PixelDeck reads its first 200 at most. Playing costs
 nothing. The key is kept like the other tokens and never reaches the page.
 
 ## Configuration

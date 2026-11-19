@@ -5,6 +5,8 @@ was not told to expect, and the API key lives in the test's own settings file.""
 
 import json
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
 import types
@@ -525,6 +527,42 @@ class PlaylistTest(Base):
             self.items()
         self.assertEqual(str(caught.exception), youtube.NO_KEY_LIST)
         self.assertEqual(self.fake.calls, [])
+
+
+@unittest.skipUnless(shutil.which("node"), "needs node")
+class QueueTest(unittest.TestCase):
+    """static/music-queue.js, run in node: it needs no page."""
+
+    def run_js(self, body):
+        src = (Path(__file__).resolve().parent.parent / "static" / "music-queue.js").read_text(encoding="utf-8")
+        script = src + "\nconst v = (id) => ({ id, title: id });\nconst ids = (q) => q.map((x) => x.id);\n" + \
+            f"process.stdout.write(JSON.stringify((() => {{ {body} }})()));"
+        return json.loads(subprocess.run(["node", "-e", script], capture_output=True, text=True, check=True, timeout=30).stdout)
+
+    def test_add_skips_what_is_queued_and_what_is_not_a_video(self):
+        out = self.run_js("""
+            const q = [v("aaaaaaaaaaa"), v("bbbbbbbbbbb")];
+            const added = TubeQueue.add(q, [v("bbbbbbbbbbb"), v("ccccccccccc"), v("ccccccccccc"), v("short"), null, "x"]);
+            return { added: ids(added), same: ids(q) };""")
+        self.assertEqual(out, {"added": ["aaaaaaaaaaa", "bbbbbbbbbbb", "ccccccccccc"], "same": ["aaaaaaaaaaa", "bbbbbbbbbbb"]})
+
+    def test_next_puts_videos_in_front_and_moves_queued_ones_there(self):
+        out = self.run_js("""
+            const q = [v("aaaaaaaaaaa"), v("bbbbbbbbbbb")];
+            return ids(TubeQueue.add(q, [v("ccccccccccc"), v("bbbbbbbbbbb")], { next: true }));""")
+        self.assertEqual(out, ["ccccccccccc", "bbbbbbbbbbb", "aaaaaaaaaaa"])
+
+    def test_take_remove_after_and_the_cap(self):
+        out = self.run_js("""
+            const q = [v("aaaaaaaaaaa"), v("bbbbbbbbbbb"), v("ccccccccccc")];
+            const t = TubeQueue.take(q), e = TubeQueue.take([]);
+            const many = Array.from({ length: 250 }, (_, i) => v(String(i).padStart(11, "x")));
+            return { item: t.item.id, rest: ids(t.rest), empty: [e.item, e.rest.length], removed: ids(TubeQueue.remove(q, 1)),
+                     after: ids(TubeQueue.after(q, "aaaaaaaaaaa")), notIn: ids(TubeQueue.after(q, "zzzzzzzzzzz")),
+                     last: ids(TubeQueue.after(q, "ccccccccccc")), capped: TubeQueue.add([], many).length };""")
+        self.assertEqual(out, {"item": "aaaaaaaaaaa", "rest": ["bbbbbbbbbbb", "ccccccccccc"], "empty": [None, 0],
+                               "removed": ["aaaaaaaaaaa", "ccccccccccc"], "after": ["bbbbbbbbbbb", "ccccccccccc"],
+                               "notIn": ["aaaaaaaaaaa", "bbbbbbbbbbb", "ccccccccccc"], "last": [], "capped": 200})
 
 
 if __name__ == "__main__":

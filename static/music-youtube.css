@@ -41,7 +41,7 @@
 .yt-away { display: grid; place-items: center; gap: 10px; min-height: 140px; margin-top: 48px; padding: var(--space-md);
   border: var(--pixel) dashed var(--color-rule-2); color: var(--color-muted); font-size: var(--num-9); }
 .yt-away .btn { font-size: var(--text-sm); }
-.yt-away[hidden], .yt-recent[hidden], .yt-error[hidden] { display: none; }
+.yt-away[hidden], .yt-recent[hidden], .yt-error[hidden], .yt-notice[hidden] { display: none; }
 .yt-note, .yt-hint { margin: 0; color: var(--color-muted); font-size: var(--text-sm); }
 .yt-error { margin: 0; color: var(--color-bad); font-size: var(--text-sm); }
 .yt-find { display: flex; gap: 8px; }
@@ -51,6 +51,8 @@
 .yt-input:focus-visible { outline: var(--pixel) solid var(--color-focus); outline-offset: 1px; }
 .yt-sub { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: var(--space-xs) 0 4px; }
 .yt-sub h3 { margin: 0; font-size: var(--num-9); color: var(--color-ink-2); letter-spacing: 0.06em; }
+.yt-sub-acts { display: flex; gap: 12px; }
+.yt-queue .yt-row:first-child { box-shadow: inset 3px 0 0 var(--color-rule-2); }
 .yt-rows { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
 .yt-empty { padding: 8px; color: var(--color-muted); font-size: var(--text-sm); }
 .yt-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; border: var(--rule-hair) solid transparent; }

@@ -2,8 +2,10 @@
 
 /* YouTube in the Music panel. A switch on top of the panel picks Spotify (the boombox, drawn by
    music.js below it, untouched) or YouTube: a search when an API key is saved, a field for a
-   pasted link always (that needs no key), the results, and what you played lately (kept per
-   browser). Videos play in the TV (music-tv.js), here or floating. The bar's mini player gets a
+   pasted link always (that needs no key), the results, what plays next (the queue, with the
+   rest of a pasted playlist), and what you played lately, all kept per browser. When a video
+   ends the next one in the queue plays, unless autoplay is off. Videos play in the TV
+   (music-tv.js), here or floating. The bar's mini player gets a
    first button that switches the two; with YouTube it shows the video and toggles the TV.
    Everything from YouTube is written with esc() or textContent; thumbnails come through
    /api/youtube-thumb, because the page's CSP allows no other host, and are drawn small.
@@ -13,7 +15,7 @@
 const MusicYouTube = (() => {
   const KEY = "prdesk.youtube.v1", RECENT_MAX = 20, THUMB_W = 96, THUMB_H = 54;
   const ID = /^[0-9A-Za-z_-]{11}$/;
-  let panel = null, els = {}, status = null, results = null, error = "", busy = false, mini = null, miniEls = {};
+  let panel = null, els = {}, status = null, results = null, error = "", notice = "", busy = false, mini = null, miniEls = {};
   const listeners = new Set();
   const text = (v) => (typeof v === "string" && v.trim() ? v.trim().slice(0, 300) : null);
   const clean = (v) => (v && typeof v === "object" && ID.test(v.id)
@@ -21,8 +23,9 @@ const MusicYouTube = (() => {
   let kept = (() => {
     try {
       const v = JSON.parse(localStorage.getItem(KEY)) || {};
-      return { current: clean(v.current), recent: (Array.isArray(v.recent) ? v.recent : []).map(clean).filter(Boolean).slice(0, RECENT_MAX) };
-    } catch { return { current: null, recent: [] }; }
+      const list = (x, max) => (Array.isArray(x) ? x : []).map(clean).filter(Boolean).slice(0, max);
+      return { current: clean(v.current), recent: list(v.recent, RECENT_MAX), queue: list(v.queue, TubeQueue.MAX), auto: v.auto !== false };
+    } catch { return { current: null, recent: [], queue: [], auto: true }; }
   })();
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(kept)); } catch { /* storage blocked: it forgets on reload */ } };
   const icon = (id, px) => (typeof ControlCenter !== "undefined" ? ControlCenter.appIcon(id, px) : "");
@@ -91,6 +94,11 @@ const MusicYouTube = (() => {
         <div class="yt-away" data-ref="away" hidden><span class="num8">THE TV FLOATS</span>
           <button class="btn btn--quiet" type="button" data-tube="dock">Bring it back here</button></div>
         <p class="yt-note">YouTube's own player, in a pixel set. Nothing is drawn over the video.</p>
+        <section class="yt-recent yt-queue" data-ref="queueBox" aria-labelledby="yt-queue-title" hidden>
+          <header class="yt-sub"><h3 class="num8" id="yt-queue-title" data-ref="queueTitle">UP NEXT</h3>
+            <span class="yt-sub-acts"><button class="link" type="button" data-tube="auto" data-ref="auto"></button>
+              <button class="link" type="button" data-tube="clear-queue">Clear</button></span></header>
+          <ol class="yt-rows" data-ref="queue"></ol></section>
         <section class="yt-recent" data-ref="recentBox" aria-labelledby="yt-recent-title" hidden>
           <header class="yt-sub"><h3 class="num8" id="yt-recent-title">RECENTLY PLAYED</h3>
             <button class="link" type="button" data-tube="forget">Clear</button></header>
@@ -102,6 +110,7 @@ const MusicYouTube = (() => {
           <button class="btn btn--primary" type="submit" data-ref="go">Search</button></form>
         <p class="yt-hint" data-ref="hint"></p>
         <p class="yt-error" data-ref="error" role="alert" hidden></p>
+        <p class="yt-hint yt-notice" data-ref="notice" role="status" hidden></p>
         <ol class="yt-rows yt-rows--results" data-ref="results" aria-live="polite"></ol>
       </section>
     </div>`;
@@ -115,7 +124,10 @@ const MusicYouTube = (() => {
           ${v.live ? '<span class="yt-live num8">LIVE</span>' : ""}</span>
         <span class="yt-row-text"><b>${esc(v.title || `Video ${v.id}`)}</b>${v.channel ? `<small>${esc(v.channel)}</small>` : ""}</span></button>
       <span class="yt-row-acts"><button class="yt-mini" type="button" data-tube="play" data-list="${list}" data-i="${i}" aria-label="Play here">${g("play", 1)}<span>PLAY</span></button>
-        <button class="yt-mini" type="button" data-tube="float" data-list="${list}" data-i="${i}" aria-label="Play it floating">${g("pop", 1)}<span>FLOAT</span></button></span></li>`;
+        ${list === "queue"
+          ? `<button class="yt-mini" type="button" data-tube="unqueue" data-i="${i}" aria-label="Take it out of the queue">${g("close", 1)}<span>REMOVE</span></button>`
+          : `<button class="yt-mini" type="button" data-tube="queue" data-list="${list}" data-i="${i}" aria-label="Play it after the others">${g("plus", 1)}<span>QUEUE</span></button>
+        <button class="yt-mini" type="button" data-tube="float" data-list="${list}" data-i="${i}" aria-label="Play it floating">${g("pop", 1)}<span>FLOAT</span></button>`}</span></li>`;
   }
 
   function paintFind() {
@@ -130,6 +142,8 @@ const MusicYouTube = (() => {
         <button class="link" type="button" data-tube="settings">Settings, Connected apps, YouTube</button>.`;
     els.error.hidden = !error;
     els.error.textContent = error;
+    els.notice.hidden = !notice;
+    els.notice.textContent = notice;
     const list = results?.items || [];
     const html = results ? (list.length ? list.map((v, i) => rowHtml(v, "results", i)).join("") : '<li class="yt-empty">No videos found. Try other words.</li>') : "";
     if (els.results._html !== html) { els.results.innerHTML = html; els.results._html = html; drawThumbs(els.results); }
@@ -140,12 +154,23 @@ const MusicYouTube = (() => {
     const html = kept.recent.map((v, i) => rowHtml(v, "recent", i)).join("");
     if (els.recent._html !== html) { els.recent.innerHTML = html; els.recent._html = html; drawThumbs(els.recent); }
   }
+  function paintQueue() {
+    tv()?.setSkip(kept.queue.length ? playNext : null);
+    if (!els.queue) return;
+    els.queueBox.hidden = !kept.queue.length;
+    els.queueTitle.textContent = `UP NEXT · ${kept.queue.length}`;
+    els.auto.textContent = kept.auto ? "Autoplay on" : "Autoplay off";
+    els.auto.setAttribute("aria-pressed", String(kept.auto));
+    els.auto.title = kept.auto ? "The next video plays when one ends" : "Videos stop at their end";
+    const html = kept.queue.map((v, i) => rowHtml(v, "queue", i)).join("");
+    if (els.queue._html !== html) { els.queue.innerHTML = html; els.queue._html = html; drawThumbs(els.queue); }
+  }
   function paintTvPlace() {
     if (!els.away) return;
     const floating = !!tv()?.isFloating();
     els.away.hidden = !floating;
   }
-  function paintPanel() { paintFind(); paintRecent(); paintTvPlace(); }
+  function paintPanel() { paintFind(); paintQueue(); paintRecent(); paintTvPlace(); }
 
   /** The Music panel's switch and the YouTube view; answers the host the deck is drawn in. */
   function mountPanel(el) {
@@ -161,6 +186,7 @@ const MusicYouTube = (() => {
       tv().mount(els.dock);
       if (kept.current) tv().cue(kept.current);
       tv().onChange(onTv);
+      tv().onEnded(() => { if (kept.auto) playNext(); });
     }
     applySource();
     paintPanel();
@@ -188,6 +214,41 @@ const MusicYouTube = (() => {
     paintPanel();
     refreshMini();
   }
+  /** The first queued video, now: when one ends (with autoplay on) or on Next. */
+  function playNext() {
+    const { item, rest } = TubeQueue.take(kept.queue);
+    if (!item || !tv()) return;
+    kept.queue = rest;
+    remember(item);
+    tv().next(item);
+    paintPanel();
+    refreshMini();
+  }
+  /** Videos into the queue: at its end, or with next at its front. */
+  function enqueue(items, opts) {
+    kept.queue = TubeQueue.add(kept.queue, (items || []).map(clean).filter(Boolean), opts);
+    save();
+    paintQueue();
+  }
+  // A pasted playlist: the video its link names (or its first) plays, and the rest of it is queued next.
+  async function openList(list, linked) {
+    let answer;
+    try {
+      answer = await api(`youtube-playlist?list=${encodeURIComponent(list)}`);
+    } catch (err) {
+      if (err.message === "reloading") return;
+      // the linked video still plays; the note says why the rest of the list is not queued
+      if (linked) { play(linked); notice = err.message; } else error = err.message;
+      return;
+    }
+    const items = answer.items || [];
+    const first = (linked && items.find((v) => v.id === linked.id)) || linked || items[0];
+    if (!first) { error = "That playlist has no video that can play here."; return; }
+    const rest = TubeQueue.after(items, first.id);
+    enqueue(rest, { next: true });
+    play(first);
+    notice = rest.length ? `${rest.length} video${rest.length === 1 ? "" : "s"} from the playlist queued next${answer.more ? " (its first 200)" : ""}.` : "";
+  }
   // What the player says (a title for a pasted link, playing or not) goes to the list and the bar.
   function onTv() {
     const v = tv().video();
@@ -210,13 +271,14 @@ const MusicYouTube = (() => {
   async function find(form) {
     const q = form.q.value.trim();
     if (!q || busy) return;
-    busy = true; error = "";
+    busy = true; error = ""; notice = "";
     paintFind();
     try {
       const out = await api(`youtube-search?q=${encodeURIComponent(q)}`);
-      if (out.link && out.items?.[0]) {
+      if (out.link) {
         form.q.value = "";
-        play(out.items[0]);
+        if (out.list) await openList(out.list, out.items?.[0]);
+        else if (out.items?.[0]) play(out.items[0]);
       } else {
         results = out;
       }
@@ -288,14 +350,22 @@ const MusicYouTube = (() => {
 
   /* ------------------------------------------------------------ events */
 
-  const listOf = (name) => (name === "recent" ? kept.recent : results?.items || []);
+  const listOf = (name) => (name === "recent" ? kept.recent : name === "queue" ? kept.queue : results?.items || []);
   document.addEventListener("click", (e) => {
     const s = e.target.closest?.("[data-tube-src]");
     if (s) { setSource(s.dataset.tubeSrc); return; }
     const t = e.target.closest?.("[data-tube]");
     if (!t || t.disabled) return;
     const what = t.dataset.tube;
-    if (what === "play" || what === "float") return play(listOf(t.dataset.list)[Number(t.dataset.i)], what === "float" ? true : undefined);
+    if (what === "play" || what === "float") {
+      const list = t.dataset.list, i = Number(t.dataset.i), v = listOf(list)[i];
+      if (list === "queue") kept.queue = TubeQueue.remove(kept.queue, i);  // played now, so no longer next
+      return play(v, what === "float" ? true : undefined);
+    }
+    if (what === "queue") return enqueue([listOf(t.dataset.list)[Number(t.dataset.i)]]);
+    if (what === "unqueue") { kept.queue = TubeQueue.remove(kept.queue, Number(t.dataset.i)); save(); return paintQueue(); }
+    if (what === "auto") { kept.auto = !kept.auto; save(); return paintQueue(); }
+    if (what === "clear-queue") { kept.queue = []; save(); return paintQueue(); }
     if (what === "source") return setSource(source() === "youtube" ? "spotify" : "youtube");
     if (what === "toggle") return tv()?.toggle();
     if (what === "tv") {
@@ -325,7 +395,8 @@ const MusicYouTube = (() => {
   }
 
   return {
-    mountPanel, paintMini, refresh, openPanel, openSettings, play, thumb,
+    mountPanel, paintMini, refresh, openPanel, openSettings, play, playNext, enqueue, thumb,
+    queue: () => kept.queue.slice(),
     status: () => status, live, source, setSource,
     current: () => kept.current,
     onChange: (fn) => listeners.add(fn),

@@ -27,7 +27,8 @@ const MusicTV = (() => {
   let video = null;                          // { id, title, channel }
   let info = { state: -1, time: 0, duration: 0, error: 0 };
   let listening = 0, heard = false, drag = null, seen = "";
-  const listeners = new Set();
+  let skip = null;                           // what the Next button does: set while a queue waits
+  const listeners = new Set(), endedListeners = new Set();
   const g = (name, px = 2) => (typeof Music !== "undefined" ? Music.core.glyph(name, px) : "");
   const still = () => matchMedia("(prefers-reduced-motion: reduce)").matches || document.documentElement.dataset.motion === "calm";
 
@@ -81,6 +82,7 @@ const MusicTV = (() => {
         <span class="ytv-grip" aria-hidden="true"></span><b class="ytv-name num8">NOW SHOWING</b><span class="ytv-title" data-r="title"></span>
         <span class="ytv-tools">
           <button class="ytv-btn ytv-btn--play" type="button" data-ytv="play" data-r="play" aria-label="Play" data-tip="Play">${g("play")}${g("pause")}</button>
+          <button class="ytv-btn" type="button" data-ytv="skip" data-r="skip" aria-label="Next video" data-tip="Next video" hidden>${g("next")}</button>
           <button class="ytv-btn" type="button" data-ytv="move" data-r="move"></button>
           <button class="ytv-btn" type="button" data-ytv="close" data-r="close" aria-label="Stop and close the video" data-tip="Stop and close">${g("close")}</button>
         </span></div>
@@ -154,7 +156,7 @@ const MusicTV = (() => {
     if (typeof data === "string") { try { data = JSON.parse(data); } catch { return; } }
     if (!data || typeof data !== "object") return;
     heard = true;
-    const what = data.event, said = data.info;
+    const what = data.event, said = data.info, was = info.state;
     // initialDelivery is the player's first word, with the title already in it
     if ((what === "infoDelivery" || what === "initialDelivery") && said && typeof said === "object") {
       if (Number.isInteger(said.playerState)) info.state = said.playerState;
@@ -176,6 +178,7 @@ const MusicTV = (() => {
       info.error = Number(said) || 5;
     }
     paint();
+    if (info.state === 0 && was !== 0) for (const fn of endedListeners) fn();
   }
 
   /* ------------------------------------------------------------ painting */
@@ -192,6 +195,7 @@ const MusicTV = (() => {
     r.play.setAttribute("aria-label", on ? "Pause" : "Play");
     r.play.dataset.tip = on ? "Pause" : "Play";
     r.play.disabled = !video;
+    r.skip.hidden = !skip;
     r.close.disabled = !frame && !st.floating;
     r.move.innerHTML = st.floating ? g("dock") : g("pop");
     r.move.setAttribute("aria-label", st.floating ? "Back into the Music panel" : "Float it over the layout");
@@ -279,6 +283,17 @@ const MusicTV = (() => {
     if (floating !== st.floating || el.parentElement !== (floating ? document.body : slot)) moveTo(floating);
     attach(true);
   }
+  /** The next video, into the player already there: the same media element plays on, so it
+      starts even in a window behind others, where a new player would wait to be seen. */
+  function next(nextVideo) {
+    if (!nextVideo || !ID.test(nextVideo.id)) return;
+    if (!frame || !heard) { play(nextVideo); return; }
+    video = { id: nextVideo.id, title: nextVideo.title || null, channel: nextVideo.channel || null };
+    info = { state: 3, time: 0, duration: 0, error: 0 };
+    frame.title = video.title ? `YouTube: ${video.title}` : "YouTube video";
+    command("loadVideoById", [video.id, 0]);
+    paint();
+  }
   /** Show a video without loading the player (after a reload): its picture and a Play button. */
   function cue(next) {
     if (!next || !ID.test(next.id) || frame) return;
@@ -340,6 +355,7 @@ const MusicTV = (() => {
     const what = t.dataset.ytv;
     if (what === "start" && !video) return typeof MusicYouTube !== "undefined" && MusicYouTube.openPanel();
     if (what === "play" || what === "start") return toggle();
+    if (what === "skip") return skip?.();
     if (what === "close") return stop();
     if (what === "move") return st.floating ? dock() : float();
   }
@@ -371,7 +387,10 @@ const MusicTV = (() => {
   }
 
   return {
-    mount, play, cue, toggle, stop, float, dock,
+    mount, play, next, cue, toggle, stop, float, dock,
+    /** What Next does, or null to hide it: the queue sets it while it holds videos. */
+    setSkip: (fn) => { skip = typeof fn === "function" ? fn : null; paint(); },
+    onEnded: (fn) => endedListeners.add(fn),
     isFloating: () => st.floating,
     playing, loaded: () => !!frame, ended: () => !!frame && info.state === 0,
     video: () => (video ? { ...video, time: info.time } : null),
