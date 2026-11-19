@@ -7,7 +7,7 @@
    leaves the bar as it was. */
 
 // The themes and accents PixelDeck knows; anything else falls back to the first.
-const THEMES = [["night", "Night", "dark"], ["midnight", "Midnight", "dark"], ["daylight", "Daylight", "light"], ["grey", "Retro grey", "light"]];
+const THEMES = [["night", "Night", "dark"], ["midnight", "Midnight", "dark"], ["bubblegum", "Bubblegum", "dark"], ["daylight", "Daylight", "light"], ["grey", "Retro grey", "light"]];
 const ACCENTS = [["amber", "Amber"], ["cool", "Arcade blue"], ["slime", "Slime green"], ["pink", "Neon pink"], ["purple", "Purple"], ["turquoise", "Turquoise"]];
 const Prefs = (() => {
   const KEY = "prdesk.prefs.v1";
@@ -39,7 +39,7 @@ const Prefs = (() => {
 /* The blob is an AI helper, and each theme repaints it. After a theme change, the next few
    times you hover a blob it has something to say about its CSS. */
 const BlobTalk = (() => {
-  const COLOUR = { night: "green", midnight: "cyan", daylight: "orange", grey: "purple" };
+  const COLOUR = { night: "green", midnight: "cyan", bubblegum: "mint", daylight: "orange", grey: "purple" };
   const JOKES = [
     (was) => `Someone changed my CSS again. I was ${was} five minutes ago.`,
     () => "My colour got washed out by the last update. Classic cascade.",

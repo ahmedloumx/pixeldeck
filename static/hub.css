@@ -341,6 +341,36 @@
   --color-scrim: oklch(8% 0.03 272 / 0.62);
   --sprite-grass: oklch(78% 0.13 200);
 }
+/* Bubblegum: a pastel retro desktop. Plum windows with lavender title bars in a pink frame
+   (the bar and the gaps between panels), cream text, and a mint blob. */
+:root[data-theme="bubblegum"] {
+  --frame: oklch(82% 0.1 355); --frame-deep: oklch(66% 0.14 355); --frame-ink: oklch(28% 0.08 320); --title: oklch(75% 0.1 305);
+  --color-paper: oklch(23% 0.07 298); --color-paper-2: oklch(27.5% 0.08 300); --color-paper-3: oklch(19% 0.06 296);
+  --color-ink: oklch(97% 0.012 340); --color-ink-2: oklch(88% 0.03 330); --color-muted: oklch(76% 0.05 318);
+  --color-rule: oklch(38% 0.08 302); --color-rule-2: oklch(53% 0.1 315);
+  --color-scrim: oklch(12% 0.05 298 / 0.62);
+  --color-cool: oklch(82% 0.09 230);
+  --sprite-grass: oklch(85% 0.12 168);
+}
+:root[data-theme="bubblegum"] body, :root[data-theme="bubblegum"] .workspace { background: var(--frame); }
+:root[data-theme="bubblegum"] .slot { border: 3px solid var(--frame-deep); }
+/* The frame and the title bars are light: their own ink, and an accent deep enough to read on pink. */
+:root[data-theme="bubblegum"] .bar {
+  --color-paper: oklch(91% 0.05 355); --color-paper-2: oklch(87% 0.07 355); --color-paper-3: var(--frame);
+  --color-ink: var(--frame-ink); --color-ink-2: oklch(36% 0.08 320); --color-muted: oklch(44% 0.07 320);
+  --color-rule: oklch(68% 0.11 350); --color-rule-2: oklch(54% 0.12 345);
+  --color-accent: oklch(48% 0.17 340); --color-accent-ink: oklch(98% 0.01 340); --color-accent-soft: oklch(88% 0.06 345); --color-accent-deep: oklch(36% 0.14 340);
+  --color-focus: oklch(48% 0.17 340);
+  --color-cool: oklch(42% 0.13 262); --color-ok: oklch(45% 0.14 150); --color-bad: oklch(48% 0.18 25); --color-wait: oklch(50% 0.14 70);
+  background: var(--frame); border-bottom: 3px solid var(--frame-deep); color: var(--frame-ink);
+}
+:root[data-theme="bubblegum"] .slot-head {
+  --color-paper: oklch(85% 0.06 305); --color-paper-2: oklch(80% 0.08 305); --color-paper-3: var(--title);
+  --color-ink: var(--frame-ink); --color-ink-2: oklch(33% 0.08 315); --color-muted: oklch(42% 0.07 315);
+  --color-rule: oklch(60% 0.1 305); --color-rule-2: oklch(50% 0.1 305);
+  --color-accent: oklch(46% 0.17 340); --color-accent-ink: oklch(98% 0.01 340);
+}
+:root[data-theme="bubblegum"] .settings-dialog, :root[data-theme="bubblegum"] .bell-panel, :root[data-theme="bubblegum"] .mb-pop { border-color: var(--frame-deep); }
 :root[data-theme="daylight"] {
   --color-paper: #d4cfc2; --color-paper-2: #e1dccf; --color-paper-3: #c3bdae;
   --color-rule: #9a9384; --color-rule-2: #6f695c;
@@ -384,6 +414,7 @@
 .theme-card[data-theme-card="night"] { --tb: #131820; --tp: #1c2129; }
 .theme-card[data-theme-card="midnight"] { --tb: #0b0e22; --tp: #151a36; }
 .theme-card[data-theme-card="daylight"] { --tb: #d4cfc2; --tp: #e1dccf; }
+.theme-card[data-theme-card="bubblegum"] { --tb: #f2a7c3; --tp: #2f2050; }
 .theme-card[data-theme-card="grey"] { --tb: #c6c6c6; --tp: #d5d5d5; }
 :root[data-tone="light"] .term-panes { --color-muted: #a9a9a9; --color-ink: #e8e8e8; --color-ink-2: #d0d0d0; color: var(--term-ink); }
 
