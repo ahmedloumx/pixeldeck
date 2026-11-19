@@ -1,10 +1,10 @@
-"""Open Bitbucket, Jira and Spotify links outside the app window.
+"""Open Bitbucket, Jira, Spotify and Google Cloud links outside the app window.
 
 Links go to the system's default browser, or to PIXELDECK_BROWSER when it is set
 (for example: firefox --new-tab). Only https links to Bitbucket, the configured Jira
-site and Spotify's developer site are accepted, plus Spotify's sign-in page and no
-other page on its accounts site. The URL is passed as one argv element, never
-through a shell.
+site, Spotify's developer site and the Google Cloud console are accepted, plus the
+sign-in pages of Spotify and Google and no other page on their accounts sites. The URL
+is passed as one argv element, never through a shell.
 """
 
 import shlex
@@ -16,12 +16,14 @@ from urllib.parse import urlsplit
 import config
 
 
-# Of Spotify's accounts site only the sign-in page opens: the music player sends you there.
+# Of an accounts site only the sign-in page opens: the music player and the YouTube settings send you there.
 SPOTIFY_SIGN_IN = ("accounts.spotify.com", "/authorize")
+SIGN_IN_PAGES = dict([SPOTIFY_SIGN_IN, ("accounts.google.com", "/o/oauth2/v2/auth")])
 
 
 def allowed_hosts():
-    hosts = {"bitbucket.org", "developer.spotify.com"}
+    # the Google Cloud console: where the YouTube setup guide sends you for a key and a client
+    hosts = {"bitbucket.org", "developer.spotify.com", "console.cloud.google.com"}
     site = urlsplit(config.jira_site()).hostname
     if site:
         hosts.add(site)
@@ -32,8 +34,8 @@ def allowed(url):
     parts = urlsplit(url)
     if parts.scheme != "https" or parts.username or parts.password:
         return False
-    if parts.hostname == SPOTIFY_SIGN_IN[0]:
-        return parts.port is None and parts.path == SPOTIFY_SIGN_IN[1]
+    if parts.hostname in SIGN_IN_PAGES:
+        return parts.port is None and parts.path == SIGN_IN_PAGES[parts.hostname]
     return parts.hostname in allowed_hosts()
 
 

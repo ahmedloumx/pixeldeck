@@ -164,6 +164,20 @@ class SignInTest(Base):
                           "code_challenge_method": "S256", "access_type": "offline", "prompt": "consent"})
         self.assertNotIn(SECRET, url)
 
+    def test_the_link_opens_in_your_browser_and_only_googles_sign_in_page_may(self):
+        import opener  # noqa: PLC0415
+        self.save_client()
+        opened = []
+        with mock.patch.object(opener, "webbrowser") as browser:
+            browser.open.side_effect = lambda url, new=0: opened.append(url)
+            out = self.route("POST", "youtube-signin")
+        self.assertEqual((out["opened"], opened), (True, [out["url"]]), "the system browser, not a window in PixelDeck")
+        for url in ("https://accounts.google.com/o/oauth2/v2/auth?x=1", "https://console.cloud.google.com/apis/credentials"):
+            self.assertTrue(opener.allowed(url), url)
+        for url in ("https://accounts.google.com/signin", "http://accounts.google.com/o/oauth2/v2/auth",
+                    "https://accounts.google.com:444/o/oauth2/v2/auth", "https://evil.example/o/oauth2/v2/auth"):
+            self.assertFalse(opener.allowed(url), url)
+
     def test_no_client_no_link(self):
         with self.assertRaises(ValueError):
             self.account.begin(HANDLER.port)
