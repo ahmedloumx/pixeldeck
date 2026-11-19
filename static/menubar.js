@@ -41,6 +41,7 @@ const MenuBar = (() => {
         { label: "Settings…", run: () => Settings.open() },
         { label: "Connected apps", run: () => Settings.open("connections") },
         { label: "Personalise", run: () => Settings.open("look") },
+        ...(typeof LockScreen !== "undefined" ? [{ label: "Lock PixelDeck", run: () => LockScreen.show() }] : []),
         ...(chrome ? ["-", { label: "Close the window", run: () => PixelChrome.send("close") }] : []),
       ] },
       { id: "view", label: "View", key: "V", items: [
@@ -107,6 +108,7 @@ const MenuBar = (() => {
       { id: "help", label: "Help", key: "H", items: [
         { label: "Keyboard keys", key: "?", run: () => $("#help-dialog").showModal() },
         { label: "The guide", run: () => Guide.start() },
+        ...(typeof Welcome !== "undefined" ? [{ label: "Welcome", run: () => Welcome.play() }] : []),
         "-",
         { label: "About PixelDeck", run: () => Settings.open("about") },
         { label: "PixelDeck on GitHub", run: () => openExternal("https://github.com/ahmedloumx/pixeldeck") },

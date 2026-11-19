@@ -40,6 +40,8 @@ const ControlCenter = (() => {
     wave: [".........", "..##...##", ".#..#.#..", "#....#...", ".........", "..##...##", ".#..#.#..", "#....#...", "........."],
     diamond: ["....#....", "...###...", "..#####..", ".#######.", "#########", ".#######.", "..#####..", "...###...", "....#...."],
     pop: ["....#####", ".....####", "....#####", "...###.##", "#.###...#", "#..#.....", "#........", "#........", "######..."],
+    speaker: ["....#....", "...##..#.", "#####...#", "#####.#.#", "#####.#.#", "#####...#", "...##..#.", "....#....", "........."],
+    padlock: ["..#####..", ".##...##.", ".#.....#.", ".#.....#.", "#########", "####.####", "####.####", "#########", "#########"],
   };
   function art(rows, colours, px) {
     const w = Math.max(...rows.map((r) => r.length)), h = rows.length;
@@ -101,6 +103,10 @@ const ControlCenter = (() => {
       on: () => Prefs.get("motion") === "calm", set: (on) => Prefs.set({ motion: on ? "calm" : "auto" }), tip: "Fewer animations" },
     { id: "games", label: "Games", glyph: "diamond", ok: () => true,
       on: () => !!Prefs.get("games"), set: (on) => Prefs.set({ games: on }), tip: "Games beside the terminal" },
+    { id: "sounds", label: "Sounds", glyph: "speaker", ok: () => true,
+      on: () => Prefs.get("sounds") !== false, set: (on) => Prefs.set({ sounds: on }), tip: "The coin, the keys and the jingles" },
+    { id: "lock", label: "Lock screen", glyph: "padlock", ok: () => typeof LockScreen !== "undefined" && has("lock"),
+      on: () => Prefs.get("lockScreen") !== false, set: (on) => Prefs.set({ lockScreen: on }), tip: "Let's code, when you come back from locking the computer" },
   ];
   const tileOf = (id) => TILES.find((t) => t.id === id);
 
