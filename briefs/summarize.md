@@ -4,4 +4,4 @@ Read the code each thread points at from the PR branch with `git fetch origin {s
 `git show origin/{source}:<path>`, without checking anything out.
 For every open thread: what the reviewer asks, whether you agree and why,
 and the change you would make. Then a short ordered plan, and a draft reply
-per thread that I can paste into Bitbucket.
+per thread that I can paste into {host}.

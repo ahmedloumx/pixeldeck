@@ -16,6 +16,7 @@ import time
 import urllib.parse
 
 import config
+import forge
 import gitscan
 import model
 from bitbucket import BitbucketError
@@ -82,8 +83,7 @@ def default_reviewers(engine, repo):
     me = (engine.me() or {}).get("uuid")
     people = []
     try:
-        for row in engine.client.paged(f"/repositories/{engine.client.workspace}/{repo}/effective-default-reviewers",
-                                       {"pagelen": 100}, max_pages=3):
+        for row in forge.default_reviewers(engine.client, repo):
             user = row.get("user") or {}
             if user.get("uuid") and user["uuid"] != me:
                 people.append({"uuid": user["uuid"], "name": user.get("display_name")})
@@ -158,7 +158,7 @@ def create(engine, root, body):
         "close_source_branch": bool(body.get("close_source_branch", True)),
         "reviewers": [{"uuid": r["uuid"]} for r in reviewers],
     }
-    pr = engine.client.send("POST", f"/repositories/{engine.client.workspace}/{repo}/pullrequests", payload)
+    pr = forge.create_pr(engine.client, repo, payload)
     _after_change(engine)
     return {"id": pr.get("id"), "url": ((pr.get("links") or {}).get("html") or {}).get("href"),
             "reviewers": len(reviewers)}
@@ -199,7 +199,7 @@ def decline(engine, body):
         raise PermissionError("only your own pull requests can be declined from here")
     if pr["state"] != "OPEN":
         raise ValueError(f"#{pr_id} is {pr['state'].lower()}, not open")
-    engine.client.send("POST", f"/repositories/{engine.client.workspace}/{repo}/pullrequests/{pr_id}/decline", {})
+    forge.decline(engine.client, repo, pr_id)
     _after_change(engine)
     return {"repo": repo, "id": pr_id}
 
@@ -220,9 +220,9 @@ def _mergeable(engine, repo, pr_id):
         raise PermissionError("only your own pull requests can be merged from here")
     base = f"/repositories/{engine.client.workspace}/{repo}/pullrequests/{pr_id}"
     # The strategies are not in a pull request by default; asking for them costs no extra call.
-    live = engine.client.get(base, {"fields": "+destination.branch.merge_strategies,+destination.branch.default_merge_strategy"})
+    live = forge.merge_info(engine.client, repo, pr_id)
     if live.get("state") != "OPEN":
-        raise ValueError(f"#{pr_id} is {str(live.get('state', 'unknown')).lower()} on Bitbucket, not open")
+        raise ValueError(f"#{pr_id} is {str(live.get('state', 'unknown')).lower()} on {forge.label(forge.kind(engine.client))}, not open")
     branch = (live.get("destination") or {}).get("branch") or {}
     default = branch.get("default_merge_strategy")
     strategies = [s for s in branch.get("merge_strategies") or [] if isinstance(s, str)] or ([default] if default else [])
@@ -235,9 +235,7 @@ def merge_options(engine, repo, pr_id):
     pr, _me, _base, live, default, strategies = _mergeable(engine, repo, pr_id)
     approvers = [((p.get("user") or {}).get("display_name")) for p in live.get("participants") or [] if p.get("approved")]
     source = ((live.get("source") or {}).get("branch") or {}).get("name") or pr.get("source")
-    message = f"Merged in {source} (pull request #{pr_id})\n\n{live.get('title') or pr.get('title') or ''}".rstrip()
-    if approvers:
-        message += "\n\n" + "\n".join(f"Approved-by: {name}" for name in approvers if name)
+    message = forge.merge_message(engine.client, repo, pr_id, source, pr.get("dest"), live.get("title") or pr.get("title"), approvers)
     return {
         "repo": repo, "id": pr_id, "source": source, "dest": pr.get("dest"), "title": live.get("title") or pr.get("title"),
         "strategies": strategies, "default": default if default in strategies else (strategies[0] if strategies else None),
@@ -271,6 +269,13 @@ def merge(engine, body):
             payload["message"] = message.strip()
     if "close_source_branch" in body:
         payload["close_source_branch"] = bool(body["close_source_branch"])
+    if forge.kind(engine.client) != "bitbucket":
+        # GitHub and GitLab merge before they answer, and only while the branch is where it was read.
+        expected = ((live.get("source") or {}).get("commit") or {}).get("hash")
+        result = engine.client.merge(repo, pr_id, payload, expected=expected)
+        merged = engine.file_merged(me, result) if result.get("state") == "MERGED" else None
+        _after_change(engine, wait=False)
+        return {"repo": repo, "id": pr_id, "state": result.get("state") or "PENDING", "strategy": strategy, "pr": merged}
     # Bitbucket merges in the background and answers at once with a link to its merge task;
     # PixelDeck follows that task, so the answer says merged, refused (and why), or still going.
     headers = {}
@@ -359,15 +364,20 @@ def review(engine, body):
     repo, pr_id, action = body.get("repo"), body.get("id"), body.get("action")
     if not isinstance(repo, str) or not isinstance(pr_id, int) or action not in REVIEW_ROUTES:
         raise ValueError("repo, id and an action (approve, unapprove, request_changes, unrequest_changes) are required")
+    bitbucket = forge.kind(engine.client) == "bitbucket"
     base = f"/repositories/{engine.client.workspace}/{repo}/pullrequests/{pr_id}"
-    pr = engine.find_pr(repo, pr_id) or model.slim_pr(engine.client.get(base))
+    read = (lambda: engine.client.get(base)) if bitbucket else (lambda: engine.client.pull_request(repo, pr_id))  # noqa: E731
+    pr = engine.find_pr(repo, pr_id) or model.slim_pr(read())
     if pr["author"]["uuid"] == (engine.me() or {}).get("uuid"):
         raise PermissionError("you cannot review your own pull request")
     if pr["state"] != "OPEN":
         raise ValueError(f"#{pr_id} is {pr['state'].lower()}, not open")
-    method, route = REVIEW_ROUTES[action]
-    engine.client.send(method, f"{base}/{route}")
-    fresh = model.slim_pr(engine.client.get(base))
+    if bitbucket:
+        method, route = REVIEW_ROUTES[action]
+        engine.client.send(method, f"{base}/{route}")
+    else:
+        engine.client.review(repo, pr_id, action)
+    fresh = model.slim_pr(read())
     engine.update_pr(fresh)
     return {"pr": fresh, "action": action}
 

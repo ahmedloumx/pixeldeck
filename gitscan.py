@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 
 import config
+import forge
 
 SKIP_BRANCHES = {"HEAD", "develop", "main", "master"}
 
@@ -33,7 +34,8 @@ def git(repo_dir, *args, timeout=20):
 
 
 def repo_dirs(root):
-    """Map repo slug -> main clone directory (a .git directory, not a worktree)."""
+    """Map repo slug -> main clone directory (a .git directory, not a worktree), for the clones
+    whose origin is a repository of the workspace on the chosen host."""
     found = {}
     for entry in sorted(Path(root).iterdir()):
         if not (entry / ".git").is_dir():
@@ -45,14 +47,10 @@ def repo_dirs(root):
         workspace = config.workspace()
         if not workspace:
             return found
-        marker = f"bitbucket.org:{workspace}/"
-        alt = f"bitbucket.org/{workspace}/"
-        for prefix in (marker, alt):
-            if prefix in url:
-                slug = url.split(prefix, 1)[1].removesuffix(".git")
-                # A folder named exactly like the slug wins over a stray copy.
-                if slug not in found or entry.name == slug:
-                    found[slug] = entry
+        slug = forge.remote_slug(url, workspace)
+        # A folder named exactly like the slug wins over a stray copy.
+        if slug and (slug not in found or entry.name == slug.rsplit("/", 1)[-1]):
+            found[slug] = entry
     return found
 
 
@@ -112,7 +110,7 @@ def pushed_without_pr(root, email, pr_branches, days=21):
                 "sha": sha,
                 "subject": subject,
                 "pushed_at": int(when),
-                "create_url": f"https://bitbucket.org/{config.workspace()}/{slug}/pull-requests/new?source={branch}&dest={dest}",
+                "create_url": forge.new_pr_url(slug, branch, dest),
             })
     out.sort(key=lambda b: -b["pushed_at"])
     return out

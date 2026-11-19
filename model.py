@@ -1,4 +1,5 @@
-"""Turn raw Bitbucket payloads into the small shapes the page renders."""
+"""Turn raw Bitbucket payloads into the small shapes the page renders. GitHub and GitLab
+answers arrive here already in Bitbucket's shapes (see forge.py)."""
 
 import re
 
@@ -74,8 +75,10 @@ def reviews_of(raw):
 def slim_pr(raw):
     destination = raw.get("destination") or {}
     source = raw.get("source") or {}
-    full_name = ((destination.get("repository") or {}).get("full_name")) or ""
-    repo = full_name.split("/", 1)[-1]
+    repository = destination.get("repository") or {}
+    full_name = repository.get("full_name") or ""
+    # GitHub and GitLab name the repository themselves (a GitLab subgroup's path has slashes).
+    repo = repository.get("slug") or full_name.split("/", 1)[-1]
     source_branch = ((source.get("branch") or {}).get("name")) or ""
     return {
         "repo": repo,

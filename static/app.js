@@ -98,6 +98,8 @@ async function openExternal(url) {
   try { await api("open", { method: "POST", body: { url } }); }
   catch { window.open(url, "_blank", "noopener,noreferrer"); }
 }
+// Where your code lives (Bitbucket, GitHub or GitLab), for the words the page shows.
+const hostName = () => state.host?.label || "Bitbucket";
 
 /* ------------------------------------------------------------ seen map */
 
@@ -369,7 +371,7 @@ function mergeButton(pr) {
   const who = r.s.approvals.length ? `approved by ${listNames(r.s.approvals.map((x) => x.name))}` : "";
   const tip = r.ready
     ? `Ready: ${who}${r.b.known ? ` and up to date with ${pr.dest}` : ""}. Pick the strategy, the message and the ticket's next status first.`
-    : `Not ready: ${r.waits.join("; ")}. Bitbucket's merge checks decide; the popup lets you try.`;
+    : `Not ready: ${r.waits.join("; ")}. ${hostName()}'s merge checks decide; the popup lets you try.`;
   return `<button class="btn tool tool--merge tool--text ${r.ready ? "is-ready" : "is-waiting"}" type="button" data-merge data-tip="${esc(tip)}">${Sprites.svg("merge", { scale: 2 })}<span class="tool-label">Merge</span></button>`;
 }
 // The line under the title: who approved, whether the branch is up to date, what is still open.
@@ -709,9 +711,12 @@ function skeleton(rows = 5) {
 function authNotice() {
   const auth = state.auth || {};
   if (auth.ok !== false) return "";
-  const unset = /^No BITBUCKET_/.test(auth.error || "");
-  return `<section class="notice" role="alert"><h2>${unset ? "PixelDeck is not set up yet" : "Bitbucket refused the token"}</h2><p>${esc(auth.error || "Unknown error")}</p>
-    <p>Put an API token with Bitbucket read scopes (and pull request write, for the actions) in PixelDeck's <code>.env</code> as <code>BITBUCKET_TOKEN=</code>, next to <code>BITBUCKET_EMAIL=</code> and <code>BITBUCKET_WORKSPACE=</code>. See <code>.env.example</code>. It is picked up within a minute.</p>
+  const unset = /^No [A-Z]+_[A-Z_]+ in /.test(auth.error || "");
+  const how = hostName() === "Bitbucket"
+    ? `Put an API token with Bitbucket read scopes (and pull request write, for the actions) in PixelDeck's <code>.env</code> as <code>BITBUCKET_TOKEN=</code>, next to <code>BITBUCKET_EMAIL=</code> and <code>BITBUCKET_WORKSPACE=</code>. See <code>.env.example</code>. It is picked up within a minute.`
+    : `Open <button class="link" type="button" data-settings-open="setup">Settings, Setup</button>, pick ${esc(hostName())} and paste a token there. See <code>.env.example</code> for the settings it writes.`;
+  return `<section class="notice" role="alert"><h2>${unset ? "PixelDeck is not set up yet" : `${esc(hostName())} refused the token`}</h2><p>${esc(auth.error || "Unknown error")}</p>
+    <p>${how}</p>
     <p><button class="btn" type="button" data-action="retry">Try again now</button></p></section>`;
 }
 
@@ -1072,12 +1077,12 @@ async function reviewPr(button) {
       if (state.pr.detail?.pr) state.pr.detail.pr = { ...state.pr.detail.pr, ...res.pr };
     }
     renderPr();
-    toast(`${REVIEW_DONE[action]} #${pr.id}.`, `${pr.author?.name || "The author"} sees it on Bitbucket.`);
+    toast(`${REVIEW_DONE[action]} #${pr.id}.`, `${pr.author?.name || "The author"} sees it on ${hostName()}.`);
     state.loadedAt = {};
     loadView({ silent: true });
   } catch (err) {
     if (/no route/.test(err.message)) toast("Reviews need the newer PixelDeck server.", NEEDS_RESTART, true);
-    else toast("Bitbucket did not take the review.", err.message, true);
+    else toast(`${hostName()} did not take the review.`, err.message, true);
   }
 }
 
@@ -1195,7 +1200,7 @@ function fileBody(i) {
   }
   const stray = [...anchored.entries()].filter(([k]) => !used.has(k)).flatMap(([, ts]) => ts);
   const strayHtml = stray.length ? `<div class="stray"><p class="note">Comments on lines outside this diff</p>${stray.map((t) => trail(t)).join("")}</div>` : "";
-  return `${strayHtml}<div class="diff-wrap"><table class="diff"><tbody>${rows}</tbody></table></div>${f.truncated ? '<p class="empty">This file was cut; open it on Bitbucket for the rest.</p>' : ""}`;
+  return `${strayHtml}<div class="diff-wrap"><table class="diff"><tbody>${rows}</tbody></table></div>${f.truncated ? `<p class="empty">This file was cut; open it on ${esc(hostName())} for the rest.</p>` : ""}`;
 }
 
 function hydrateFiles(root) {
@@ -1332,7 +1337,7 @@ function renderPr() {
     <div class="pr-view${state.prFolded ? " is-folded" : ""}">
       <header class="pr-head"${state.prFolded ? " inert" : ""}>
         <div class="pr-top"><span class="id">${esc(full.repo)} #${full.id}</span>${stateChip(full)}<span>${esc(full.author.name)}</span><time class="when">${esc(ago(full.updated_on))}</time>
-          <span class="spacer"></span><button class="link" type="button" data-external="${esc(full.url)}">Bitbucket</button><button class="link copy-link" type="button" data-copy-link="${esc(full.url)}" title="Copy the link to this pull request">Copy link</button>${ticket}
+          <span class="spacer"></span><button class="link" type="button" data-external="${esc(full.url)}">${esc(hostName())}</button><button class="link copy-link" type="button" data-copy-link="${esc(full.url)}" title="Copy the link to this pull request">Copy link</button>${ticket}
           <button class="link" type="button" data-action="reload-pr">Reload</button><button class="btn btn--quiet" type="button" data-action="close-pr" data-tip="Back to the list">Back to the queue</button></div>
         <h2>${esc(full.title)}</h2>
         <div class="branch">${esc(full.source)} into ${esc(full.dest)}</div>
@@ -1479,7 +1484,7 @@ async function syncPr(button) {
     const res = await busy(button, () => api("sync", { method: "POST", body: { repo: pr.repo, id: pr.id } }));
     markSynced(pr.repo, pr.id, res.state === "synced" ? res.merged : 0);
     toast(res.state === "synced" ? `Synced: ${res.merged} ${res.merged === 1 ? "commit" : "commits"} from ${s.dest} merged into ${s.source}.` : "Already up to date.",
-      res.state === "synced" ? "Pushed to Bitbucket. You can merge now." : "");
+      res.state === "synced" ? `Pushed to ${hostName()}. You can merge now.` : "");
     reloadMine().catch(() => {});
     openPr(pr, { force: true });
   } catch (err) {
@@ -1549,7 +1554,10 @@ async function launch(button, event) {
   if (!pr) return;
   if (action === "fix_push" && !armed(button, "Confirm: fix and push")) return;
   clearTimeout(button._disarm);
-  const where = event?.shiftKey ? "window" : "app";
+  // Where Claude runs: the terminal panel, or the Claude panel when you chose it (Settings,
+  // Connected apps, Claude Code). Shift-click always opens a terminal window of its own.
+  const panel = Prefs.get("claudeIn") === "panel" && (state.features || []).includes("claude-panel");
+  const where = event?.shiftKey ? "window" : panel ? "panel" : "app";
   // AI work: the green slime pops up here, then goes to build the new terminal tab.
   const slime = where === "app" ? Sprites.agent(button) : null;
   button.disabled = true;
@@ -1558,14 +1566,20 @@ async function launch(button, event) {
   setLabel(button, `<span class="spin" aria-hidden="true"></span>Opening`);
   button.querySelectorAll(".spr").forEach((sp) => Sprites.play(sp));
   try {
-    const record = await api("launch", { method: "POST", body: { repo: pr.repo, id: pr.id, action, where } });
+    const body = { repo: pr.repo, id: pr.id, action, where };
+    if (where === "panel") Object.assign(body, { mode: Prefs.get("claudeMode") || "default", model: Prefs.get("claudeModel") || "", effort: Prefs.get("claudeEffort") || "" });
+    const record = await api("launch", { method: "POST", body });
     state.launches = [record, ...state.launches].slice(0, 30);
-    if (record.term) {
+    if (record.chat && typeof ClaudePanel !== "undefined") {
+      Sprites.dismiss(slime);
+      ClaudePanel.open(record.chat);
+    } else if (record.term) {
       Term.attach(record.term, record.title);
       Layout.activate("terminal");
       if (slime) Term.buildWith(slime, record.term); else Sprites.dismiss(slime);
     } else Sprites.dismiss(slime);
-    toast(record.term ? `Claude is running in the Terminal panel: ${ACTION_LABEL[action]}.` : `Claude is open in its own window: ${ACTION_LABEL[action]}.`, shortPath(record.cwd));
+    toast(record.chat ? `Claude is working in the Claude panel: ${ACTION_LABEL[action]}.`
+      : record.term ? `Claude is running in the Terminal panel: ${ACTION_LABEL[action]}.` : `Claude is open in its own window: ${ACTION_LABEL[action]}.`, shortPath(record.cwd));
   } catch (err) {
     Sprites.dismiss(slime);
     toast("Could not open Claude.", err.message, true);
@@ -1656,7 +1670,7 @@ function paintPreview() {
   const commits = p.commits.map((c) => `<li><span class="id">${esc(c.sha)}</span><span>${esc(c.subject)}</span><time class="when">${esc(ago(c.at))}</time></li>`).join("");
   const files = p.files.map((f) => `<tr><td class="branch">${esc(f.path)}</td><td class="num figure-cell plus">${f.binary ? "bin" : `+${f.added}`}</td><td class="num figure-cell minus">${f.binary ? "" : `-${f.removed}`}</td></tr>`).join("");
   const reviewers = p.reviewers.length ? `${plural(p.reviewers.length, "default reviewer")}: ${p.reviewers.map((r) => firstName(r.name)).join(", ")}` : "No default reviewers on this repository.";
-  const behind = p.behind ? `<p class="warn-line">This branch is ${plural(p.behind, "commit")} behind ${esc(p.dest)}. Bitbucket will ask for a sync before it can merge.</p>` : "";
+  const behind = p.behind ? `<p class="warn-line">This branch is ${plural(p.behind, "commit")} behind ${esc(p.dest)}. ${esc(hostName())} may ask for a sync before it can merge.</p>` : "";
   $("#pr-dialog-body").innerHTML = `
     <header class="pr-dialog-head"><h2 id="pr-dialog-title">Potential pull request</h2><p><span class="id">${esc(p.repo)}</span> <span class="branch">${esc(p.branch)}</span></p></header>
     <dl class="pr-facts">
@@ -1755,7 +1769,7 @@ function paintMerge() {
   const body = $("#pr-dialog-body");
   if (!m.opts) {
     body.innerHTML = `<header class="pr-dialog-head"><h2 id="pr-dialog-title">Merge #${esc(m.pr.id)}</h2></header>
-      ${m.error ? `<p class="set-error">${esc(m.error)}</p>` : `<p class="set-hint">Reading the pull request from Bitbucket…</p>`}
+      ${m.error ? `<p class="set-error">${esc(m.error)}</p>` : `<p class="set-hint">Reading the pull request from ${esc(hostName())}…</p>`}
       <footer class="pr-dialog-foot"><span class="spacer"></span><button class="btn btn--quiet" type="button" data-action="close-preview">Close</button></footer>`;
     return;
   }
@@ -1807,7 +1821,7 @@ async function mergeGo(button) {
   const started = Date.now();
   const tick = () => {
     const s = Math.round((Date.now() - started) / 1000);
-    wait.textContent = s < 3 ? "Merging on Bitbucket." : s < 20 ? `Merging on Bitbucket: ${s} s.` : `Bitbucket is still merging: ${s} s. PixelDeck follows it to the end.`;
+    wait.textContent = s < 3 ? `Merging on ${hostName()}.` : s < 20 ? `Merging on ${hostName()}: ${s} s.` : `${hostName()} is still merging: ${s} s. PixelDeck follows it to the end.`;
   };
   tick();
   wait.hidden = false;
@@ -1862,7 +1876,7 @@ async function doMerge(pr, body, button, inline = null) {
     } else {
       // Bitbucket finishes it on its own: the refresh that finds it merged plays the moment.
       merging.delete(key);
-      toast(`Merging #${pr.id}: Bitbucket is finishing it.`, `${how} It moves to Merged on the next refresh.`);
+      toast(`Merging #${pr.id}: ${hostName()} is finishing it.`, `${how} It moves to Merged on the next refresh.`);
     }
     // The popup closes now; the lists catch up behind it.
     reloadMine().catch(() => {}).finally(() => {
@@ -1893,7 +1907,8 @@ async function declinePr(button) {
     await busy(button, () => api("decline", { method: "POST", body: { repo: pr.repo, id: pr.id } }));
     Sprites.die(at, "pr");
     closePr();
-    toast(`Declined #${pr.id} on ${pr.repo}.`, "Bitbucket cannot reopen a declined pull request.");
+    toast(`${hostName() === "Bitbucket" ? "Declined" : "Closed"} #${pr.id} on ${pr.repo}.`,
+      hostName() === "Bitbucket" ? "Bitbucket cannot reopen a declined pull request." : `You can reopen it on ${hostName()}.`);
     await reloadMine();
   } catch (err) { toast("Could not decline the pull request.", err.message, true); }
 }
@@ -1935,7 +1950,7 @@ function renderBar() {
   MenuBar.paintScope();
   const { used, limit } = state.budget;
   StatusBar.paint();
-  $("#refresh").dataset.tip = `Refresh from Bitbucket (r). ${used} of ${limit} API calls used this hour.`;
+  $("#refresh").dataset.tip = `Refresh from ${hostName()} (r). ${used} of ${limit} API calls used this hour.`;
 }
 
 // Whose pull requests and which project: the scope chip, the Team menu and Jump all set them here.
@@ -1982,6 +1997,8 @@ function applyBoot(b) {
   state.platform = b.platform || "";
   state.features = b.features || []; // an older server has none: the page skips what it lacks
   state.setupNeeded = !!b.setup_needed;
+  state.host = b.host || { id: "bitbucket", label: "Bitbucket" };
+  document.documentElement.dataset.host = state.host.id;
   if (b.restore !== undefined && state.restore === undefined) state.restore = b.restore;
   if (b.stale && !state.staleSaid) {
     state.staleSaid = true;
@@ -2353,6 +2370,7 @@ function bind() {
     if (t.closest("[data-merge]")) return mergePr(t.closest("[data-merge]"));
     if (t.closest("[data-merge-go]")) return mergeGo(t.closest("[data-merge-go]"));
     if (t.closest("[data-merge-settings]")) { $("#pr-dialog").close(); return Settings.open("connections", { app: "jira" }); }
+    if (t.closest("[data-settings-open]")) return Settings.open(t.closest("[data-settings-open]").dataset.settingsOpen);
     if (t.closest("[data-sync]")) return syncPr(t.closest("[data-sync]"));
     const preset = t.closest("[data-date-preset]");
     if (preset) return setDates({ preset: preset.dataset.datePreset });
@@ -2615,6 +2633,8 @@ async function boot() {
       { id: "queue", title: "Pull Requests", copyable: true },
       { id: "insights", title: "Insights", copyable: true }, { id: "terminal", title: "Terminal" },
       { id: "repos", title: "Repos", place: "left" }, { id: "music", title: "Music", place: "hidden" },
+      // Claude as a chat, like an editor's extension: on the right once opened.
+      { id: "claude", title: "Claude", place: "hidden", home: "right" },
     ],
     onChange: () => { for (const b of $$(".chart-box")) b.dataset.drawn = ""; paintCharts(); Term.fit(); },
     paramsFor: (id) => { const v = viewOf(id); return { who: v.who, section: v.section, range: v.range }; },
@@ -2638,6 +2658,8 @@ async function boot() {
   BootScreen.step("connect");
   try { applyBoot(await api("bootstrap")); } catch (err) { if (err.message !== "reloading") toast("Dashboard server unreachable.", err.message, true); }
   setSyncing(false);
+  // The Claude panel asks the server for its chats, so it mounts once the features are known.
+  if (typeof ClaudePanel !== "undefined") ClaudePanel.mount(Layout.body("claude"));
   api("projects").then((r) => { state.projects = r.projects; state.project = r.project; renderBar(); }).catch(() => {});
   BootScreen.step("data");
   await loadView();

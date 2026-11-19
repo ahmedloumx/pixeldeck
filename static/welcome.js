@@ -173,10 +173,15 @@ const Welcome = (() => {
             <span class="wl-choice">${icon("gemini", 2)} Gemini CLI <small>SOON</small></span><span class="wl-choice">${icon("codex", 2)} Codex CLI <small>SOON</small></span></div></div>
       </div>`;
     } },
-    { title: "Where does your code live?", sub: "Your pull requests and your team's. Bitbucket today; GitHub and GitLab are coming.", html: () => {
-      const bb = state.me ? "CONNECTED" : "SET IT UP NEXT";
-      return `<div class="wl-hosts">${hostCard("bitbucket", "Bitbucket", "A cloud workspace and an API token", bb, 'data-wl-app="bitbucket"')}
-        ${hostCard("github", "GitHub", "github.com or Enterprise", "SOON", "disabled")}${hostCard("gitlab", "GitLab", "gitlab.com or your own server", "SOON", "disabled")}
+    { title: "Where does your code live?", sub: "Your pull requests and your team's, on Bitbucket, GitHub or GitLab. Pick one; you can switch in Settings, Setup.", html: () => {
+      // The host in use says so; the others open their setup, where saving switches to them.
+      const hosts = (state.features || []).includes("hosts");
+      const now = state.host?.id || "bitbucket";
+      const pill = (id) => (id === now ? (state.me ? "CONNECTED" : "SET IT UP NEXT") : "PICK IT");
+      const card = (id, name, line) => (hosts || id === "bitbucket")
+        ? hostCard(id, name, line, pill(id), `data-wl-host="${id}"`) : hostCard(id, name, line, "SOON", "disabled");
+      return `<div class="wl-hosts">${card("bitbucket", "Bitbucket", "A cloud workspace and an API token")}
+        ${card("github", "GitHub", "github.com or Enterprise")}${card("gitlab", "GitLab", "gitlab.com or your own server")}
         ${hostCard("git", "Any git", "Clones on this computer", report?.git?.ok ? "READY" : "", 'data-wl-app="git"')}</div>`;
     } },
     { title: "Bring your tools", sub: "All optional, all later is fine. A click opens the app's guide, with the link to the page you need.", html: () => {
@@ -184,7 +189,7 @@ const Welcome = (() => {
       const jira = report?.jira;
       return `<div class="wl-hosts">${hostCard("jira", "Jira", "Ticket status when you merge", jira?.site && jira?.token_set ? "READY" : "SET UP", 'data-wl-app="jira"')}
         ${hostCard("spotify", "Spotify", "Music while you work", sp?.connected ? "READY" : "SET UP", 'data-wl-app="spotify"')}
-        ${hostCard("claude", "Claude Code", "Fixes and reviews in a terminal", report?.claude?.ok ? "READY" : "SET UP", 'data-wl-app="claude"')}
+        ${hostCard("claude", "Claude Code", "Fixes and reviews, in a terminal or a chat panel", report?.claude?.ok ? "READY" : "SET UP", 'data-wl-app="claude"')}
         ${hostCard("youtube", "YouTube", "Videos floating while you work", "SOON", "disabled")}</div>`;
     } },
     { title: "Your look", sub: "A theme and an accent. The bot stays blue; the blob takes the theme's colour. All of it is in Settings, Personalise.", html: () => {
@@ -334,6 +339,13 @@ const Welcome = (() => {
     if (theme) { Prefs.set({ theme: theme.dataset.wlTheme }); Sound.key(2); return showStage(stage); }
     const accent = t.closest("[data-wl-accent]");
     if (accent) { Prefs.set({ accent: accent.dataset.wlAccent }); Sound.key(4); return showStage(stage); }
+    const host = t.closest("[data-wl-host]");
+    if (host) {
+      const id = host.dataset.wlHost;
+      // The host in use, set up: its card. Another one, or none yet: the setup, on that host.
+      return finish(() => (id === (state.host?.id || "bitbucket") && !state.setupNeeded
+        ? Settings.open("connections", { app: id }) : Settings.open("setup", { host: id })));
+    }
     const app = t.closest("[data-wl-app]");
     if (app) {
       const id = app.dataset.wlApp;

@@ -38,6 +38,7 @@ const Layout = (() => {
     insights: [".......##", ".......##", "....##.##", "....##.##", ".##.##.##", ".##.##.##", ".##.##.##", ".........", "#########"],
     terminal: ["#########", "#.......#", "#.#.....#", "#..#....#", "#.#..##.#", "#.......#", "#########", ".........", "........."],
     music: ["...######", "...######", "...#....#", "...#....#", "...#....#", ".###..###", "####.####", ".##...##.", "........."],
+    claude: ["#...#...#", ".#..#..#.", "..#.#.#..", "...###...", "#########", "...###...", "..#.#.#..", ".#..#..#.", "#...#...#"],
   };
   const glyph = (id) => {
     const rows = GLYPH[panels[id]?.base] || GLYPH[id];
@@ -348,10 +349,13 @@ const Layout = (() => {
     });
   }
 
+  // A hidden panel comes back in its home area when it has one (the Claude panel on the right,
+  // as an editor's side bar), else in the main area.
+  const homeOf = (id) => (SLOTS.includes(panels[id]?.home) ? panels[id].home : "main");
   function activate(id) {
     if (!panels[id]) return;
     let slot = slotOf(id);
-    if (!slot) { move(id, "main"); return; }
+    if (!slot) { move(id, homeOf(id)); return; }
     state.active[slot] = id;
     state.collapsed[slot] = false;
     save();
@@ -367,7 +371,7 @@ const Layout = (() => {
     save();
     paint();
   }
-  function show(id) { if (state.hidden.includes(id)) move(id, "main"); }
+  function show(id) { if (state.hidden.includes(id)) move(id, homeOf(id)); }
 
   const isCopy = (id) => !!panels[id] && panels[id].base !== id;
   const canCopy = (id) => !!panels[id] && !!panels[panels[id].base].copyable && !solo;

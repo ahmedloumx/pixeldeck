@@ -24,7 +24,12 @@ FROZEN = bool(getattr(sys, "frozen", False))
 # Resolved: reached by a short name (C:\Users\JOHNDO~1), it would not match the long paths
 # that resolve() gives the files under it.
 APP_DIR = Path(sys._MEIPASS).resolve() if FROZEN else Path(__file__).resolve().parent
-SECRET_KEYS = ("BITBUCKET_TOKEN", "JIRA_TOKEN")
+SECRET_KEYS = ("BITBUCKET_TOKEN", "JIRA_TOKEN", "GITHUB_TOKEN", "GITLAB_TOKEN")
+# Where your code lives, picked with CODE_HOST. Bitbucket Cloud is the default.
+HOSTS = ("bitbucket", "github", "gitlab")
+# Each host's token, and the setting that names the account its pull requests live under.
+HOST_TOKEN = {"bitbucket": "BITBUCKET_TOKEN", "github": "GITHUB_TOKEN", "gitlab": "GITLAB_TOKEN"}
+HOST_WORKSPACE = {"bitbucket": "BITBUCKET_WORKSPACE", "github": "GITHUB_OWNER", "gitlab": "GITLAB_GROUP"}
 APP_NAME = "PixelDeck"
 SLUG = "pixeldeck"
 # The Linux window's application id. GNOME ties a window to the launcher named <APP_ID>.desktop,
@@ -79,7 +84,9 @@ def _file_values():
     with _lock:
         if _cache["path"] != path or _cache["mtime"] != mtime:
             try:
-                values = parse_env(path.read_text(encoding="utf-8"))
+                # utf-8-sig: a file saved with a byte order mark (Windows editors, PowerShell)
+                # keeps its first key, which the mark would otherwise hide.
+                values = parse_env(path.read_text(encoding="utf-8-sig"))
             except (OSError, UnicodeDecodeError):
                 values = {}
             _cache.update(path=path, mtime=mtime, values=values)
@@ -117,7 +124,7 @@ def save(values):
             raise ValueError(f"cannot save {key!r}")
     path = env_path()
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        lines = path.read_text(encoding="utf-8-sig").splitlines()
     except FileNotFoundError:
         lines = []
     pending, done, out = dict(values), set(), []
@@ -202,9 +209,30 @@ def port():
     return get_int("PIXELDECK_PORT", DEFAULT_PORT)
 
 
+def host():
+    """Where your code lives: bitbucket (the default), github or gitlab."""
+    value = get("CODE_HOST", "bitbucket").strip().lower()
+    return value if value in HOSTS else "bitbucket"
+
+
 def workspace():
-    """The Bitbucket workspace slug, as in bitbucket.org/<workspace>/<repo>."""
-    return get("BITBUCKET_WORKSPACE")
+    """The account your pull requests live under, on the chosen host: the Bitbucket workspace
+    (bitbucket.org/<workspace>/<repo>), the GitHub owner, a user or an organization
+    (github.com/<owner>/<repo>), or the GitLab group, subgroups allowed (gitlab.com/<group>/<project>)."""
+    chosen = host()
+    if chosen == "bitbucket":
+        return get("BITBUCKET_WORKSPACE")
+    return get(HOST_WORKSPACE[chosen]).strip().strip("/")
+
+
+def github_api():
+    """GitHub's REST address: api.github.com, or https://<your server>/api/v3 for GitHub Enterprise."""
+    return get("GITHUB_API_URL", "https://api.github.com").strip().rstrip("/")
+
+
+def gitlab_url():
+    """GitLab's address: gitlab.com, or your own server."""
+    return get("GITLAB_URL", "https://gitlab.com").strip().rstrip("/")
 
 
 def workspace_root():
@@ -217,7 +245,8 @@ def workspace_root():
 
 
 def default_project():
-    return get("BITBUCKET_PROJECT") or None
+    # Projects are Bitbucket's: GitHub and GitLab have no such scope.
+    return (get("BITBUCKET_PROJECT") or None) if host() == "bitbucket" else None
 
 
 def jira_site():

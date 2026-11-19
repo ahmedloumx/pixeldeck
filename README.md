@@ -5,19 +5,24 @@
 <h1 align="center">PixelDeck</h1>
 
 <p align="center">
-  A retro desk for your Bitbucket Cloud pull requests, with Claude Code running next to the diff.
+  A retro desk for your pull requests on Bitbucket, GitHub or GitLab, with Claude Code running next to the diff.
 </p>
 
 PixelDeck is a small local app. It shows the pull requests that need you, the diffs and review
-threads, your team's queue and merge history, and a built-in terminal where Claude Code can fix
-review comments on the right branch. It looks and moves like an 8-bit game, and gets out of the
-way when you want it to.
+threads, your team's queue and merge history, and Claude Code, in a built-in terminal or as a chat
+panel, to fix review comments on the right branch. It looks and moves like an 8-bit game, and
+gets out of the way when you want it to.
 
 Full documentation, with the architecture, security model and measured performance:
 [docs/pixeldeck-documentation.html](docs/pixeldeck-documentation.html) (open it in a browser).
 
 ## What it does
 
+- **Bitbucket, GitHub or GitLab.** Pick where your code lives in Settings, Setup: Bitbucket Cloud,
+  github.com or GitHub Enterprise, gitlab.com or your own GitLab. The queue, the pull request view,
+  reviews, merges, notifications and insights work the same on all three; each host keeps its own
+  settings, token and cache, so switching back finds everything where you left it. The Repos panel
+  reads Bitbucket only, for now.
 - **Queue.** Your pull requests by state: needs you, changes requested, open, waiting, approved,
   waiting for your review, pushed without a pull request, merged and declined. A date filter
   (today, 7 days, 30 days, or a range) narrows any list by when it was opened, merged or
@@ -29,8 +34,20 @@ Full documentation, with the architecture, security model and measured performan
   plain Markdown, ready to paste into a Claude prompt.
 - **Claude Code on a pull request.** Fix, Fix and push, Read and summarize, or Review. PixelDeck
   prepares a worktree on the branch, briefs Claude with the open threads (quoted as data, never as
-  instructions) and starts it in the built-in terminal. The brief comes from templates you can
-  replace with your own.
+  instructions) and starts it in the built-in terminal, or in the Claude panel. The brief comes
+  from templates you can replace with your own.
+- **The Claude panel.** Claude Code as a chat, the way the VS Code and Windsurf extensions show
+  it, on the right of the window: its answers as it writes them, each file it reads or edits and
+  each command it runs, with what came back, and an Allow, Allow for this chat or Deny before it
+  changes anything. The composer attaches files (+, a drop or a pasted image), lists the slash
+  commands (/), shows how full the context is and when the five-hour usage window resets, and
+  picks the model, its effort (up to Max) and the permission mode (Ask, Accept edits, Plan, Auto).
+  The sessions view shows the account and plan, the five-hour and weekly usage, and the sessions
+  Claude Code keeps for a folder, newest first; one opens with the end of its history and goes on
+  where it stopped. All of it is read from the `claude` you already use, signed in as whoever uses
+  the computer (each person signs in with their own account: **Sign in** opens Claude Code in a
+  terminal, where `/login` does it). Pick the panel in Settings, Connected apps, Claude Code; the
+  terminal stays the other choice, and Shift-click still opens a terminal window of its own.
 - **A menu bar for a title bar.** Desk, View, Go, Pull request, Team and Help gather what
   PixelDeck does; Alt and the underlined letter opens one. One chip picks the project and the
   person, and Jump (Ctrl K), in the middle of the bar, finds any pull request by number, title,
@@ -69,7 +86,7 @@ Full documentation, with the architecture, security model and measured performan
   per open pull request of yours every 3 minutes) with a Sync button, like Bitbucket's; approvals
   taken back and new tasks notify too, and every kind is on by default.
 - **Status bar.** The main things only: when your pull requests were read and the next read, the
-  connection, the music player, your apps, the bell and refresh. Bitbucket API calls left this
+  connection, the music player, your apps, the bell and refresh. The host's API calls left this
   hour are in the sync tooltip; the API meter is a quick toggle and shows itself when they run low.
 - **Control center.** The bell has two tabs: your notifications, and quick toggles (Spotify sync,
   do not disturb, lyrics, the mini player, apps in the bar, the API meter, mascots, calm motion,
@@ -177,12 +194,14 @@ straight to main, master or develop.
 |---|---|---|---|
 | Python 3.10 or newer (tested on 3.12 and 3.14) | yes | yes | yes |
 | git on PATH | yes | yes | yes |
-| Claude Code CLI | optional, for the Claude actions | optional | optional |
+| Claude Code CLI | optional, for the Claude actions and the Claude panel | optional | optional |
 | App window | its own GTK window when PyGObject, GTK 4 and WebKitGTK 6 are installed; otherwise Chrome, Chromium, Edge or Brave in app mode | Chrome, Edge or Brave in app mode, else the default browser | Edge (built in) in app mode |
 | Terminal panel | built in | built in | `py -m pip install pywinpty` |
 
 The server uses the Python standard library only. The one extra package is `pywinpty`, on
-Windows, for the terminal panel. You also need a Bitbucket Cloud account and an API token.
+Windows, for the terminal panel. You also need an account and a token on the host your code
+lives on: Bitbucket Cloud, GitHub (github.com or Enterprise Server) or GitLab (gitlab.com or
+your own server).
 
 **Platform status.** PixelDeck is developed and tested on Linux (Fedora, GNOME on Wayland).
 It also runs on Windows 11, from a git clone and as the packaged app below. The macOS code
@@ -199,9 +218,9 @@ Nothing is published yet: build it with `packaging/build.py` (see Development).
   `pixeldeck` command on PATH (for `pixeldeck --stop`, `--status` and an agent's
   `pixeldeck --propose`). It is not signed yet, so Windows SmartScreen warns on the first run:
   More info, then Run anyway.
-- **First start.** Settings opens on Setup: your Atlassian email, the API token, the
-  workspace and the folder that holds your clones. **Check** tries each Bitbucket endpoint
-  PixelDeck reads and names any scope the token lacks. **Save** puts the token in Windows
+- **First start.** Settings opens on Setup: where your code lives (Bitbucket, GitHub or GitLab),
+  its token, the workspace (owner, group) and the folder that holds your clones. **Check** tries
+  each endpoint PixelDeck reads and says what the token lacks. **Save** puts the token in Windows
   Credential Manager and the rest in `%APPDATA%\PixelDeck\.env`. Used PixelDeck from a git
   clone before? **Import** copies that clone's `.env`, token included.
 - **Update.** Run the new Setup. It stops the server first, and refuses while terminals are
@@ -221,7 +240,10 @@ cp .env.example .env        # Windows: copy .env.example .env
 ```
 
 Edit `.env` and set at least `BITBUCKET_EMAIL`, `BITBUCKET_TOKEN` and `BITBUCKET_WORKSPACE`, and
-`PIXELDECK_WORKSPACE_ROOT` (the folder that holds your clones). Then start it:
+`PIXELDECK_WORKSPACE_ROOT` (the folder that holds your clones). On GitHub, set `CODE_HOST=github`,
+`GITHUB_TOKEN` and `GITHUB_OWNER` instead; on GitLab, `CODE_HOST=gitlab`, `GITLAB_TOKEN` and
+`GITLAB_GROUP`. Or leave the file empty and fill in **Settings, Setup** at the first start. Then
+start it:
 
 | | Start | Stop |
 |---|---|---|
@@ -250,7 +272,9 @@ git credentials, not through the token.
 
 From a git clone the token lives in `.env`, which `.gitignore` keeps out of git. Saved from the
 setup screen (Settings, Setup) on Windows, it goes to Windows Credential Manager instead, and
-out of the file. PixelDeck sends it to `api.bitbucket.org` and nowhere else.
+out of the file. PixelDeck sends it to `api.bitbucket.org` and nowhere else. A GitHub or GitLab
+token goes the same way, to that host's API only (see [Set up GitHub](#set-up-github) and
+[Set up GitLab](#set-up-gitlab)).
 
 ## Setup guides
 
@@ -267,6 +291,35 @@ works, yellow when it needs you, grey when it is not connected. A click opens it
 3. In **Settings, Setup**, paste it with your Atlassian email and your workspace (the part after
    `bitbucket.org/`), press **Check**, then **Save**.
 
+### Set up GitHub
+
+1. Open [github.com, Settings, Developer settings, Fine-grained tokens](https://github.com/settings/personal-access-tokens/new)
+   and press **Generate new token**.
+2. Give it the owner of your repositories, and the repository permissions **Pull requests**
+   (read; read and write to merge and review from PixelDeck), **Contents** (read) and **Metadata**
+   (read). For an organization's team list, add its **Members** (read). A classic token works
+   too, with `repo` and `read:org`.
+3. In **Settings, Setup**, pick **GitHub**, paste it with the owner (the user or organization in
+   `github.com/<owner>/<repo>`) and, for GitHub Enterprise Server, its API address
+   (`https://<server>/api/v3`). Press **Check**, then **Save**.
+
+Your pull requests are found with GitHub's search, each read once until it changes; review
+threads and their resolved state come from one GraphQL query per pull request you open.
+
+### Set up GitLab
+
+1. In GitLab, open **Preferences, Access tokens**
+   ([gitlab.com](https://gitlab.com/-/user_settings/personal_access_tokens), or the same page on
+   your server) and press **Add new token**.
+2. Tick `read_api` to read your merge requests, or `api` to also merge, close and approve them
+   from PixelDeck.
+3. In **Settings, Setup**, pick **GitLab**, paste it with your group (the path in
+   `gitlab.com/<group>/<project>`; a subgroup such as `acme/platform` works too) and, for your
+   own server, its address. Press **Check**, then **Save**.
+
+A project in a subgroup shows by its path below the group (`platform/shop-api`). Requesting
+changes is done on GitLab's website for now; approving and taking an approval back work here.
+
 ### Set up git
 
 1. Install git from [git-scm.com/downloads](https://git-scm.com/downloads).
@@ -277,6 +330,23 @@ works, yellow when it needs you, grey when it is not connected. A click opens it
 1. Install Claude Code: [docs.claude.com, Claude Code](https://docs.claude.com/en/docs/claude-code/overview).
 2. Run `claude` once in a terminal and sign in.
 3. Not on your PATH? Put its full path in `PIXELDECK_CLAUDE` in the settings file.
+4. In **Settings, Connected apps, Claude Code**, pick where the Claude buttons run it: **The
+   terminal (CLI)**, or **The Claude panel**, a chat like the VS Code and Windsurf extensions.
+
+The Claude panel runs the same `claude`, without a terminal:
+`claude -p --input-format stream-json --output-format stream-json --permission-prompt-tool stdio`.
+A tool that needs your yes comes to the panel as a question, and your answer goes back to
+Claude Code: the protocol the Claude Agent SDK and the editor extensions speak with the CLI.
+The same channel answers what the panel shows around the chat, from Claude Code itself: its
+models and effort levels and its slash commands (`initialize`), your account and usage windows
+(`get_usage`), the context a session fills (`get_context_usage`); and it changes a live
+session's model, effort and permission mode. Those questions send nothing to a model, so they
+cost no tokens; the answers are kept a minute (usage) or ten (models, commands, account).
+The sessions come from where Claude Code keeps them, `~/.claude/projects/<folder>/<id>.jsonl`
+(or `CLAUDE_CONFIG_DIR`); only the end of a session file is read, as some grow very large.
+Each chat's history is kept in PixelDeck's state folder too, so a chat reads the same after a
+restart and picks up its Claude session (`--resume`) when you write to it again. The modes that
+skip your yes altogether stay a terminal's.
 
 ### Set up Jira
 
@@ -303,14 +373,19 @@ Everything is in one settings file; [.env.example](.env.example) lists every key
 A git clone uses the `.env` next to the code. The packaged app, or a clone without one, uses
 `.env` in the config folder: `%APPDATA%\PixelDeck`, `~/Library/Application Support/PixelDeck`
 or `~/.config/pixeldeck`. `PIXELDECK_ENV` names another file. A value in the real environment
-wins over the file, the file wins over Windows Credential Manager (for `BITBUCKET_TOKEN` and
-`JIRA_TOKEN` only), and the file is re-read when it changes.
+wins over the file, the file wins over Windows Credential Manager (for `BITBUCKET_TOKEN`,
+`GITHUB_TOKEN`, `GITLAB_TOKEN` and `JIRA_TOKEN` only), and the file is re-read when it changes.
 
 | Key | What it is |
 |---|---|
-| `BITBUCKET_EMAIL`, `BITBUCKET_TOKEN` | Your Atlassian account email and API token. Required. |
-| `BITBUCKET_WORKSPACE` | The workspace slug, as in `bitbucket.org/<workspace>/<repo>`. Required. |
+| `CODE_HOST` | Where your code lives: `bitbucket` (the default), `github` or `gitlab`. |
+| `BITBUCKET_EMAIL`, `BITBUCKET_TOKEN` | Your Atlassian account email and API token. Required on Bitbucket. |
+| `BITBUCKET_WORKSPACE` | The workspace slug, as in `bitbucket.org/<workspace>/<repo>`. Required on Bitbucket. |
 | `BITBUCKET_PROJECT` | Start scoped to one project key. Empty: every project. |
+| `GITHUB_TOKEN`, `GITHUB_OWNER` | A GitHub personal access token, and the user or organization in `github.com/<owner>/<repo>`. Required on GitHub. |
+| `GITHUB_API_URL` | GitHub Enterprise Server's API, `https://<server>/api/v3`. Default: github.com. |
+| `GITLAB_TOKEN`, `GITLAB_GROUP` | A GitLab personal access token, and the group in `gitlab.com/<group>/<project>`, subgroups allowed. Required on GitLab. |
+| `GITLAB_URL` | Your own GitLab server. Default: `https://gitlab.com`. |
 | `JIRA_SITE`, `TICKET_PREFIXES` | Turn ticket keys such as `ABC-123` in branches and titles into Jira links. |
 | `SPOTIFY_CLIENT_ID` | The Client ID of your own Spotify app, for the music player (see below). |
 | `JIRA_TOKEN`, `JIRA_EMAIL` | An Atlassian API token with Jira access, to show and move a ticket's status in the merge popup. Classic and scoped tokens both work; the Bitbucket token is never sent to Jira. `JIRA_EMAIL` defaults to `BITBUCKET_EMAIL`. **Settings, Connected apps, Jira** sets all three without editing the file, and tries them at once; the token is never shown back. |

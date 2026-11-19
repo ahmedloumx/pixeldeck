@@ -1,4 +1,4 @@
-"""PixelDeck: a local dashboard for Bitbucket pull requests.
+"""PixelDeck: a local dashboard for your pull requests on Bitbucket, GitHub or GitLab.
 
 Security model, because this server can open a terminal that pushes code:
 - binds 127.0.0.1 only;
@@ -34,7 +34,9 @@ sys.path.insert(0, str(HERE))
 
 import account  # noqa: E402
 import actions  # noqa: E402
+import chats  # noqa: E402
 import connections  # noqa: E402
+import forge  # noqa: E402
 import repos  # noqa: E402
 import sessions  # noqa: E402
 import spotify  # noqa: E402
@@ -61,8 +63,9 @@ AGENT_KEY = secrets.token_urlsafe(32)
 AGENT_ROUTES = {("POST", "propose"), ("GET", "proposal")}
 PROPOSALS = proposals.Proposals()
 FEATURES = ["merge", "sync", "drop", "proposals", "snapshots", "reviews", "events", "status", "settings", "merge-options", "jira",
-            "restore", "ui-state", "open-link", *account.FEATURES, *repos.FEATURES, *spotify.FEATURES, *spotifyd.FEATURES, "lyrics", "jira-settings", *screenlock.FEATURES]
-ROUTE_MODULES = (account, repos, spotify, spotifyd, lyrics, screenlock)  # each answers its own routes, or None
+            "restore", "ui-state", "open-link", *account.FEATURES, *repos.FEATURES, *spotify.FEATURES, *spotifyd.FEATURES, "lyrics", "jira-settings",
+            *screenlock.FEATURES, *chats.FEATURES]
+ROUTE_MODULES = (account, repos, spotify, spotifyd, lyrics, screenlock, chats)  # each answers its own routes, or None
 JIRA = jira.Jira()
 SNAPSHOT_MAX = 4 * 1024 * 1024
 MIN_COLS, MIN_ROWS = 20, 4  # a collapsed panel must not squeeze a program into a sliver
@@ -167,8 +170,10 @@ class Desk(BaseHTTPRequestHandler):
             return self._send(200, {
                 "ok": True, "pid": os.getpid(), "start": os.environ.get("PIXELDECK_START_ID", ""),
                 "version": version.VERSION, "build": BUILD,
-                # what a stop would cut off: open terminals, and agents waiting on a proposal
-                "terminals": sum(1 for t in TERMS.list() if t["alive"]),
+                # what a stop would cut off: open terminals (a running Claude chat counts as one),
+                # and agents waiting on a proposal
+                "terminals": sum(1 for t in TERMS.list() if t["alive"]) + chats.CHATS.running(),
+                "chats": chats.CHATS.running(),
                 "proposals": sum(1 for p in PROPOSALS.list() if p["status"] in ("pending", "opening")),
             })
         if url.path == "/spotify/callback":  # the browser comes back here from Spotify; no page token
@@ -270,8 +275,13 @@ class Desk(BaseHTTPRequestHandler):
             if method == "GET" and route == "term-stream":
                 return self._stream_term((query.get("cursors") or [""])[0])
             if method == "POST" and route == "terms":
+                if body.get("kind") == "claude":
+                    # Claude Code itself, for each person to sign in with their own account (/login)
+                    # or switch to another one: the Claude panel then reads that account.
+                    session = TERMS.spawn("Claude Code", [launcher.claude_binary()], config.workspace_root())
+                    return self._send(200, session.info())
                 if body.get("kind") != "shell":
-                    raise ValueError("only a shell can be opened directly")
+                    raise ValueError("only a shell or Claude Code can be opened directly")
                 session = TERMS.spawn("Shell", shell_argv(), config.workspace_root())
                 return self._send(200, session.info())
             if method == "POST" and route == "term-restore":
@@ -435,6 +445,9 @@ class Desk(BaseHTTPRequestHandler):
             "terminal": terminals.UNAVAILABLE or "",
             "features": FEATURES,
             "setup_needed": account.status()["needed"],
+            # where your code lives, for the page's words: "Open on GitHub", "merge request"…
+            "host": {"id": forge.kind(engine.client), "label": forge.label(forge.kind(engine.client)),
+                     "web": forge.web_base(forge.kind(engine.client))},
             "restore": self.keeper.public_offer() if self.keeper else None,
             "version": version.VERSION,
             "stale": code_changed(),
@@ -626,8 +639,16 @@ class Desk(BaseHTTPRequestHandler):
         detail = engine.detail(repo, pr_id)
         me = (engine.me() or {}).get("uuid")
         where = body.get("where", "app")
-        record = launcher.launch(config.workspace_root(), action, detail["pr"], detail, pr["author"]["uuid"] == me,
-                                 terms=TERMS if where == "app" else None)
+        if where == "panel":
+            # The Claude panel: the same worktree and brief as a terminal, in a conversation.
+            cwd, how, brief, title = launcher.prepare(config.workspace_root(), action, detail["pr"], detail, pr["author"]["uuid"] == me)
+            chat = chats.CHATS.start(cwd, title, model=str(body.get("model") or ""), mode=str(body.get("mode") or "default"),
+                                     effort=str(body.get("effort") or ""), origin={"repo": repo, "id": pr_id, "action": action})
+            chat.brief(brief, title)
+            record = {"cwd": str(cwd), "checkout": how, "title": title, "at": time.time(), "chars": len(brief), "chat": chat.info["id"]}
+        else:
+            record = launcher.launch(config.workspace_root(), action, detail["pr"], detail, pr["author"]["uuid"] == me,
+                                     terms=TERMS if where == "app" else None)
         record.update({"repo": repo, "id": pr_id, "action": action, "pr_title": pr["title"]})
         engine.record_launch(record)
         return record
@@ -687,6 +708,7 @@ def main():
     Desk.keeper = sessions.Keeper(TERMS)
     Desk.keeper.run()
     atexit.register(Desk.keeper.save)
+    atexit.register(chats.CHATS.stop_all)  # the Claude panel's chats end with the server
     # PixelDeck's own Spotify player, when spotifyd is installed and signed in: it runs while
     # the server runs and stops with it.
     atexit.register(spotifyd.PLAYER.stop)

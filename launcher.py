@@ -1,6 +1,7 @@
-"""Open an interactive Claude Code session on a pull request.
+"""Open an interactive Claude Code session on a pull request: in a terminal, or in the Claude
+panel (chats.py), which takes the same worktree and the same brief.
 
-The brief is built here from cached Bitbucket data and the templates in briefs/,
+The brief is built here from cached pull request data and the templates in briefs/,
 never from text sent by the browser. On Linux and macOS it reaches Claude as one
 argv element, so no shell ever sees reviewer text and a backtick in a comment
 stays a backtick. Windows caps a whole command line at 32,767 characters, so
@@ -16,6 +17,7 @@ import time
 from pathlib import Path
 
 import config
+import forge
 import gitscan
 
 BRIEFS = config.APP_DIR / "briefs"
@@ -99,6 +101,7 @@ def build_brief(action, pr, detail, cwd, is_mine):
         "me": " (me)" if is_mine else "", "ticket": ticket or "none found in the branch or title",
         "cwd": str(cwd), "reviews": "\n".join([_review_line(r) for r in pr.get("reviews", [])] or ["- nobody has reviewed yet"]),
         "ticket_subjects": f" with {ticket} in every subject." if ticket else ".",
+        "host": forge.label(),
     }
     head = render(template("head.md"), values)
     task = render(template(f"{action}.md"), values)
@@ -206,7 +209,9 @@ def open_terminal(cwd, title, argv):
                      stderr=subprocess.DEVNULL, **flags)
 
 
-def launch(root, action, pr, detail, is_mine, terms=None):
+def prepare(root, action, pr, detail, is_mine):
+    """Where Claude works on a pull request (a worktree for the fixes, the clone otherwise), its
+    brief and its title: the same whether it runs in a terminal or in the Claude panel."""
     if action not in ACTIONS:
         raise ValueError(f"unknown action {action!r}")
     if action in OWN_ONLY and not is_mine:
@@ -220,7 +225,11 @@ def launch(root, action, pr, detail, is_mine, terms=None):
     else:
         cwd, how = repo_dir, "repo"
     brief = build_brief(action, pr, detail, cwd, is_mine)
-    title = f"{ACTIONS[action]} · {pr['repo']} #{pr['id']}"
+    return cwd, how, brief, f"{ACTIONS[action]} · {pr['repo']} #{pr['id']}"
+
+
+def launch(root, action, pr, detail, is_mine, terms=None):
+    cwd, how, brief, title = prepare(root, action, pr, detail, is_mine)
     record = {"cwd": str(cwd), "checkout": how, "title": title, "at": time.time(), "chars": len(brief)}
     # macOS hands an outside terminal its command through AppleScript, so a long brief goes by file there too.
     by_file = WINDOWS or (terms is None and sys.platform == "darwin")

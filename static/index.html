@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="desk-token" content="__DESK_TOKEN__">
-<meta name="description" content="Your Bitbucket pull requests, diffs, review threads and merges, with Claude running in the same window.">
+<meta name="description" content="Your pull requests on Bitbucket, GitHub or GitLab: diffs, review threads and merges, with Claude running in the same window.">
 <meta name="color-scheme" content="dark">
 <title>PixelDeck</title>
 <link rel="icon" href="/static/app-icon.svg" type="image/svg+xml">
@@ -20,6 +20,7 @@
 <link rel="stylesheet" href="/static/menubar.css">
 <link rel="stylesheet" href="/static/control.css">
 <link rel="stylesheet" href="/static/welcome.css">
+<link rel="stylesheet" href="/static/claude.css">
 <script src="/static/keep.js" defer></script>
 <script src="/static/vendor/xterm.js" defer></script>
 <script src="/static/vendor/addon-fit.js" defer></script>
@@ -49,6 +50,7 @@
 <script src="/static/winchrome.js" defer></script>
 <script src="/static/menubar.js" defer></script>
 <script src="/static/jump.js" defer></script>
+<script src="/static/claude.js" defer></script>
 <script src="/static/app.js" defer></script>
 </head>
 <body>
@@ -78,7 +80,7 @@
     <span class="bar-drag" aria-hidden="true"></span>
     <div class="sync statusbar" id="status" role="group" aria-label="Status">
       <span class="st-item st-api" id="st-api" tabindex="0" hidden>
-        <span class="st-label" aria-hidden="true">API</span><span class="energy" id="energy" role="img" aria-label="Bitbucket API calls left this hour"></span>
+        <span class="st-label" aria-hidden="true">API</span><span class="energy" id="energy" role="img" aria-label="API calls left this hour"></span>
         <span class="st-num num8" id="st-api-num">0/1000</span><span class="st-unit">/h</span></span>
       <span class="st-item st-sync" id="st-sync" tabindex="0"><span class="st-dot" id="st-dot" data-tone="warn" aria-hidden="true"></span>
         <span class="sync-text" id="sync-text">not synced</span><span class="st-next" id="st-next"></span></span>
@@ -129,7 +131,7 @@
     <div><dt><kbd>/</kbd></dt><dd>Filter the pull request list</dd></div>
     <div><dt><kbd>Ctrl</kbd> <kbd>K</kbd></dt><dd>Jump to a pull request, a person or a command</dd></div>
     <div><dt><kbd>Alt</kbd> + letter</dt><dd>Open a menu by its underlined letter</dd></div>
-    <div><dt><kbd>r</kbd></dt><dd>Refresh from Bitbucket</dd></div>
+    <div><dt><kbd>r</kbd></dt><dd>Refresh your pull requests</dd></div>
     <div><dt><kbd>?</kbd></dt><dd>This list</dd></div>
   </dl>
   <p class="menu-hint">Shift-click a Claude button to open it in its own terminal window.</p>

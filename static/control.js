@@ -60,13 +60,18 @@ const ControlCenter = (() => {
     return `<svg class="cc-pix" viewBox="0 0 ${w} ${h}" width="${Math.round(w * px)}" height="${Math.round(h * px)}" shape-rendering="crispEdges" aria-hidden="true">${rects}</svg>`;
   }
   const appIcon = (id, px = 1.6) => (APP_ART[id] ? art(APP_ART[id][0], APP_ART[id][1], px) : "");
+  // The code host's place in the bar keeps the id "bitbucket" (saved in your layout of apps),
+  // and wears the icon and the name of the host in use: Bitbucket, GitHub or GitLab.
+  const hostId = () => (typeof state !== "undefined" && state.host?.id) || "bitbucket";
+  const trayIcon = (id, px) => appIcon(id === "bitbucket" ? hostId() : id, px);
   const glyph = (name, px = 2) => art(GLYPHS[name], { "#": "currentColor" }, px);
 
   /* ---------------------------------------------------------------- apps */
   const musicOn = () => typeof Music !== "undefined" && !!Music.status()?.connected;
   const APPS = [
-    { id: "bitbucket", label: "Bitbucket", live: () => (state.auth?.ok === false ? false : state.auth?.ok === true || !!state.me),
-      yes: () => (state.me ? `connected as ${state.me.name}` : "connected"), no: "not connected", open: () => Settings.open(state.setupNeeded ? "setup" : "connections", { app: "bitbucket" }) },
+    { id: "bitbucket", get label() { return (typeof state !== "undefined" && state.host?.label) || "Bitbucket"; },
+      live: () => (state.auth?.ok === false ? false : state.auth?.ok === true || !!state.me),
+      yes: () => (state.me ? `connected as ${state.me.name}` : "connected"), no: "not connected", open: () => Settings.open(state.setupNeeded ? "setup" : "connections", { app: hostId() }) },
     { id: "jira", label: "Jira", live: () => (report?.jira ? !!(report.jira.site && report.jira.token_set) : null),
       yes: () => "set up", no: "not set up yet", open: () => Settings.open("connections", { app: "jira" }) },
     { id: "spotify", label: "Spotify", live: () => (typeof Music === "undefined" ? false : Music.status() ? musicOn() : null),
@@ -77,7 +82,9 @@ const ControlCenter = (() => {
         Layout.activate("music");
       } },
     { id: "claude", label: "Claude Code", live: () => (report?.claude ? !!report.claude.ok : null),
-      yes: () => (report?.claude?.version ? `ready, ${report.claude.version}` : "ready"), no: "not found", open: () => Settings.open("connections", { app: "claude" }) },
+      yes: () => (report?.claude?.version ? `ready, ${report.claude.version}` : "ready"), no: "not found",
+      // With the Claude panel chosen, the icon opens it; else the guide.
+      open: () => (Prefs.get("claudeIn") === "panel" && typeof ClaudePanel !== "undefined" ? ClaudePanel.open() : Settings.open("connections", { app: "claude" })) },
   ];
   const appTip = (a) => { const l = a.live(); return `${a.label}: ${l === true ? a.yes() : l === false ? a.no : "checking"}. Click to open, drag to move it`; };
 
@@ -155,7 +162,7 @@ const ControlCenter = (() => {
       tray.innerHTML = shown.map((a) => {
         const l = a.live();
         return `<span class="cc-tray-app${l === true ? " is-live" : l === false ? " is-off" : ""}" draggable="true" data-cc-app="${a.id}">
-          <button class="cc-tray-btn" type="button" data-cc-open="${a.id}" aria-label="${esc(appTip(a))}" data-tip="${esc(appTip(a))}">${appIcon(a.id)}</button>
+          <button class="cc-tray-btn" type="button" data-cc-open="${a.id}" aria-label="${esc(appTip(a))}" data-tip="${esc(appTip(a))}">${trayIcon(a.id)}</button>
           <button class="cc-x" type="button" data-cc-hide="${a.id}" aria-label="Move ${esc(a.label)} to the control center" data-tip="Move to the control center">×</button></span>`;
       }).join("") || `<span class="cc-tray-empty">Drop apps here</span>`;
       tray.classList.toggle("is-empty", !shown.length);
@@ -171,7 +178,7 @@ const ControlCenter = (() => {
     const apps = away.map((a) => {
       const l = a.live();
       return `<span class="cc-app${l === true ? " is-live" : l === false ? " is-off" : ""}" draggable="true" data-cc-app="${a.id}">
-        <button class="cc-app-btn" type="button" data-cc-open="${a.id}" data-tip="${esc(appTip(a))}">${appIcon(a.id, 2.4)}<small>${esc(a.label)}</small></button>
+        <button class="cc-app-btn" type="button" data-cc-open="${a.id}" data-tip="${esc(appTip(a))}">${trayIcon(a.id, 2.4)}<small>${esc(a.label)}</small></button>
         <button class="cc-up" type="button" data-cc-show="${a.id}" aria-label="Show ${esc(a.label)} in the bar" data-tip="Show it in the bar">↑</button></span>`;
     }).join("") || `<p class="cc-none">Every app is in the bar. Drag one here to keep it out of the way.</p>`;
     const tiles = c.order.map(tileOf).filter((t) => t.ok()).map((t) => {

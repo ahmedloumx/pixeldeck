@@ -223,6 +223,11 @@ const Repos = (() => {
     if (!box) return;
     const note = root.querySelector(".rp-note");
     const kinds = root.querySelector(".rp-kinds");
+    if (elsewhere()) {
+      note.textContent = ""; kinds.innerHTML = "";
+      box.innerHTML = `<p class="empty">The Repos panel reads Bitbucket repositories only, for now. Your ${esc(state.host.label)} pull requests are all in the Pull Requests panel.</p>`;
+      return;
+    }
     if (st.listError && !st.list) { box.innerHTML = failed("Could not read the repositories.", st.listError, "refresh"); return; }
     if (!st.list) { note.textContent = ""; kinds.innerHTML = ""; box.innerHTML = waiting("Reading the repositories"); return; }
     const all = st.list.repos;
@@ -344,8 +349,14 @@ const Repos = (() => {
 
   /* ------------------------------------------------------------ the list */
 
+  // GitHub and GitLab: the panel reads Bitbucket's source API only, so it says so instead of asking.
+  const elsewhere = () => typeof state !== "undefined" && !!state.host && state.host.id !== "bitbucket";
+  let bootWaits = 0;
   async function load({ force = false } = {}) {
     if (st.loading) return;
+    // The panel can come into view before the page knows its host: wait for it a little.
+    if (typeof state !== "undefined" && state.host === undefined && bootWaits++ < 50) { setTimeout(() => load({ force }), 400); return; }
+    if (elsewhere()) { paintList(); return; }
     st.loading = true;
     st.listError = "";
     paintList();

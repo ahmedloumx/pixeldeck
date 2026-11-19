@@ -15,9 +15,10 @@ from pathlib import Path
 
 import config
 import events
+import forge
 import gitscan
 import model
-from bitbucket import HOURLY_LIMIT, BitbucketError, Client
+from bitbucket import HOURLY_LIMIT, BitbucketError, Client  # noqa: F401 - Client: older imports of it
 
 ME_EVERY = 300
 OPEN_EVERY = 60  # your open pull requests alone: one call, so an approval shows within a minute or two
@@ -45,20 +46,45 @@ def _atomic_write(path, payload):
     os.replace(tmp, path)
 
 
+def _files(host):
+    """The cache and the saved team of one host: Bitbucket keeps the names it always had, so an
+    update reads the same files; GitHub and GitLab get files of their own."""
+    if host == "bitbucket":
+        return config.folder("cache") / "cache.json", config.settings_file()
+    settings = config.settings_file()
+    return config.folder("cache") / f"cache-{host}.json", settings.with_name(f"{settings.stem}-{host}{settings.suffix}")
+
+
 class Engine:
     def __init__(self, root, workspace=None):
         self.root = Path(root)
-        self.client = Client(workspace)
         self.lock = threading.RLock()
-        self.cache_file = config.folder("cache") / "cache.json"
-        self.settings_file = config.settings_file()
+        self._start(workspace)
+
+    def _start(self, workspace=None):
+        """Everything that belongs to one host and account: its client, its cache, its team."""
+        self.client = forge.client(workspace)
+        self.cache_file, self.settings_file = _files(forge.kind(self.client))
         self.data = {"me": None, "members": [], "people": {}, "details": {}, "launches": [], "history": {}}
         self.config = {"team": None, "project": config.default_project()}
         self.auth = {"ok": None, "error": None}
         self._pushed = {"at": 0, "items": []}
         self._seed_tried = False
+        for cache in ("_diff_cache", "_extra_cache"):
+            self.__dict__.pop(cache, None)
         self._load()
         self.events = events.Log(self.data, self._save)
+
+    def use_host(self):
+        """After the setup screen saved another host or workspace: start over on it. The open
+        page reloads; the cache of the host left behind stays on disk for a return to it."""
+        with self.lock:
+            self._start()
+        return forge.kind(self.client)
+
+    def _ceiling(self):
+        """Background reads stop at 80% of the host's hourly budget, leaving room for you."""
+        return int(getattr(self.client, "hourly_limit", HOURLY_LIMIT) * 0.8)
 
     # ---- persistence ----------------------------------------------------
 
@@ -82,7 +108,7 @@ class Engine:
     # ---- auth and identity ----------------------------------------------
 
     def _note(self, exc):
-        if exc.status in (401, 403) or exc.status == 0 and "No BITBUCKET_" in exc.message:
+        if exc.status in (401, 403) or forge.missing_setting(exc):
             self.auth = {"ok": False, "error": exc.message, "status": exc.status}
 
     def refresh_identity(self):
@@ -173,11 +199,9 @@ class Engine:
             key = f"{pr['repo']}#{pr['id']}"
             open_keys.add(key)
             try:
-                raw = self.client.get(f"/repositories/{self.client.workspace}/{pr['repo']}/commits",
-                                      {"include": pr["dest"], "exclude": pr["source"], "pagelen": 5, "fields": "values.hash,next"})
+                behind, more = forge.behind(self.client, pr["repo"], pr["source"], pr["dest"])
             except BitbucketError:
                 continue
-            behind, more = len(raw.get("values") or []), bool(raw.get("next"))
             before = store.get(key)
             with self.lock:
                 store[key] = {"behind": behind, "more": more, "at": time.time()}
@@ -219,14 +243,11 @@ class Engine:
                 continue
             looked += 1
             try:
-                raw = self.client.get(
-                    f"/repositories/{self.client.workspace}/{ev['repo']}/pullrequests/{int(ev['pr_id'])}/comments",
-                    {"sort": "-created_on", "pagelen": max(1, min(50, int(ev.get("count") or 1))),
-                     "fields": "values.user.uuid,values.user.display_name,values.deleted"})
+                newest = forge.newest_comments(self.client, ev["repo"], ev["pr_id"], ev.get("count"))
             except BitbucketError:
                 out.append(ev)
                 continue
-            others = [c for c in raw.get("values") or [] if not c.get("deleted") and (c.get("user") or {}).get("uuid") != me]
+            others = [c for c in newest if not c.get("deleted") and (c.get("user") or {}).get("uuid") != me]
             if not others:
                 continue
             names = list(dict.fromkeys((c.get("user") or {}).get("display_name") or "Someone" for c in others))
@@ -412,7 +433,7 @@ class Engine:
         for pr in entry.get("merged", []):
             if not self.in_scope(pr):
                 continue
-            if done >= budget or self.client.calls_last_hour() > BACKGROUND_CEILING:
+            if done >= budget or self.client.calls_last_hour() > self._ceiling():
                 break
             if (pr.get("updated_on") or "") < since:
                 break
@@ -446,7 +467,7 @@ class Engine:
         key = self._pr_key(repo, pr_id)
         if key in cache:
             return cache[key]
-        text, cut = self.client.text(f"/repositories/{self.client.workspace}/{repo}/pullrequests/{int(pr_id)}/diff")
+        text, cut = forge.pr_diff(self.client, repo, pr_id)
         result = {"files": model.parse_diff(text), "cut": cut, "fetched_at": time.time()}
         if len(cache) > 24:
             cache.pop(next(iter(cache)))
@@ -458,9 +479,8 @@ class Engine:
         key = self._pr_key(repo, pr_id)
         if key in cache:
             return cache[key]
-        base = f"/repositories/{self.client.workspace}/{repo}/pullrequests/{int(pr_id)}"
         commits = []
-        for c in self.client.paged(base + "/commits", {"pagelen": 50}, max_pages=4):
+        for c in forge.pr_commits(self.client, repo, pr_id):
             author = c.get("author") or {}
             commits.append({
                 "sha": (c.get("hash") or "")[:8],
@@ -487,7 +507,7 @@ class Engine:
         for pr in entry.get("open", []):
             if not self.in_scope(pr):
                 continue
-            if budget <= 0 or self.client.calls_last_hour() > BACKGROUND_CEILING:
+            if budget <= 0 or self.client.calls_last_hour() > self._ceiling():
                 return
             cached = self.data["details"].get(f"{pr['repo']}#{pr['id']}")
             if cached and cached.get("change_key") == model.change_key(pr) \
@@ -542,14 +562,14 @@ class Engine:
         return {
             "synced_at": synced, "open_at": open_at, "next_at": max(time.time(), owed) if synced else None,
             "tick": TICK, "team_at": max(team_at) if team_at else None,
-            "paused": self.client.calls_last_hour() > BACKGROUND_CEILING,
+            "paused": self.client.calls_last_hour() > self._ceiling(),
         }
 
     def _env_mtime(self):
         return config.mtime()
 
     def tick(self):
-        if self.client.calls_last_hour() > BACKGROUND_CEILING:
+        if self.client.calls_last_hour() > self._ceiling():
             return
         if self.auth.get("ok") is False:
             # A rejected token is retried once a minute, or at once when the env file changes.
@@ -599,7 +619,7 @@ class Engine:
         return thread
 
     def budget(self):
-        return {"used": self.client.calls_last_hour(), "limit": HOURLY_LIMIT}
+        return {"used": self.client.calls_last_hour(), "limit": getattr(self.client, "hourly_limit", HOURLY_LIMIT)}
 
     # ---- project scope ----------------------------------------------------
 
@@ -608,7 +628,7 @@ class Engine:
         cache = self.data.get("projects") or {}
         if cache.get("items") and time.time() - cache.get("at", 0) < PROJECT_LIST_MAX_AGE:
             return cache["items"]
-        raw = self.client.paged(f"/workspaces/{self.client.workspace}/projects", {"pagelen": 100}, max_pages=5)
+        raw = forge.projects(self.client)
         items = sorted(({"key": p.get("key"), "name": p.get("name")} for p in raw if p.get("key")),
                        key=lambda p: (p["name"] or "").lower())
         with self.lock:
@@ -635,9 +655,7 @@ class Engine:
         if offline:
             return None
         try:
-            raw = self.client.paged(f"/repositories/{self.client.workspace}",
-                                    {"q": f'project.key="{key}"', "pagelen": 100, "fields": "values.slug,next"},
-                                    max_pages=10)
+            raw = forge.project_repos(self.client, key)
             slugs = sorted(r["slug"] for r in raw if r.get("slug"))
         except BitbucketError:
             return set(cache["slugs"]) if cache.get("slugs") is not None else None

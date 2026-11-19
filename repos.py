@@ -20,6 +20,7 @@ import time
 from collections import OrderedDict
 from urllib.parse import quote
 
+import forge
 import gitscan
 from bitbucket import BitbucketError
 
@@ -525,6 +526,11 @@ WRITES = {"repo-commit": commit}
 def route(handler, engine, method, name, query, body):
     """Answer a route this module owns, or None. A dict or list goes out as JSON; a
     (bytes, content type) pair goes out as is."""
+    mine = (method == "POST" and name in WRITES) or (method == "GET" and name in ROUTES)
+    if mine and forge.kind(engine.client) != "bitbucket":
+        # The panel reads Bitbucket's source API; its pull requests work on every host.
+        raise ValueError(f"The Repos panel reads Bitbucket repositories only, for now. "
+                         f"Your {forge.label(forge.kind(engine.client))} pull requests are in the Pull Requests panel.")
     if method == "POST" and name in WRITES:
         return WRITES[name](engine, body)
     answer = ROUTES.get(name)
