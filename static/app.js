@@ -1114,7 +1114,7 @@ function reviewerRow(pr) {
 /* The activity as a vertical timeline, newest on top, a day label where the day changes, down to
    the opening of the pull request. */
 const TL_WORD = { approved: "approved", changes_requested: "asked for changes", commented: "commented", updated: "pushed new commits", opened: "opened the pull request", merged: "merged it", declined: "declined it" };
-function dayOf(at) {
+function dayLabel(at) {
   const d = new Date(at), t = new Date();
   const day = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
   const diff = Math.round((day(t) - day(d)) / 86400000);
@@ -1128,7 +1128,7 @@ function activityTimeline(pr, extra) {
   items.push({ kind: "opened", who: pr.author?.name || "Someone", at: pr.created_on });
   let last = "";
   const rows = items.map((e) => {
-    const label = dayOf(e.at);
+    const label = dayLabel(e.at);
     const day = label !== last ? `<li class="tl-day">${esc(label)}</li>` : "";
     last = label;
     return `${day}<li class="tl-item is-${esc(e.kind)}"><span class="tl-node" aria-hidden="true"></span>
@@ -2679,7 +2679,9 @@ async function boot() {
   setSyncing(false);
   api("projects").then((r) => { state.projects = r.projects; state.project = r.project; renderBar(); }).catch(() => {});
   BootScreen.step("data");
-  await loadView();
+  // A panel that fails to draw must not take the rest of the start with it (the status bar, the
+  // bell, the terminals' restore offer): it is reported and the start goes on.
+  try { await loadView(); } catch (err) { console.error(err); toast("A panel could not be drawn.", err.message, true); }
   // A first start has no account yet: the setup screen comes before the guide.
   // The very first start plays the welcome; then the setup screen, or the guide.
   BootScreen.finish(state.me ? "" : "NO CONNECTION").then(async () => {
