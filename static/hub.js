@@ -279,7 +279,7 @@ const Settings = (() => {
         <dl class="set-rows">${row("API key", yt?.key_set ? `set${where ? ` ${where}` : ""} (never shown)` : "missing: pasted links still play")}${row("Free quota", "10,000 units a day; a search costs 100, so about 100 searches")}</dl>
         <form class="set-form" data-youtube-form autocomplete="off">
           <label class="field-block"><span>API key</span><input type="password" name="key" data-keep="youtube-key" spellcheck="false" autocomplete="new-password"
-            placeholder="${yt?.key_set ? "Saved: paste another to change it" : "AIza and 35 more letters and digits"}"></label>
+            placeholder="${yt?.key_set ? "Saved: paste another to change it" : "Starts with AIza (capital I), 39 characters"}"></label>
           <p class="set-error" data-youtube-error hidden></p>
           <p class="set-actions"><button class="btn btn--primary" type="submit">Save</button>${yt?.key_set ? ' <button class="btn btn--quiet" type="button" data-youtube-clear>Remove</button>' : ""}
             <button class="btn btn--quiet" type="button" data-tube="open">Open YouTube in Music</button></p></form>
@@ -363,7 +363,7 @@ const Settings = (() => {
         pill: !yt ? "Checking" : ok ? "Search on" : yt.key_set ? "Check the key" : "Links only",
         line: ok ? "Search and play in a floating pixel TV" : "Pasted links play; a free key adds search",
         steps: [`Open ${ext("https://console.cloud.google.com/apis/library/youtube.googleapis.com", "YouTube Data API v3")} in the Google Cloud console, pick or create a project (free) and press <b>Enable</b>.`,
-          "Open <b>Credentials</b>, press <b>Create credentials</b>, <b>API key</b>, and restrict the key to <b>YouTube Data API v3</b>.",
+          "Open <b>Credentials</b>, press <b>Create credentials</b>, then <b>API key</b> (not <em>OAuth client ID</em>: PixelDeck needs no client file), and restrict the key to <b>YouTube Data API v3</b>.",
           "Paste the key below and save it. Playing a pasted link needs no key."] });
     } else {
       apps.push({ id: "youtube", group: "media", label: "YouTube", soon: true, line: "Videos in a floating pixel TV" });

@@ -44,6 +44,8 @@ THUMB_BYTES = 8 * 1024 * 1024  # this much in memory
 
 # A Google API key: "AIza" and 35 characters more.
 KEY_RE = re.compile(r"AIza[0-9A-Za-z_-]{35}")
+# What an OAuth client looks like when pasted instead: its ID, its secret, or its JSON file.
+OAUTH_RE = re.compile(r"\.apps\.googleusercontent\.com|GOCSPX-|\"client_secret\"|\"installed\"|\"web\"\s*:")
 VIDEO_ID_RE = re.compile(r"[0-9A-Za-z_-]{11}")
 # A video's picture on YouTube's image host, by its id. Anything else is refused, so this
 # route can never be pointed at another host, port, path or query.
@@ -109,7 +111,12 @@ def save_key(body):
     raw = body.get("key")
     key = raw.strip() if isinstance(raw, str) else ""
     if not KEY_RE.fullmatch(key):
-        raise ValueError("A YouTube API key starts with AIza and has 39 letters, digits, - and _. "
+        # An OAuth client (its ID, its secret, or its downloaded JSON) is the other choice under
+        # Create credentials, and the easy one to take by mistake: say so, never echo it.
+        if OAUTH_RE.search(key):
+            raise ValueError("That is an OAuth client, not an API key: PixelDeck does not need one. In the Google Cloud "
+                             "console, Credentials, press Create credentials, then API key, and paste that.")
+        raise ValueError("A YouTube API key starts with AIza (A, capital I, z, a) and has 39 letters, digits, - and _. "
                          "Copy it again from the Google Cloud console, Credentials.")
     if store.name:
         store.set(SETTING, key)

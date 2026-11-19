@@ -125,6 +125,22 @@ class KeyTest(Base):
         self.assertEqual(_ENV.read_text(), _START)
         self.assertFalse(self.route("GET", "youtube-status")["key_set"])
 
+    def test_an_oauth_client_pasted_instead_is_named_and_never_echoed(self):
+        # Made up, and put together here so no file holds anything shaped like a real credential.
+        client_id = "-".join(["123456789012", "x" * 32]) + ".apps.googleusercontent" + ".com"
+        secret = "GOCSPX" + "-" + "y" * 28
+        blob = json.dumps({"installed": {"client_id": client_id, "client_secret": secret, "project_id": "p"}})
+        for pasted in (client_id, secret, blob):
+            with self.subTest(pasted=pasted[:12]), self.assertRaises(ValueError) as caught:
+                self.save(pasted)
+            self.assertIn("OAuth client, not an API key", str(caught.exception))
+            self.assertNotIn(secret, str(caught.exception))
+            self.assertNotIn(client_id, str(caught.exception))
+        self.assertEqual(_ENV.read_text(), _START)
+        with self.assertRaises(ValueError) as caught:
+            self.save("Alza" + KEY[4:])  # a lowercase L where the capital I goes
+        self.assertIn("capital I", str(caught.exception))
+
     def test_clear_removes_it_and_forgets_the_searches(self):
         self.save()
         youtube.CLIENT.cache["lofi"] = (self.now[0], {"items": []})
