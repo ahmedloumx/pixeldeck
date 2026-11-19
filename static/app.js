@@ -2642,7 +2642,11 @@ async function boot() {
   BootScreen.step("data");
   await loadView();
   // A first start has no account yet: the setup screen comes before the guide.
-  BootScreen.finish(state.me ? "" : "NO CONNECTION").then(() => { if (state.setupNeeded) Settings.open("setup"); else if (!offerRestore()) Guide.firstRun(); });
+  // The very first start plays the welcome; then the setup screen, or the guide.
+  BootScreen.finish(state.me ? "" : "NO CONNECTION").then(async () => {
+    if (typeof Welcome !== "undefined" && Welcome.due() && (await Welcome.play()) === "app") return;
+    if (state.setupNeeded) Settings.open("setup"); else if (!offerRestore()) Guide.firstRun();
+  });
   if (state.route.pr) { const pr = findPr(state.route.pr); if (pr) openPr(pr); }
   // The server re-reads your open pull requests every minute; the page asks it twice as often.
   setInterval(() => { if (!document.hidden) loadView({ silent: true }); }, 30000);

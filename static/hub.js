@@ -184,6 +184,7 @@ const StatusBar = (() => {
       state.budget = status.budget || state.budget;
       if (status.auth?.ok !== null && status.auth) state.auth = status.auth;
       offline = false;
+      if (typeof LockScreen !== "undefined") LockScreen.seen(status.lock);
     } catch { offline = true; }
     paint();
   }
@@ -462,7 +463,8 @@ const Settings = (() => {
       ${typeof PixelChrome !== "undefined" && PixelChrome.available() ? `<div class="set-block"><h3>Title bar</h3><div class="date-bar">${choice("titlebar", "custom", "PixelDeck's menu bar")}${choice("titlebar", "system", "The system's")}</div>
         <p class="set-hint">PixelDeck's own bar moves the window from its empty parts and carries the window buttons. The system's brings back the usual title bar above it.</p></div>` : ""}
       <div class="set-block"><h3>Arcade</h3><div class="switch-grid">${toggle("mascots", "Mascots", "the slime and the bot")}${toggle("bubbles", "Bot ideas", "the bot suggests a game while you wait")}${toggle("games", "Games beside the terminal", "Tetris, Snake and Flappy")}</div></div>
-      <div class="set-block"><h3>Guide</h3><p><button class="btn" type="button" data-guide-again>Show the guide again</button></p></div>`;
+      ${typeof LockScreen !== "undefined" ? LockScreen.settingsHtml() : ""}
+      <div class="set-block"><h3>Guide</h3><p><button class="btn" type="button" data-guide-again>Show the guide again</button> <button class="btn btn--quiet" type="button" data-welcome-again>Play the welcome again</button></p></div>`;
   }
   function aboutHtml() {
     const app = report?.app;
@@ -525,6 +527,8 @@ const Settings = (() => {
     paint();
     if (!d.open) d.showModal();
     load();
+    // whether a lock screen passcode is set, for Personalise
+    if (typeof LockScreen !== "undefined") LockScreen.refreshCode().then(() => { if (d.open && tab === "look") paint(); });
   }
   document.addEventListener("click", async (e) => {
     const t = e.target;
@@ -579,6 +583,7 @@ const Settings = (() => {
     const pref = t.closest("[data-pref]");
     if (pref) { Prefs.set({ [pref.dataset.pref]: pref.dataset.value }); return paint(); }
     if (t.closest("[data-guide-again]")) { dialog().close(); if (typeof Guide !== "undefined") Guide.start(); return; }
+    if (t.closest("[data-welcome-again]")) { dialog().close(); if (typeof Welcome !== "undefined") Welcome.play(); return; }
     const check = t.closest("[data-setup-check]");
     if (check) {
       try { checks = await busy(check, () => api("setup-check", { method: "POST", body: Object.fromEntries(new FormData(check.form)) })); paint(); }

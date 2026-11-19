@@ -139,3 +139,13 @@ class KeeperTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class KeptKeysTest(unittest.TestCase):
+    def test_the_page_and_the_server_keep_the_same_keys(self):
+        """The server refuses a ui-state write with a key it does not know, so a key added to
+        keep.js alone would quietly stop every setting from being kept."""
+        import re  # noqa: PLC0415
+        src = (Path(__file__).resolve().parent.parent / "static" / "keep.js").read_text(encoding="utf-8")
+        block = re.search(r"const KEYS = \[(.*?)\];", src, re.S).group(1)
+        self.assertEqual(tuple(re.findall(r'"([^"]+)"', block)), sessions.UI_KEYS)

@@ -42,6 +42,7 @@ import spotifyd  # noqa: E402
 import jira  # noqa: E402
 import launcher  # noqa: E402
 import lyrics  # noqa: E402
+import screenlock  # noqa: E402
 import terminals  # noqa: E402
 import opener  # noqa: E402
 import proposals  # noqa: E402
@@ -60,8 +61,8 @@ AGENT_KEY = secrets.token_urlsafe(32)
 AGENT_ROUTES = {("POST", "propose"), ("GET", "proposal")}
 PROPOSALS = proposals.Proposals()
 FEATURES = ["merge", "sync", "drop", "proposals", "snapshots", "reviews", "events", "status", "settings", "merge-options", "jira",
-            "restore", "ui-state", "open-link", *account.FEATURES, *repos.FEATURES, *spotify.FEATURES, *spotifyd.FEATURES, "lyrics", "jira-settings"]
-ROUTE_MODULES = (account, repos, spotify, spotifyd, lyrics)  # each answers its own routes, or None
+            "restore", "ui-state", "open-link", *account.FEATURES, *repos.FEATURES, *spotify.FEATURES, *spotifyd.FEATURES, "lyrics", "jira-settings", *screenlock.FEATURES]
+ROUTE_MODULES = (account, repos, spotify, spotifyd, lyrics, screenlock)  # each answers its own routes, or None
 JIRA = jira.Jira()
 SNAPSHOT_MAX = 4 * 1024 * 1024
 MIN_COLS, MIN_ROWS = 20, 4  # a collapsed panel must not squeeze a program into a sliver
@@ -449,6 +450,8 @@ class Desk(BaseHTTPRequestHandler):
         return {
             "budget": engine.budget(), "auth": engine.auth, "schedule": engine.schedule(),
             "events_last": engine.events.last(), "now": time.time(),
+            # the system's locks, counted: the page shows its lock screen when the count goes up
+            "lock": screenlock.status(),
         }
 
     def _restore_one(self, entry, skip_permissions=None):
@@ -688,6 +691,9 @@ def main():
     # the server runs and stops with it.
     atexit.register(spotifyd.PLAYER.stop)
     threading.Thread(target=spotifyd.PLAYER.start, name="spotifyd-start", daemon=True).start()
+    # Hear the system lock (Super+L) for the lock screen; Linux with a session bus only.
+    atexit.register(screenlock.WATCHER.stop)
+    screenlock.WATCHER.start()
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     write_agent_key(args.port)
     if not args.no_refresh:

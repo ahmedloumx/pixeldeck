@@ -77,6 +77,17 @@ Full documentation, with the architecture, security model and measured performan
   a grid, compact or list layout. Each app icon (Bitbucket, Jira, Spotify, Claude Code) sits in the
   bar or in the control center: drag it from one to the other, or use × and ↑. All of it is kept
   with your other settings.
+- **Welcome.** The first start says "Welcome" in eight languages (English, French, Tunisian,
+  German, Japanese, Russian, Portuguese, Spanish), drawn in pixels, until you insert a coin (a
+  click or any key). Five short stages follow: the crew (the blue bot is your agent, the blob is
+  your AI helper), where your code lives, your tools, your look, and press start. SKIP leaves at
+  any moment; **Help, Welcome** plays it again.
+- **Lock screen.** Lock the computer (Super+L, Windows+L) and come back to "Let's code" in eight
+  languages, with a new line each time to get you going. Optional 4 to 8 digit passcode, sounds
+  you can switch off on the screen itself, and **Desk, Lock PixelDeck** on demand. On Linux
+  PixelDeck hears the lock from the desktop (GNOME, KDE and others on the session bus). The
+  passcode is a privacy screen for the window, not a second lock on the computer; only a salted
+  hash is kept, and `pixeldeck.py --forget-passcode` removes it.
 - **Connected apps.** Settings lists what PixelDeck connects to, grouped (where your code lives,
   AI helpers, tickets, music and video), each with an 8-bit icon and its state. A click opens its
   guide: the steps, each with the link to the exact page, then the fields to paste into. Jira and
