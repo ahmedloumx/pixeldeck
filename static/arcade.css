@@ -6,9 +6,11 @@
 /* ------------------------------------------------------------------ sprites */
 .spr { display: inline-block; vertical-align: middle; flex-shrink: 0; overflow: visible; }
 .spr g[data-f] { display: none; }
+/* One rule per frame: a frame with none draws nothing at all (tests/test_sprites.py checks it). */
 .spr[data-frame="0"] g[data-f="0"], .spr[data-frame="1"] g[data-f="1"], .spr[data-frame="2"] g[data-f="2"],
 .spr[data-frame="3"] g[data-f="3"], .spr[data-frame="4"] g[data-f="4"], .spr[data-frame="5"] g[data-f="5"],
-.spr[data-frame="6"] g[data-f="6"], .spr[data-frame="7"] g[data-f="7"] { display: inline; }
+.spr[data-frame="6"] g[data-f="6"], .spr[data-frame="7"] g[data-f="7"], .spr[data-frame="8"] g[data-f="8"],
+.spr[data-frame="9"] g[data-f="9"], .spr[data-frame="10"] g[data-f="10"], .spr[data-frame="11"] g[data-f="11"] { display: inline; }
 .p-orange { fill: var(--sprite-orange); } .p-orange-deep { fill: var(--sprite-orange-deep); }
 .p-dark { fill: var(--sprite-dark); } .p-white { fill: var(--sprite-white); }
 .p-blue { fill: var(--sprite-blue); } .p-blue-deep { fill: var(--sprite-blue-deep); }

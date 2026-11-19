@@ -37,18 +37,23 @@ const Sprites = (() => {
         ["y..y..y", ".y.y.y.", "..yyy..", "yyy.yyy", "..yyy..", ".y.y.y.", "y..y..y"],
       ],
     },
-    // the desk bot: the app icon grown legs (blue screen, yellow side bar, red light)
+    // the desk bot: blue, with a joystick on its head (red ball, steel stick, a base with a fire
+    // button). Someone plays it now and then: it leans, comes back, gets pressed.
     bot: {
       frames: [
-        [".....rr.....", ".....rr.....", "......B.....", "..bbbbbbbb..", ".ybbbbbbbbb.", ".ybwwbbbwwb.", ".ybwkbbbwkb.", ".ybbbbbbbbb.", ".ybbwwwwwbb.", ".ybbbbbbbbb.", "..bbbbbbbb..", "...B....B...", "..BB....BB.."],
-        [".....rr.....", ".....rr.....", "......B.....", "..bbbbbbbb..", ".ybbbbbbbbb.", ".ybbbbbbbbb.", ".ybkkbbbkkb.", ".ybbbbbbbbb.", ".ybbwwwwwbb.", ".ybbbbbbbbb.", "..bbbbbbbb..", "...B....B...", "..BB....BB.."],
-        [".....rr.....", ".....rr.....", "......B.....", "..bbbbbbbb..", ".ybbbbbbbbb.", ".ybwwbbbwwb.", ".ybwkbbbwkb.", ".ybbbbbbbbb.", ".ybbwwwwwbb.", ".ybbbbbbbbb.", "..bbbbbbbb..", "....B..B....", "....BB.BB..."],
-        [".....rr.....", ".....rr.....", "......B.....", "..bbbbbbbb..", ".ybbbbbbbbb.", ".ybkbbbbkbb.", ".ybbkbbkbbb.", ".ybkbbbbkbb.", ".ybbwbwbwbb.", ".ybbbbbbbbb.", "..bbbbbbbb..", "...B....B...", "..BB....BB.."],
-        [".....rr.....", ".....rr.....", "......B.....", "..bbbbbbbb..", ".ybbbbbbbbb.", ".ybbkbbbkbb.", ".ybkbkbkbkb.", ".ybbbbbbbbb.", ".ybbwwwwwbb.", ".ybbbwwwbbb.", "..bbbbbbbb..", "...B....B...", "..BB....BB.."],
+        [".....rr.....", "....rwrr....", "....rrrr....", ".....rr.....", ".....ss.....", "....SSaS....", "..bbbbbbbb..", ".ybbbbbbbbb.", ".ybwwbbbwwb.", ".ybwkbbbwkb.", ".ybbbbbbbbb.", ".ybbwwwwwbb.", ".ybbbbbbbbb.", "..bbbbbbbb..", "...B....B...", "..BB....BB.."],
+        [".....rr.....", "....rwrr....", "....rrrr....", ".....rr.....", ".....ss.....", "....SSaS....", "..bbbbbbbb..", ".ybbbbbbbbb.", ".ybbbbbbbbb.", ".ybkkbbbkkb.", ".ybbbbbbbbb.", ".ybbwwwwwbb.", ".ybbbbbbbbb.", "..bbbbbbbb..", "...B....B...", "..BB....BB.."],
+        [".....rr.....", "....rwrr....", "....rrrr....", ".....rr.....", ".....ss.....", "....SSaS....", "..bbbbbbbb..", ".ybbbbbbbbb.", ".ybwwbbbwwb.", ".ybwkbbbwkb.", ".ybbbbbbbbb.", ".ybbwwwwwbb.", ".ybbbbbbbbb.", "..bbbbbbbb..", "....B..B....", "....BB.BB..."],
+        [".....rr.....", "....rwrr....", "....rrrr....", ".....rr.....", ".....ss.....", "....SSaS....", "..bbbbbbbb..", ".ybbbbbbbbb.", ".ybkbbbbkbb.", ".ybbkbbkbbb.", ".ybkbbbbkbb.", ".ybbwbwbwbb.", ".ybbbbbbbbb.", "..bbbbbbbb..", "...B....B...", "..BB....BB.."],
+        [".....rr.....", "....rwrr....", "....rrrr....", ".....rr.....", ".....ss.....", "....SSaS....", "..bbbbbbbb..", ".ybbbbbbbbb.", ".ybbkbbbkbb.", ".ybkbkbkbkb.", ".ybbbbbbbbb.", ".ybbwwwwwbb.", ".ybbbwwwbbb.", "..bbbbbbbb..", "...B....B...", "..BB....BB.."],
         // looking left, up and left, up and right (frame 0 looks down and right)
-        [".....rr.....", ".....rr.....", "......B.....", "..bbbbbbbb..", ".ybbbbbbbbb.", ".ybwwbbbwwb.", ".ybkwbbbkwb.", ".ybbbbbbbbb.", ".ybbwwwwwbb.", ".ybbbbbbbbb.", "..bbbbbbbb..", "...B....B...", "..BB....BB.."],
-        [".....rr.....", ".....rr.....", "......B.....", "..bbbbbbbb..", ".ybbbbbbbbb.", ".ybkwbbbkwb.", ".ybwwbbbwwb.", ".ybbbbbbbbb.", ".ybbwwwwwbb.", ".ybbbbbbbbb.", "..bbbbbbbb..", "...B....B...", "..BB....BB.."],
-        [".....rr.....", ".....rr.....", "......B.....", "..bbbbbbbb..", ".ybbbbbbbbb.", ".ybwkbbbwkb.", ".ybwwbbbwwb.", ".ybbbbbbbbb.", ".ybbwwwwwbb.", ".ybbbbbbbbb.", "..bbbbbbbb..", "...B....B...", "..BB....BB.."],
+        [".....rr.....", "....rwrr....", "....rrrr....", ".....rr.....", ".....ss.....", "....SSaS....", "..bbbbbbbb..", ".ybbbbbbbbb.", ".ybwwbbbwwb.", ".ybkwbbbkwb.", ".ybbbbbbbbb.", ".ybbwwwwwbb.", ".ybbbbbbbbb.", "..bbbbbbbb..", "...B....B...", "..BB....BB.."],
+        [".....rr.....", "....rwrr....", "....rrrr....", ".....rr.....", ".....ss.....", "....SSaS....", "..bbbbbbbb..", ".ybbbbbbbbb.", ".ybkwbbbkwb.", ".ybwwbbbwwb.", ".ybbbbbbbbb.", ".ybbwwwwwbb.", ".ybbbbbbbbb.", "..bbbbbbbb..", "...B....B...", "..BB....BB.."],
+        [".....rr.....", "....rwrr....", "....rrrr....", ".....rr.....", ".....ss.....", "....SSaS....", "..bbbbbbbb..", ".ybbbbbbbbb.", ".ybwkbbbwkb.", ".ybwwbbbwwb.", ".ybbbbbbbbb.", ".ybbwwwwwbb.", ".ybbbbbbbbb.", "..bbbbbbbb..", "...B....B...", "..BB....BB.."],
+        // the joystick on its head: leaning left, right, and pressed down (8, 9, 10)
+        ["...rr.......", "..rwrr......", "..rrrr......", "...rr.......", ".....s......", "....SSaS....", "..bbbbbbbb..", ".ybbbbbbbbb.", ".ybwwbbbwwb.", ".ybwkbbbwkb.", ".ybbbbbbbbb.", ".ybbwwwwwbb.", ".ybbbbbbbbb.", "..bbbbbbbb..", "...B....B...", "..BB....BB.."],
+        [".......rr...", "......rwrr..", "......rrrr..", ".......rr...", "......s.....", "....SSaS....", "..bbbbbbbb..", ".ybbbbbbbbb.", ".ybwwbbbwwb.", ".ybwkbbbwkb.", ".ybbbbbbbbb.", ".ybbwwwwwbb.", ".ybbbbbbbbb.", "..bbbbbbbb..", "...B....B...", "..BB....BB.."],
+        ["............", ".....rr.....", "....rwrr....", "....rrrr....", ".....rr.....", "....SSyS....", "..bbbbbbbb..", ".ybbbbbbbbb.", ".ybbkbbbkbb.", ".ybkbkbkbkb.", ".ybbbbbbbbb.", ".ybbwwwwwbb.", ".ybbbwwwbbb.", "..bbbbbbbb..", "...B....B...", "..BB....BB.."],
       ],
     },
     // a small critter that stands for a branch or a pull request when it is removed
@@ -143,9 +148,19 @@ const Sprites = (() => {
     el.dataset.frame = frame;
   }
   function flash(el, frame, ms = 160) {
-    if (!el || el._timer || reduced()) return;
+    if (!el || el._timer || el._wiggling || reduced()) return;
     el.dataset.frame = frame;
     setTimeout(() => { if (!el._timer) el.dataset.frame = el._look || 0; }, ms);
+  }
+
+  // Someone plays the bot's joystick: left, back, right, back, a press.
+  function wiggle(el) {
+    if (!el || el._timer || el._wiggling || reduced()) return;
+    el._wiggling = true;
+    const steps = [[8, 180], [0, 120], [9, 180], [0, 120], [10, 160]];
+    let t = 0;
+    for (const [frame, ms] of steps) { setTimeout(() => { if (!el._timer) el.dataset.frame = frame; }, t); t += ms; }
+    setTimeout(() => { el._wiggling = false; if (!el._timer) el.dataset.frame = el._look || 0; }, t);
   }
 
   // A bot marked data-follow watches the pointer: its pupils turn toward it.
@@ -158,7 +173,8 @@ const Sprites = (() => {
       if (!r.width || el._timer) continue;
       const cx = r.left + r.width / 2, cy = r.top + r.height * 0.45;
       el._look = LOOK[`${pointerY < cy - 4 ? "up" : "down"}-${pointerX < cx ? "left" : "right"}`];
-      if (el.dataset.frame !== "1") el.dataset.frame = el._look; // not in the middle of a blink
+      // not in the middle of a blink or a joystick wiggle, which ends on the new look
+      if (el.dataset.frame !== "1" && !el._wiggling) el.dataset.frame = el._look;
     }
   }
   addEventListener("pointermove", (e) => {
@@ -192,7 +208,8 @@ const Sprites = (() => {
       const all = [...document.querySelectorAll(".spr[data-idle]")];
       if (!all.length) return;
       const pick = all[Math.floor(Math.random() * all.length)];
-      if (pick.dataset.idle === "blink") flash(pick, 1, 150);
+      if (pick.dataset.idle === "blink" && pick.dataset.sprite === "bot" && Math.random() < 0.45) wiggle(pick);
+      else if (pick.dataset.idle === "blink") flash(pick, 1, 150);
       else if (pick.dataset.idle === "wave") flash(pick, 1, 420);
     }, 1800);
   }
@@ -425,5 +442,5 @@ const Sprites = (() => {
     return { rows, colors, width: Math.max(...rows.map((r) => r.length)), height: rows.length, frames: def.frames.length };
   }
 
-  return { svg, grid, play, stop, flash, die, celebrate, builder, construct, goHome, worker, agent, dismiss, spawn };
+  return { svg, grid, play, stop, flash, wiggle, die, celebrate, builder, construct, goHome, worker, agent, dismiss, spawn };
 })();

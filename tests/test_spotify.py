@@ -12,6 +12,7 @@ import sys
 import tempfile
 import types
 import unittest
+from unittest import mock
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
@@ -196,6 +197,49 @@ class SignInTest(SpotifyBase):
         self.assertFalse(status["connected"])
         self.assertFalse((self.tmp / "spotify.json").exists())
         self.assertEqual(self.route("GET", "spotify-now"), {"connected": False})
+
+
+class ClientIdTest(SpotifyBase):
+    """The Client ID is set from the settings, into the test's own settings file."""
+
+    def setUp(self):
+        super().setUp()
+        # other test modules point PIXELDECK_ENV at their own file when the whole suite runs
+        env = mock.patch.dict(os.environ, {"PIXELDECK_ENV": str(_ENV)})
+        env.start()
+        self.addCleanup(env.stop)
+        self.client._client_id = None  # read it from the settings file, as the real one does
+        self.addCleanup(spotify.config.save, {spotify.SETTING: ""})
+
+    def test_saving_writes_the_settings_file_and_calls_nobody(self):
+        status = self.route("POST", "spotify-client-id", body={"client_id": f"  {CID} "})
+        self.assertEqual((status["configured"], status["client_id_ok"], status["connected"]), (True, True, False))
+        self.assertIn(f"SPOTIFY_CLIENT_ID={CID}", _ENV.read_text())
+        self.assertEqual((self.fake.calls, self.opened), ([], []))
+
+    def test_a_bad_client_id_is_refused_and_nothing_is_written(self):
+        before = _ENV.read_text()
+        for bad in ("", "short", "has spaces 0123456789abcdef", "x" * 80, f"{CID}\nEVIL=1", None, 12345678901234567):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                self.route("POST", "spotify-client-id", body={"client_id": bad})
+        self.assertEqual(_ENV.read_text(), before)
+
+    def test_a_new_client_id_signs_the_old_account_out(self):
+        self.route("POST", "spotify-client-id", body={"client_id": CID})
+        self.connect()
+        self.route("POST", "spotify-client-id", body={"client_id": CID})  # the same one keeps the sign-in
+        self.assertTrue(self.route("GET", "spotify-status")["connected"])
+        other = "fedcba9876543210fedcba9876543210"
+        status = self.route("POST", "spotify-client-id", body={"client_id": other})
+        self.assertFalse(status["connected"])
+        self.assertFalse((self.tmp / "spotify.json").exists())
+        self.assertIn(f"SPOTIFY_CLIENT_ID={other}", _ENV.read_text())
+
+    def test_clear_removes_it(self):
+        self.route("POST", "spotify-client-id", body={"client_id": CID})
+        status = self.route("POST", "spotify-client-id", body={"clear": True})
+        self.assertFalse(status["configured"])
+        self.assertNotIn("SPOTIFY_CLIENT_ID", _ENV.read_text())
 
 
 class ApiTest(SpotifyBase):

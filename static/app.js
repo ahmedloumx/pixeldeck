@@ -1738,7 +1738,7 @@ function mergeTicketHtml() {
   if (m.ticketState === "loading") return `<section class="merge-ticket"><h3>Ticket</h3><p class="set-hint">Reading ${esc(key)} from Jira…</p></section>`;
   if (m.ticketState === "error") {
     return `<section class="merge-ticket"><h3>Ticket ${link}</h3><p class="set-hint">Could not read it from Jira: ${esc(m.ticketError)}</p>
-      <p class="set-hint">Set <code>JIRA_TOKEN</code> in the settings file to see and move its status here. <button class="link" type="button" data-merge-settings>Connections</button></p></section>`;
+      <p class="set-hint">Connect Jira to see and move its status here: <button class="link" type="button" data-merge-settings>Settings, Connected apps, Jira</button>.</p></section>`;
   }
   const t = m.ticket;
   let remembered = "";
@@ -2352,7 +2352,7 @@ function bind() {
     if (t.closest("[data-decline]")) return declinePr(t.closest("[data-decline]"));
     if (t.closest("[data-merge]")) return mergePr(t.closest("[data-merge]"));
     if (t.closest("[data-merge-go]")) return mergeGo(t.closest("[data-merge-go]"));
-    if (t.closest("[data-merge-settings]")) { $("#pr-dialog").close(); return Settings.open("connections"); }
+    if (t.closest("[data-merge-settings]")) { $("#pr-dialog").close(); return Settings.open("connections", { app: "jira" }); }
     if (t.closest("[data-sync]")) return syncPr(t.closest("[data-sync]"));
     const preset = t.closest("[data-date-preset]");
     if (preset) return setDates({ preset: preset.dataset.datePreset });
@@ -2642,7 +2642,11 @@ async function boot() {
   BootScreen.step("data");
   await loadView();
   // A first start has no account yet: the setup screen comes before the guide.
-  BootScreen.finish(state.me ? "" : "NO CONNECTION").then(() => { if (state.setupNeeded) Settings.open("setup"); else if (!offerRestore()) Guide.firstRun(); });
+  // The very first start plays the welcome; then the setup screen, or the guide.
+  BootScreen.finish(state.me ? "" : "NO CONNECTION").then(async () => {
+    if (typeof Welcome !== "undefined" && Welcome.due() && (await Welcome.play()) === "app") return;
+    if (state.setupNeeded) Settings.open("setup"); else if (!offerRestore()) Guide.firstRun();
+  });
   if (state.route.pr) { const pr = findPr(state.route.pr); if (pr) openPr(pr); }
   // The server re-reads your open pull requests every minute; the page asks it twice as often.
   setInterval(() => { if (!document.hidden) loadView({ silent: true }); }, 30000);

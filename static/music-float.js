@@ -162,8 +162,9 @@ const MusicFloat = (() => {
     el.classList.add(cls);
     let finished = false;
     const end = () => { if (finished) return; finished = true; el.classList.remove(cls); done?.(); };
-    el.addEventListener("animationend", end, { once: true });
-    setTimeout(end, 500);
+    const own = (e) => { if (e.target === el) { el.removeEventListener("animationend", own); end(); } };
+    el.addEventListener("animationend", own);
+    setTimeout(() => { el.removeEventListener("animationend", own); end(); }, 500);
   }
   function show(el) {
     el.hidden = false;

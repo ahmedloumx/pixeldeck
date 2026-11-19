@@ -33,8 +33,10 @@ Full documentation, with the architecture, security model and measured performan
   replace with your own.
 - **A menu bar for a title bar.** Desk, View, Go, Pull request, Team and Help gather what
   PixelDeck does; Alt and the underlined letter opens one. One chip picks the project and the
-  person, and Jump (Ctrl K) finds any pull request by number, title, ticket or branch, any
-  teammate and any menu command. In the PixelDeck window the bar replaces the system title bar:
+  person, and Jump (Ctrl K), in the middle of the bar, finds any pull request by number, title,
+  ticket or branch, any terminal, repository, teammate or menu command, and songs, albums,
+  artists and playlists on Spotify (# $ @ > ! narrow it to one kind). In the PixelDeck window
+  the bar replaces the system title bar:
   drag its empty parts to move the window, double-click to maximize, and its own buttons
   minimize, maximize and close (Personalise brings the system title bar back).
 - **One Pull Requests panel.** The queue's side menu sits on the left; a pull request opens in
@@ -66,10 +68,35 @@ Full documentation, with the architecture, security model and measured performan
   When a merge into its target leaves one of your branches behind, you hear it at once (one call
   per open pull request of yours every 3 minutes) with a Sync button, like Bitbucket's; approvals
   taken back and new tasks notify too, and every kind is on by default.
-- **Status bar.** Bitbucket API calls used this hour, when your pull requests were read and the
-  next read, the connection, the bell, settings and the guide.
-- **Themes.** Night (the default) or an optional Retro grey, which brings its own mascots: the same
-  bot in orange and the slime in purple. Terminals stay dark in both.
+- **Status bar.** The main things only: when your pull requests were read and the next read, the
+  connection, the music player, your apps, the bell and refresh. Bitbucket API calls left this
+  hour are in the sync tooltip; the API meter is a quick toggle and shows itself when they run low.
+- **Control center.** The bell has two tabs: your notifications, and quick toggles (Spotify sync,
+  do not disturb, lyrics, the mini player, apps in the bar, the API meter, mascots, calm motion,
+  games). Edit lets you drag the tiles into your order, pin any of them to the bar with ☆, and pick
+  a grid, compact or list layout. Each app icon (Bitbucket, Jira, Spotify, Claude Code) sits in the
+  bar or in the control center: drag it from one to the other, or use × and ↑. All of it is kept
+  with your other settings.
+- **Welcome.** The first start says "Welcome" in eight languages (English, French, Tunisian,
+  German, Japanese, Russian, Portuguese, Spanish), drawn in pixels, until you insert a coin (a
+  click or any key). Five short stages follow: the crew (the blue bot is your agent, the blob is
+  your AI helper), where your code lives, your tools, your look, and press start. SKIP leaves at
+  any moment; **Help, Welcome** plays it again.
+- **Lock screen.** Lock the computer (Super+L, Windows+L) and come back to "Let's code" in eight
+  languages, with a new line each time to get you going. Optional 4 to 8 digit passcode, sounds
+  you can switch off on the screen itself, and **Desk, Lock PixelDeck** on demand. On Linux
+  PixelDeck hears the lock from the desktop (GNOME, KDE and others on the session bus). The
+  passcode is a privacy screen for the window, not a second lock on the computer; only a salted
+  hash is kept, and `pixeldeck.py --forget-passcode` removes it.
+- **Connected apps.** Settings lists what PixelDeck connects to, grouped (where your code lives,
+  AI helpers, tickets, music and video), each with an 8-bit icon and its state. A click opens its
+  guide: the steps, each with the link to the exact page, then the fields to paste into. Jira and
+  Spotify are set up there without editing a file. The same guides are below, in
+  [Setup guides](#setup-guides).
+- **Themes and accents.** Two dark themes (Night, the default, and Midnight) and two light ones
+  (Daylight, a warm grey, and Retro grey), with six accent colours apart. The blue bot, joystick on
+  its head, is the same in every theme; the blob, the AI helper, takes each theme's colour, and has
+  a word about its CSS if you hover it after a change. Terminals stay dark in every theme.
 - **Settings.** What PixelDeck is connected to (Bitbucket, Jira, the Claude Code CLI, git and
   terminals), what notifies you, and your look: accent colour, number font and size, motion,
   mascots.
@@ -107,7 +134,9 @@ Full documentation, with the architecture, security model and measured performan
   lately. It never takes focus from a terminal; switch it off in the Layout menu.
 - **Music.** A retro boombox for Spotify: pixelated album art, a green LCD with the title
   scrolling, a block progress bar to seek, chunky transport keys, volume blocks, an equalizer,
-  your devices and your playlists as cassettes; a mini player sits in the status bar. It drives
+  your devices and your playlists as cassettes; a mini player sits in the status bar. Spotify
+  sync (the SYNC key or a quick toggle) stops PixelDeck asking Spotify what plays until you turn
+  it back on; playing something from here turns it on again. It drives
   your own Spotify app (desktop or phone) through Spotify's Web API. Each person uses their own
   Spotify app, see below. **Preview** in the player shows it with made-up music.
 - **Lyrics.** The LYRICS key puts the song's lyrics beside the deck, from
@@ -118,6 +147,9 @@ Full documentation, with the architecture, security model and measured performan
 - **Devices.** PLAY ON shows the device playing with a picture of its kind (computer, phone,
   speaker, TV, car, console) and lists the others; a pick moves the music there. The status
   bar names the device when the music plays somewhere other than this computer.
+- **Many terminals.** The tab strip scrolls with the wheel and its arrows, with no scrollbar over
+  the names; long names are cut (the tooltip has them whole), and the list beside the strip finds
+  any terminal by name.
 - **Guide.** A short tour on the first start, a spotlight on each part with a mascot telling it.
   The **?** in the status bar brings it back.
 
@@ -243,6 +275,51 @@ From a git clone the token lives in `.env`, which `.gitignore` keeps out of git.
 setup screen (Settings, Setup) on Windows, it goes to Windows Credential Manager instead, and
 out of the file. PixelDeck sends it to `api.bitbucket.org` and nowhere else.
 
+## Setup guides
+
+The same steps as in **Settings, Connected apps**, where each app has a card: green when it
+works, yellow when it needs you, grey when it is not connected. A click opens its guide.
+
+### Set up Bitbucket
+
+1. Open [id.atlassian.com, Security, API tokens](https://id.atlassian.com/manage-profile/security/api-tokens)
+   and press **Create API token with scopes**.
+2. Pick the app **Bitbucket** and tick `read:user:bitbucket`, `read:workspace:bitbucket`,
+   `read:repository:bitbucket` and `read:pullrequest:bitbucket`. Add `write:pullrequest:bitbucket`
+   to open, merge and decline pull requests from PixelDeck (see [The API token](#the-api-token)).
+3. In **Settings, Setup**, paste it with your Atlassian email and your workspace (the part after
+   `bitbucket.org/`), press **Check**, then **Save**.
+
+### Set up git
+
+1. Install git from [git-scm.com/downloads](https://git-scm.com/downloads).
+2. In **Settings, Setup**, point **Your clones** at the folder that holds your repositories.
+
+### Set up Claude Code
+
+1. Install Claude Code: [docs.claude.com, Claude Code](https://docs.claude.com/en/docs/claude-code/overview).
+2. Run `claude` once in a terminal and sign in.
+3. Not on your PATH? Put its full path in `PIXELDECK_CLAUDE` in the settings file.
+
+### Set up Jira
+
+1. Open [id.atlassian.com, Security, API tokens](https://id.atlassian.com/manage-profile/security/api-tokens),
+   signed in as the account you use for Jira.
+2. Press **Create API token**, name it PixelDeck, and copy it.
+3. In **Settings, Connected apps, Jira**, paste it with your Jira address
+   (`https://your-team.atlassian.net`) and press **Save and test**. Leave the email empty when it
+   is your Bitbucket one.
+
+### Set up Spotify
+
+1. Open [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard), create an app
+   (any name) and tick **Web API**.
+2. Add the redirect URI `http://127.0.0.1:8642/spotify/callback` to it (your port, if you
+   changed `PIXELDECK_PORT`). The guide shows it with a copy button.
+3. Paste the app's **Client ID** in **Settings, Connected apps, Spotify** (or in the Music panel's
+   setup) and save it, then press **Connect** and sign in to Spotify. More in
+   [The music player and your Spotify app](#the-music-player-and-your-spotify-app).
+
 ## Configuration
 
 Everything is in one settings file; [.env.example](.env.example) lists every key with a comment.
@@ -259,7 +336,8 @@ wins over the file, the file wins over Windows Credential Manager (for `BITBUCKE
 | `BITBUCKET_PROJECT` | Start scoped to one project key. Empty: every project. |
 | `JIRA_SITE`, `TICKET_PREFIXES` | Turn ticket keys such as `ABC-123` in branches and titles into Jira links. |
 | `SPOTIFY_CLIENT_ID` | The Client ID of your own Spotify app, for the music player (see below). |
-| `JIRA_TOKEN`, `JIRA_EMAIL` | An Atlassian API token with Jira access, to show and move a ticket's status in the merge popup. Classic and scoped tokens both work; the Bitbucket token is never sent to Jira. `JIRA_EMAIL` defaults to `BITBUCKET_EMAIL`. |
+| `JIRA_TOKEN`, `JIRA_EMAIL` | An Atlassian API token with Jira access, to show and move a ticket's status in the merge popup. Classic and scoped tokens both work; the Bitbucket token is never sent to Jira. `JIRA_EMAIL` defaults to `BITBUCKET_EMAIL`. **Settings, Connected apps, Jira** sets all three without editing the file, and tries them at once; the token is never shown back. |
+| `SPOTIFYD`, `SPOTIFYD_PATH`, `SPOTIFYD_DEVICE_NAME` | PixelDeck's own Spotify player (see below): `SPOTIFYD=off` turns it off, `SPOTIFYD_PATH` names the program when it is not on the PATH or in `~/.local/bin`, the device name defaults to `PixelDeck`. |
 | `PIXELDECK_WORKSPACE_ROOT` | The folder with your local clones. Default: the folder PixelDeck sits in. |
 | `PIXELDECK_RELEASE_REPOS` | Glob patterns of repos whose pull requests target master or main before develop. |
 | `PIXELDECK_BRIEFS_DIR` | Your own Claude brief templates (see below). |
@@ -293,13 +371,26 @@ Spotify gives each app its own Client ID, so everyone who runs PixelDeck uses an
    (any name) and tick **Web API**.
 2. Add the redirect URI `http://127.0.0.1:8642/spotify/callback` (your port, if you changed
    `PIXELDECK_PORT`). Spotify allows plain http only for `127.0.0.1`, never `localhost`.
-3. Put the app's Client ID in `.env` as `SPOTIFY_CLIENT_ID=`. No client secret: PixelDeck signs in
-   with PKCE, the flow made for apps that cannot keep one.
+3. Paste the app's Client ID in **Settings, Connected apps, Spotify** and save it (it lands in the
+   settings file as `SPOTIFY_CLIENT_ID=`). No client secret: PixelDeck signs in with PKCE, the flow
+   made for apps that cannot keep one.
 4. Press **Connect** in the Music panel and sign in to Spotify in your browser.
 
 Spotify Premium is needed for the app's owner (in development mode) and for play, pause, skip,
 seek and volume. In development mode an app works for its owner and up to 5 people added under
 User Management. The player shows the exact redirect URI to register, with a copy button.
+
+#### Music without the Spotify app
+
+Spotify's Web API only steers a Spotify app that is open somewhere. To play with none open,
+install [spotifyd](https://github.com/Spotifyd/spotifyd), a small open-source Spotify Connect
+player (not made by Spotify; Premium needed): the Linux file ending in `x86_64-full.tar.gz` from
+its releases, with `spotifyd` put in `~/.local/bin`. Then press **Sign in to Spotify** under
+**Settings, Connected apps, Spotify**: Spotify's own login page opens in your browser, and the login
+is kept in PixelDeck's state folder, readable by you only. From then on PixelDeck starts it with
+the server, as the device **PixelDeck** playing through this computer's speakers, restarts it if
+it stops, and stops it with the server. It never announces itself on the network, so nobody on
+the same Wi-Fi can take it over.
 
 ### Claude brief templates
 

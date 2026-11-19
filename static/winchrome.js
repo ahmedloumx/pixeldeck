@@ -9,7 +9,7 @@ const PixelChrome = (() => {
   const handler = () => window.webkit?.messageHandlers?.pixeldeck;
   let current = { maximized: false, titlebar: "custom" };
   // Anything that does something on a press keeps it; only bare bar moves the window.
-  const ACTIVE = "button, a, input, select, textarea, label, summary, [role='menuitem'], [tabindex], .st-music, .scope, .mb-pop, .jump-btn";
+  const ACTIVE = "button, a, input, select, textarea, label, summary, [role='menuitem'], [tabindex], .st-music, .scope, .mb-pop, .jump-btn, .st-tray, .st-pins";
 
   const available = () => !!handler() && !(typeof Layout !== "undefined" && Layout.isSolo());
   function send(action, extra = {}) {

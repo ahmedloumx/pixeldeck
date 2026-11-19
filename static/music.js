@@ -19,6 +19,14 @@ const Music = (() => {
   const LOOK_KEY = "prdesk.music.look.v1";
   const reducedQuery = matchMedia("(prefers-reduced-motion: reduce)");
   const still = () => reducedQuery.matches || document.documentElement.dataset.motion === "calm";
+  // Spotify sync: off, PixelDeck stops asking Spotify what plays (no polls, no devices, no up
+  // next) until it is on again. Playing something from here turns it back on.
+  const syncOn = () => typeof Prefs === "undefined" || Prefs.get("spotifySync") !== false;
+  function wakeSync() {
+    if (syncOn()) return;
+    Prefs.set({ spotifySync: true });
+    toast("Spotify sync is on again.", "Turn it off from the bell's quick toggles or the SYNC key.");
+  }
 
   let root = null, mini = null, els = {}, miniEls = {};
   let status = null, statusFailed = "", statusSeen = "";
@@ -31,6 +39,25 @@ const Music = (() => {
   let pendingSeek = null, pendingVol = null;
   let lastFilled = -1, paintedItem = null, endAsked = false, trackSeen = null, lastOn = null;
   // A short stepped flourish on a change: the class is put back on so its animation runs again.
+  // The 125 ms beat every looping animation steps on (music.css). Each one starts when its element
+  // does (the panel shown, a song started, a list built), so once running its start is snapped
+  // onto the page-wide grid: then all of them change on the same frames.
+  const BEAT = 125;
+  const onBeat = new WeakSet();
+  function syncBeat() {
+    if (!document.getAnimations) return;
+    for (const a of document.getAnimations()) {
+      if (onBeat.has(a)) continue;
+      onBeat.add(a);
+      const t = a.effect?.getComputedTiming?.();
+      if (!t || t.iterations !== Infinity) continue;
+      a.ready.then(() => {
+        if (a.startTime == null) return;
+        const off = (((a.startTime + (t.delay || 0)) % BEAT) + BEAT) % BEAT;
+        if (off > 0.5) a.startTime -= off;
+      }).catch(() => {});
+    }
+  }
   function flash(el, cls, ms) {
     if (!el || still()) return;
     el.classList.remove(cls);
@@ -315,9 +342,11 @@ const Music = (() => {
         ${step(2, false, "Add this redirect URI", `<p>In the app's settings, paste it under Redirect URIs exactly as written, then save.</p>
           <p class="mu-code"><code>${esc(uri)}</code>${copy(uri)}</p>
           <p class="mu-hint">Spotify takes plain http only for 127.0.0.1, so it is not localhost. It follows the port PixelDeck runs on.</p>`)}
-        ${step(3, s.configured && s.client_id_ok, "Give PixelDeck the Client ID", `<p>Copy the app's Client ID into PixelDeck's settings file. No client secret, and no restart.</p>
-          <p class="mu-code"><code>SPOTIFY_CLIENT_ID=</code>${copy("SPOTIFY_CLIENT_ID=")}</p>
-          ${s.env_file ? `<p class="mu-hint">The settings file: <code>${esc(s.env_file)}</code></p>` : ""}
+        ${step(3, s.configured && s.client_id_ok, "Give PixelDeck the Client ID", `<p>Paste the app's Client ID here and save it. No client secret, and no restart.</p>
+          <form class="mu-cid" data-music-cid autocomplete="off"><input class="mu-cid-input" name="client_id" spellcheck="false" aria-label="Client ID"
+            placeholder="${s.configured ? "Saved: paste another to change it" : "Client ID"}"><button class="btn" type="submit">Save</button></form>
+          <p class="mu-warn" data-music-cid-error hidden></p>
+          ${s.env_file ? `<p class="mu-hint">It is kept as <code>SPOTIFY_CLIENT_ID</code> in <code>${esc(s.env_file)}</code>.</p>` : ""}
           ${s.configured && !s.client_id_ok ? '<p class="mu-warn">That Client ID does not look right: it is the letters and digits on the app\'s page.</p>' : ""}`)}
         ${step(4, false, "Connect", `<p>Sign in with Spotify in your browser and allow PixelDeck.</p>
           <p class="mu-actions"><button class="btn btn--primary" type="button" data-music="connect"${s.configured && s.client_id_ok ? "" : " disabled"}>Connect Spotify</button>
@@ -342,14 +371,15 @@ const Music = (() => {
   function deckHtml() {
     const eqLevels = [37.5, 25, 50, 12.5, 37.5, 62.5, 25, 50, 37.5, 62.5, 50, 75, 62.5, 75];
     const eq = Array.from({ length: EQ_BARS }, (_, i) =>
-      `<i class="mu-eq-${"abc"[i % 3]}" style="--d:${440 + ((i * 7) % 5) * 90}ms;--o:-${(i * 173) % 700}ms;--rest:${eqLevels[i]}%"></i>`).join("");
+      `<i class="mu-eq-${"abc"[i % 3]}" style="--o:-${((i * 5) % 6) * BEAT}ms;--rest:${eqLevels[i]}%"></i>`).join("");
     const blocks = "<i></i>".repeat(BLOCKS);
     const vol = Array.from({ length: VOL_BLOCKS }, (_, i) => `<i style="--h:${28 + i * 8}%"></i>`).join("");
     const woofer = speaker(26, 4, "mu-woofer"), tweeter = speaker(10, 4, "mu-tweeter");
     const mq = (ref, cls) => `<div class="mu-mq ${cls}" data-ref="${ref}"><span class="mu-mq-track"><span class="mu-mq-text"></span><span class="mu-mq-text" aria-hidden="true"></span></span></div>`;
     return `<div class="mu" data-view="deck">
       <div class="mu-top"><span class="mu-kicker num8">MUSIC</span><span class="mu-from" data-ref="from"></span>
-        <span class="mu-top-tools"><button class="btn btn--quiet mu-tool" type="button" data-music="refresh" data-tip="Ask Spotify again now: what plays, the devices, the sign-in">${glyph("refresh", 2)}<span>Refresh</span></button>
+        <span class="mu-top-tools"><button class="btn btn--quiet mu-tool mu-sync" type="button" data-music="sync" data-ref="sync" aria-pressed="true" data-tip="Spotify sync: off, PixelDeck stops asking Spotify what plays"><i class="mu-led" aria-hidden="true"></i><span>Sync</span></button>
+          <button class="btn btn--quiet mu-tool" type="button" data-music="refresh" data-tip="Ask Spotify again now: what plays, the devices, the sign-in">${glyph("refresh", 2)}<span>Refresh</span></button>
           <button class="btn btn--quiet mu-tool" type="button" data-music="popout" data-tip="Float a mini player over the layout">${glyph("pop", 2)}<span>Pop out</span></button></span></div>
       <div class="mu-ribbon" data-ref="ribbon" hidden></div>
       <div class="mu-cols">
@@ -437,11 +467,12 @@ const Music = (() => {
     const box = el.clientWidth, width = first.getBoundingClientRect().width;
     const run = box > 0 && width > box + 1 && !still();
     if (run) {
-      const dist = Math.round(width + 48);
+      // 4 px a beat (32 px a second), so every step lands on the beat
+      const steps = Math.max(1, Math.round((width + 48) / 4)), dist = steps * 4;
       if (track.style.getPropertyValue("--mq-dist") !== `${dist}px`) {
         track.style.setProperty("--mq-dist", `${dist}px`);
-        track.style.setProperty("--mq-steps", String(Math.max(1, Math.round(dist / 2))));
-        track.style.setProperty("--mq-dur", `${(dist / 30).toFixed(2)}s`);
+        track.style.setProperty("--mq-steps", String(steps));
+        track.style.setProperty("--mq-dur", `${steps * BEAT}ms`);
       }
     }
     el.classList.toggle("is-running", run);
@@ -496,7 +527,7 @@ const Music = (() => {
       loadUpNext();
     }
     const on = playing();
-    if (on !== lastOn) { if (lastOn !== null) { flash(els.play, "is-flip", 200); flash(miniEls.play, "is-flip", 200); } lastOn = on; }
+    if (on !== lastOn) { if (lastOn !== null) { flash(els.play, "is-flip", 200); flash(miniEls.play, "is-flip", 200); } lastOn = on; requestAnimationFrame(syncBeat); }
     paintDevices();
     for (const v of views) v.paint?.();
     if (view !== "deck" || !els.lcd) return;
@@ -504,13 +535,16 @@ const Music = (() => {
     paintedItem = key;
     root.firstElementChild.classList.toggle("is-playing", on);
     root.firstElementChild.classList.toggle("is-idle", !item);
-    els.mode.textContent = !p ? "TUNING" : !item ? "NO TAPE" : on ? "PLAY" : "PAUSE";
+    const off = !syncOn();
+    root.firstElementChild.classList.toggle("is-sync-off", off);
+    els.sync.setAttribute("aria-pressed", String(!off));
+    els.mode.textContent = off ? "SYNC OFF" : !p ? "TUNING" : !item ? "NO TAPE" : on ? "PLAY" : "PAUSE";
     els.mode.dataset.state = !item ? "stop" : on ? "play" : "pause";
     els.dev.textContent = p?.device?.name ? p.device.name.toUpperCase() : "";
     els.from.textContent = fromText(p);
-    marquee(els.title, item ? item.name : p ? "Nothing is playing" : "Tuning in");
-    marquee(els.sub, item ? item.artists.join(", ") : p ? "Start Spotify on a phone or computer," : "");
-    marquee(els.album, item ? (item.album ? `${item.kind === "episode" ? "SHOW" : "FROM"} ${item.album}` : "") : p ? "or pick something in the library below." : "");
+    marquee(els.title, off ? "Spotify sync is off" : item ? item.name : p ? "Nothing is playing" : "Tuning in");
+    marquee(els.sub, off ? "PixelDeck is not asking Spotify what plays." : item ? item.artists.join(", ") : p ? "Start Spotify on a phone or computer," : "");
+    marquee(els.album, off ? "Press SYNC to turn it back on." : item ? (item.album ? `${item.kind === "episode" ? "SHOW" : "FROM"} ${item.album}` : "") : p ? "or pick something in the library below." : "");
     els.play.classList.toggle("is-playing", on);
     els.play.setAttribute("aria-label", on ? "Pause" : "Play");
     els.playLabel.textContent = on ? "PAUSE" : "PLAY";
@@ -584,12 +618,14 @@ const Music = (() => {
     miniEls.play.classList.toggle("is-playing", isOn);
     miniEls.play.setAttribute("aria-label", isOn ? "Pause" : "Play");
     miniEls.play.disabled = !item;
-    marquee(miniEls.mq, item ? `${item.name} · ${item.artists.join(", ")}` : player ? "Nothing playing" : "Music");
+    mini.classList.toggle("is-sync-off", !syncOn());
+    marquee(miniEls.mq, !syncOn() ? "Spotify sync off" : item ? `${item.name} · ${item.artists.join(", ")}` : player ? "Nothing playing" : "Music");
     miniEls.title.setAttribute("aria-label", item ? `Now playing: ${item.name} by ${item.artists.join(", ")}. Open the music dropdown.` : "Open the music dropdown");
     const want = artKey(player ? item : null);
     if (miniEls.art.dataset.art !== want) drawArt(miniEls.art, want, 18);
-    const dev = player?.device, here = String(status?.here || "").toLowerCase();
-    const away = !!dev?.name && !!item && dev.name.toLowerCase() !== here && (mode === "demo" || !!here);
+    const dev = player?.device;
+    const here = (status?.here_devices || [status?.here]).filter(Boolean).map((n) => String(n).toLowerCase());
+    const away = !!dev?.name && !!item && !here.includes(dev.name.toLowerCase()) && (mode === "demo" || here.length > 0);
     miniEls.where.hidden = !away;
     if (away && typeof MusicDevices !== "undefined") {
       const html = `${MusicDevices.icon(dev.type, "mm-where-pic")}<span>${esc(dev.name)}</span>`;
@@ -611,7 +647,14 @@ const Music = (() => {
 
   // Lyrics take the library's place, until the key is pressed again; kept across restarts.
   const LYRICS_KEY = "prdesk.music.lyrics.v1";
+  const lyricListeners = new Set();
   let lyricsOn = (() => { try { return localStorage.getItem(LYRICS_KEY) === "1"; } catch { return false; } })();
+  function setLyrics(on) {
+    lyricsOn = !!on;
+    try { localStorage.setItem(LYRICS_KEY, lyricsOn ? "1" : "0"); } catch { /* storage blocked */ }
+    applyLyrics();
+    for (const fn of lyricListeners) { try { fn(lyricsOn); } catch { /* a listener's own trouble */ } }
+  }
   function applyLyrics() {
     if (!els.lyrics || !els.lib) return;
     els.lib.hidden = lyricsOn;
@@ -626,7 +669,7 @@ const Music = (() => {
   let nextKey = "", nextAt = 0;
   const nextShown = () => !!els.upnext && els.upnext.getClientRects().length > 0;
   async function loadUpNext(force = false) {
-    if ((mode !== "live" && mode !== "demo") || !nextShown()) return;
+    if ((mode !== "live" && mode !== "demo") || !nextShown() || !syncOn()) return;
     const key = `${itemKey()}|${player?.context?.uri || ""}`;
     if (!force && key === nextKey && Date.now() - nextAt < 30000) return;
     nextKey = key;
@@ -714,12 +757,13 @@ const Music = (() => {
   }
   function schedule(ms) {
     clearTimeout(pollTimer);
-    if (mode === "live" || mode === "demo") pollTimer = setTimeout(poll, ms);
+    if ((mode === "live" || mode === "demo") && syncOn()) pollTimer = setTimeout(poll, ms);
   }
   async function poll() {
     clearTimeout(pollTimer);
     const asked = mode;
     if (asked !== "live" && asked !== "demo") return;
+    if (!syncOn()) { paint(); return; }
     try {
       const next = await source().now();
       if (mode !== asked) return;
@@ -743,6 +787,7 @@ const Music = (() => {
   /** Ask again at once: what plays, the devices, a sign-in near its end (the server renews it). */
   async function refreshNow(button) {
     if (mode !== "live" && mode !== "demo") return refreshStatus();
+    wakeSync();
     const keys = [...document.querySelectorAll("[data-music='refresh']")];
     keys.forEach((k) => k.classList.add("is-busy"));
     try {
@@ -770,7 +815,7 @@ const Music = (() => {
   }
 
   function loadDevices(force = false) {
-    if (mode !== "live" && mode !== "demo") return;
+    if ((mode !== "live" && mode !== "demo") || !syncOn()) return;
     const asked = mode, now = Date.now();
     if (!force && now - devicesAt < DEVICES_EVERY) return;
     devicesAt = now;
@@ -839,6 +884,7 @@ const Music = (() => {
 
   async function act(action, value) {
     if (mode !== "live" && mode !== "demo") return;
+    wakeSync();
     await flushPending(action);
     const before = player ? JSON.parse(JSON.stringify(player)) : null;
     const pos = position();
@@ -875,6 +921,7 @@ const Music = (() => {
 
   /** Play a playlist, album or artist, or a list of songs, from one song in it. */
   async function playFrom(opts) {
+    wakeSync();
     try {
       const device = deviceChoice();
       await source().play({ ...opts, ...(device ? { device_id: device } : {}) });
@@ -1068,11 +1115,8 @@ const Music = (() => {
     }
     if (what === "popout") { if (typeof MusicFloat !== "undefined") MusicFloat.popOut(); return; }
     if (what === "refresh") return refreshNow(t);
-    if (what === "lyrics") {
-      lyricsOn = !lyricsOn;
-      try { localStorage.setItem(LYRICS_KEY, lyricsOn ? "1" : "0"); } catch { /* storage blocked */ }
-      return applyLyrics();
-    }
+    if (what === "lyrics") return setLyrics(!lyricsOn);
+    if (what === "sync") return Prefs.set({ spotifySync: !syncOn() });
     if (what === "devices") {
       if (typeof MusicDevices === "undefined") return;
       loadDevices(true);
@@ -1117,6 +1161,7 @@ const Music = (() => {
     new ResizeObserver(() => {
       const now = shown();
       refit();
+      if (now && !wasShown) requestAnimationFrame(syncBeat);
       if (now && !wasShown && (mode === "live" || mode === "demo")) { poll(); loadDevices(); }
       if (now && !wasShown && els.art && player) { els.art.dataset.art = ""; drawArt(els.art, artKey(player.item), artCss()); }
       if (now) loadUpNext();
@@ -1130,16 +1175,50 @@ const Music = (() => {
       if (typeof MusicLibrary !== "undefined" && MusicLibrary.focusSearch()) e.preventDefault();
     });
     addEventListener("focus", () => { if (signIn || mode === "setup") refreshStatus(); });
+    // Step 3 of the setup: the Client ID saved from here, into the settings file.
+    document.addEventListener("submit", async (e) => {
+      const form = e.target.closest?.("[data-music-cid]");
+      if (!form) return;
+      e.preventDefault();
+      const err = form.parentElement.querySelector("[data-music-cid-error]"), b = form.querySelector("[type=submit]");
+      if (err) err.hidden = true;
+      b.disabled = true;
+      try {
+        await api("spotify-client-id", { method: "POST", body: { client_id: form.client_id.value } });
+        await refreshStatus();
+        toast("Saved.", "Now press Connect Spotify.");
+      } catch (ex) { if (err) { err.textContent = ex.message; err.hidden = false; } else toast("Not saved.", ex.message, true); }
+      finally { b.disabled = false; }
+    });
     // The local clock: time, blocks and the end of a song, four times a second while it plays.
-    setInterval(async () => {
+    // Another window has the focus: the decorations stop (music.css) and the clock slows to a
+    // second, so music playing behind your editor costs next to nothing.
+    const away = () => document.documentElement.classList.toggle("is-away", !document.hasFocus());
+    addEventListener("blur", away);
+    addEventListener("focus", () => { away(); requestAnimationFrame(syncBeat); });
+    away();
+    let slowTick = 0;
+    const clockTick = async () => {
+      setTimeout(clockTick, 2 * BEAT - (performance.now() % (2 * BEAT)));
       if (document.hidden || !playing() || !anyShown()) return;
+      if (!document.hasFocus() && slowTick++ % 4) return;
+      syncBeat();
       if (mode === "demo" && performance.now() >= holdUntil) accept(await MusicDemo.source.now());
       const item = player?.item;
       if ((item?.id ?? item?.name ?? null) !== paintedItem || trackSeen !== (item?.id ?? item?.name ?? null)) paint(); else tick();
-    }, 250);
+    };
+    setTimeout(clockTick, 2 * BEAT - (performance.now() % (2 * BEAT)));
     const calm = () => { refit(); if (view === "deck") paint(); };
     reducedQuery.addEventListener?.("change", calm);
     if (typeof Prefs !== "undefined") Prefs.onChange(calm);
+    if (typeof Prefs !== "undefined") Prefs.onChange((p, patch) => {
+      if (!("spotifySync" in patch) || (mode !== "live" && mode !== "demo")) return;
+      if (syncOn()) { poll(); loadDevices(true); return; }
+      clearTimeout(pollTimer);
+      player = null;
+      devices = [];
+      paint();
+    });
     if (typeof MusicFloat !== "undefined") MusicFloat.mount(core);
     if (typeof MusicLyrics !== "undefined") MusicLyrics.mount(core);
     demo = new URLSearchParams(location.search).has("musicdemo");
@@ -1158,6 +1237,8 @@ const Music = (() => {
     onStatus: (fn) => listeners.add(fn),
     connect, disconnect,
     preview: startDemo,
+    lyrics: () => lyricsOn, setLyrics, onLyrics: (fn) => lyricListeners.add(fn),
+    syncOn,
     core,
   };
 })();

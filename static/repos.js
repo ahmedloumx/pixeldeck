@@ -1072,5 +1072,8 @@ const Repos = (() => {
     }).observe(root);
     setInterval(watchPrs, 3000);
   }
-  return { mount };
+  // For Jump: the repositories listed, and opening one in the Repos panel.
+  const list = () => (st.list?.repos || []).map((r) => ({ slug: r.slug, name: r.name || r.slug, description: r.description || "" }));
+  function open(slug) { Layout.activate("repos"); return openRepo(slug); }
+  return { mount, list, open };
 })();

@@ -341,6 +341,7 @@ def main():
     group.add_argument("--propose", action="store_true", help="ask PixelDeck to open a pull request")
     group.add_argument("--stop-if-idle", action="store_true", help="stop the server unless a terminal or a proposal is open")
     group.add_argument("--forget-tokens", action="store_true", help="remove the tokens from the credential store")
+    group.add_argument("--forget-passcode", action="store_true", help="remove the lock screen's passcode")
     parser.add_argument("--repo", help="--propose: the repository slug")
     parser.add_argument("--branch", help="--propose: the pushed branch")
     parser.add_argument("--dest", help="--propose: the branch to merge into (default: the repo's usual one)")
@@ -364,6 +365,10 @@ def main():
         sys.exit(stop_if_idle())
     if args.forget_tokens:
         forget_tokens()
+        return
+    if args.forget_passcode:
+        import screenlock  # noqa: PLC0415 - only this command needs it
+        print("The lock screen's passcode is removed." if screenlock.PASSCODE.forget() else "No passcode was set.")
         return
     if args.server:
         os.chdir(HERE)

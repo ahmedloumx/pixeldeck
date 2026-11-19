@@ -311,7 +311,7 @@ const Games = (() => {
       else if (s.cheer > 0) bot = 4;
       else if (s.t % 3300 < 140) bot = 1;
       else if (p && BY + (p.y + 1.5) * C < H - 10) bot = 7;
-      blit(g, "bot", bot, lx - 6, H - 15 - bob);
+      blit(g, "bot", bot, lx - 6, H - 18 - bob);  // 16 rows tall, joystick included
 
       let slime = 0, flip = "", lift = 0;
       if (s.dead) slime = 3;
@@ -457,9 +457,9 @@ const Games = (() => {
         // the bonus bot walks and blinks; it flickers in its last two seconds to say it is leaving
         if (b && (b.ttl > 2000 || Math.floor(b.ttl / 130) % 2 === 0)) {
           const f = s.dead ? 4 : s.t % 1600 < 140 ? 1 : Math.floor(s.t / 200) % 2 ? 2 : b.dx < 0 ? 5 : 0;
-          blit(g, "bot", f, b.x * CELL + 2, b.y * CELL + 3);
+          blit(g, "bot", f, b.x * CELL + 2, b.y * CELL);
         }
-        if (mode === "ready") blit(g, "bot", 0, (s.cols - 4) * CELL + 2, s.body[0].y * CELL - 5);
+        if (mode === "ready") blit(g, "bot", 0, (s.cols - 4) * CELL + 2, s.body[0].y * CELL - 8);
         for (let i = s.body.length - 1; i > 0; i--) {
           const seg = s.body[i], next = s.body[i - 1], x = seg.x * CELL, y = seg.y * CELL;
           g.fillStyle = P.grass;
@@ -489,7 +489,7 @@ const Games = (() => {
     // a flap rises about 16 px against gaps of 46 down to 40, so even the late game leaves room
     const GROUND = 10, PIPE = 14, SPACING = 76, GRAVITY = 430, FLAP = -118, MAX_FALL = 190, HIT = { w: 9, h: 8 };
     // where each sprite sits around the shared hitbox, so both flyers are judged by the same box
-    const OFFSET = { bot: { dx: 2, dy: 3 }, buddy: { dx: 4, dy: 1 } };
+    const OFFSET = { bot: { dx: 2, dy: 6 }, buddy: { dx: 4, dy: 1 } };
     const STARS = [0.05, 0.2, 0.18, 0.62, 0.31, 0.1, 0.44, 0.48, 0.57, 0.26, 0.69, 0.71, 0.78, 0.15, 0.86, 0.55, 0.95, 0.35, 0.12, 0.83];
     let pick = "bot", s = null;
     const px = () => Math.floor(s.W * 0.3);
@@ -593,7 +593,7 @@ const Games = (() => {
         if (mode === "ready") {
           // the picker: both friends side by side, the chosen one framed
           const mid = Math.floor(W / 2), y = Math.floor(ground / 2) + 3;
-          const spots = { bot: [mid - 22, y - 7, 12, 13], buddy: [mid + 6, y - 4, 16, 10] };
+          const spots = { bot: [mid - 22, y - 10, 12, 16], buddy: [mid + 6, y - 4, 16, 10] };
           for (const who of ["bot", "buddy"]) {
             const [x, yy, w, h] = spots[who], on = who === pick;
             if (on) { g.fillStyle = P.yellow; outline4(g, x - 3, yy - 3, w + 6, h + 6); }
@@ -606,7 +606,7 @@ const Games = (() => {
         // the other friend races along the ground, just for fun: no collisions
         const rival = s.pick === "bot" ? "buddy" : "bot";
         const rx = clamp(Math.round(px() + 4 + Math.sin(s.t / 900) * 24 + Math.sin(s.t / 340) * 5), 2, W - 18);
-        if (rival === "bot") blit(g, "bot", s.dead ? 4 : Math.floor(s.t / 120) % 2 ? 2 : 0, rx, ground - 13);
+        if (rival === "bot") blit(g, "bot", s.dead ? 4 : Math.floor(s.t / 120) % 2 ? 2 : 0, rx, ground - 16);
         else {
           const squash = !s.dead && Math.floor(s.t / 150) % 2 === 1;
           blit(g, "buddy", s.dead ? 2 : squash ? 1 : 0, rx, ground - 10 - (squash || calm() || s.dead ? 0 : 2));

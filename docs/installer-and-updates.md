@@ -43,7 +43,7 @@ What a colleague sees, from download to the next update.
 7. **Uninstall.** From the system's usual place (Apps settings, the Trash, deleting the
    AppImage). Settings and the token stay unless the person ticks "also remove my settings".
 
-Still needed on the machine, and checked by the setup screen and the Connections panel:
+Still needed on the machine, and checked by the setup screen and Settings, Connected apps:
 git with access to the Bitbucket repositories, and the Claude Code CLI for the Claude actions.
 
 ### Acceptance checks
