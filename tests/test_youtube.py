@@ -425,5 +425,107 @@ class LinkTest(Base):
         self.assertEqual(len(self.fake.calls), 1)
 
 
+LIST = "PLx0sYbCqOb8TBPRdmBHs5Iftvv9TPboYG"
+
+
+def entry(ident, title, privacy="public", owner="Lofi Cat"):
+    return {"kind": "youtube#playlistItem", "status": {"privacyStatus": privacy},
+            "snippet": {"title": title, "channelTitle": "Who made the list", "videoOwnerChannelTitle": owner,
+                        "resourceId": {"kind": "youtube#video", "videoId": ident},
+                        "thumbnails": {"medium": {"url": f"https://i.ytimg.com/vi/{ident}/mqdefault.jpg"}}}}
+
+
+def page(*items, token=None):
+    payload = {"kind": "youtube#playlistItemListResponse", "items": list(items)}
+    return answer(200, {**payload, "nextPageToken": token} if token else payload)
+
+
+class PlaylistLinkTest(Base):
+    """A playlist is named by a link's list=; a link to one video in a playlist names both."""
+
+    def test_the_playlist_links_youtube_gives_out(self):
+        for text in (f"https://www.youtube.com/playlist?list={LIST}", f"https://music.youtube.com/playlist?list={LIST}",
+                     f"https://www.youtube.com/watch?v={VID}&list={LIST}&index=3", f"https://youtu.be/{VID}?list={LIST}",
+                     f"https://www.youtube-nocookie.com/embed/videoseries?list={LIST}", f"youtube.com/playlist?list={LIST}"):
+            with self.subTest(text=text):
+                self.assertEqual(youtube.playlist_id(text), LIST)
+
+    def test_what_is_not_a_playlist_link(self):
+        for text in (LIST, f"https://evil.example/playlist?list={LIST}", f"https://www.youtube.com/@lofi?list={LIST}",
+                     f"https://www.youtube.com/playlist?list={LIST}<script>", "https://www.youtube.com/playlist?list=PL1",
+                     f"https://www.youtube.com/watch?v={VID}", f"https://user@youtube.com/playlist?list={LIST}", "", None):
+            with self.subTest(text=text):
+                self.assertIsNone(youtube.playlist_id(text))
+
+    def test_a_link_answers_with_its_list_without_a_key_or_a_call(self):
+        both = self.route("GET", "youtube-search", {"q": [f"https://www.youtube.com/watch?v={VID}&list={LIST}"]})
+        self.assertEqual((both["link"], [i["id"] for i in both["items"]], both["list"]), (True, [VID], LIST))
+        only = self.route("GET", "youtube-search", {"q": [f"https://www.youtube.com/playlist?list={LIST}"]})
+        self.assertEqual((only["link"], only["items"], only["list"]), (True, [], LIST))
+        self.assertNotIn("list", self.route("GET", "youtube-search", {"q": [f"https://youtu.be/{VID}"]}))
+        self.assertEqual(self.fake.calls, [])
+
+
+class PlaylistTest(Base):
+    def setUp(self):
+        super().setUp()
+        self.save()
+
+    def items(self, **query):
+        return self.route("GET", "youtube-playlist", {"list": [LIST], **query})
+
+    def test_a_playlist_answers_its_playable_videos_in_order(self):
+        self.fake.on("GET", youtube.PLAYLIST_URL, page(
+            entry("abcdefghijk", "One &amp; two"), entry("ABCDEFGHIJ_", "Private video", privacy="private"),
+            entry("bcdefghijkl", "Deleted video", privacy="privacyStatusUnspecified"),
+            {"snippet": {"resourceId": {"kind": "youtube#channel", "channelId": "UC1"}}, "status": {"privacyStatus": "public"}},
+            entry("cdefghijklm", "Three", privacy="unlisted", owner=None), "not an item"))
+        out = self.items()
+        self.assertEqual(out, {"list": LIST, "more": False, "cached": False, "items": [
+            {"id": "abcdefghijk", "title": "One & two", "channel": "Lofi Cat", "thumb": "https://i.ytimg.com/vi/abcdefghijk/mqdefault.jpg", "live": False},
+            {"id": "cdefghijklm", "title": "Three", "channel": None, "thumb": "https://i.ytimg.com/vi/cdefghijklm/mqdefault.jpg", "live": False}]})
+        q = {k: v[0] for k, v in parse_qs(urlsplit(self.fake.calls[0].url).query).items()}
+        self.assertEqual(q, {"part": "snippet,status", "playlistId": LIST, "maxResults": "50", "key": KEY})
+        self.assertNotIn(KEY, json.dumps(out))
+
+    def test_it_pages_and_stops_after_four_calls(self):
+        fifty = lambda n: [entry(f"{n:02d}{i:02d}abcdefg", f"{n}-{i}") for i in range(50)]  # noqa: E731
+        self.fake.on("GET", youtube.PLAYLIST_URL, page(*fifty(1), token="p2"), page(*fifty(2), token="p3"),
+                     page(*fifty(3), token="p4"), page(*fifty(4), token="p5"))
+        out = self.items()
+        self.assertEqual((len(out["items"]), out["more"], len(self.fake.calls)), (200, True, 4))
+        tokens = [parse_qs(urlsplit(c.url).query).get("pageToken", [None])[0] for c in self.fake.calls]
+        self.assertEqual(tokens, [None, "p2", "p3", "p4"])
+
+    def test_a_list_of_private_videos_costs_four_calls_at_most(self):
+        self.fake.on("GET", youtube.PLAYLIST_URL, page(entry("abcdefghijk", "Private video", privacy="private"), token="again"))
+        out = self.items()
+        self.assertEqual((out["items"], out["more"], len(self.fake.calls)), ([], True, 4))
+
+    def test_the_same_playlist_is_answered_from_memory(self):
+        self.fake.on("GET", youtube.PLAYLIST_URL, page(entry("abcdefghijk", "One")))
+        first, again = self.items(), self.items()
+        self.assertEqual((first["cached"], again["cached"], len(self.fake.calls)), (False, True, 1))
+        self.now[0] += youtube.CACHE_TTL + 1
+        self.items()
+        self.assertEqual(len(self.fake.calls), 2)
+
+    def test_refusals_and_bad_ids(self):
+        self.fake.on("GET", youtube.PLAYLIST_URL, google_error(404, "playlistNotFound", "The playlist cannot be found."))
+        with self.assertRaises(youtube.YouTubeError) as caught:
+            self.items()
+        self.assertEqual(caught.exception.message, youtube.PRIVATE_LIST)
+        for bad in ("PL1", f"{LIST}/../x", ""):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                self.route("GET", "youtube-playlist", {"list": [bad]})
+
+    def test_without_a_key_it_asks_nobody(self):
+        self.route("POST", "youtube-key", body={"clear": True})
+        with self.assertRaises(youtube.NoKey) as caught:
+            self.items()
+        self.assertEqual(str(caught.exception), youtube.NO_KEY_LIST)
+        self.assertEqual(self.fake.calls, [])
+
+
 if __name__ == "__main__":
     unittest.main()
