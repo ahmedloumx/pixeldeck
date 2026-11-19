@@ -210,7 +210,7 @@ const StatusBar = (() => {
 
 const Settings = (() => {
   const TABS = [["setup", "Setup"], ["connections", "Connected apps"], ["notifications", "Notifications"], ["look", "Personalise"], ["about", "About"]];
-  let tab = "connections", report = null, loading = false, musicHooked = false, appOpen = null;
+  let tab = "connections", report = null, loading = false, musicHooked = false, appOpen = null, tubeHooked = false, ytFiles = [];
   // The setup form is redrawn with the rest of the pane, so what you typed lives here until saved.
   let setup = null, draft = {}, checks = null, desk = null;
   let player = null, jiraOpen = false, playerPoll = 0;
@@ -301,15 +301,22 @@ const Settings = (() => {
         <p class="set-actions"><button class="btn btn--primary" type="button" data-youtube-signin>Sign in with Google</button>
           <button class="btn btn--quiet" type="button" data-youtube-client-clear>Remove</button></p>
         <p class="set-error" data-youtube-signin-error hidden></p>
-        <p class="set-hint">Google opens in your browser. If it says the app is not verified, it is your own client: press Advanced, then Go to it.</p>`);
+        ${typeof MusicYouTube !== "undefined" && MusicYouTube.signingIn() ? `<p class="set-wait" role="status"><span class="set-wait-led" aria-hidden="true"></span>
+          <span>Waiting for you in the browser: sign in there, this page notices by itself.</span></p>` : ""}
+        <p class="set-hint">Google opens in your browser and says <b>Google hasn't verified this app</b>: it is your own client, so press <b>Continue</b> (on some screens, Advanced, then Go to it).</p>
+        <p class="set-hint">Your client is saved: you can delete the <code>client_secret_…json</code> you downloaded.</p>`);
     }
-    return wrap(`<form class="set-form" data-youtube-client-form autocomplete="off">
+    const found = ytFiles[0];
+    return wrap(`${found ? `<div class="set-found"><span>Found a Google client file in Downloads: <code>${esc(found)}</code></span>
+        <button class="btn btn--primary" type="button" data-youtube-use="${esc(found)}">Use it</button></div>` : ""}
+      <form class="set-form" data-youtube-client-form autocomplete="off">
         <label class="field-block"><span>OAuth client (Desktop app)</span><input type="password" name="client" data-keep="youtube-client" spellcheck="false" autocomplete="new-password"
           placeholder="Paste the downloaded JSON file, or the client ID"></label>
         <label class="field-block"><span>Client secret</span><input type="password" name="secret" data-keep="youtube-secret" spellcheck="false" autocomplete="new-password"
           placeholder="GOCSPX-... (not needed with the JSON file)"></label>
         <p class="set-error" data-youtube-client-error hidden></p>
-        <p class="set-actions"><button class="btn btn--primary" type="submit">Save</button></p></form>
+        <p class="set-actions"><button class="btn btn--primary" type="submit">Save</button>
+          <label class="btn btn--quiet yt-file-btn"><input type="file" accept=".json,application/json" data-youtube-client-file hidden>Choose the client file</label></p></form>
       <p class="set-hint">Optional: it adds your own playlists, liked videos and channels. Search works with the key alone.</p>`);
   }
 
@@ -391,8 +398,8 @@ const Settings = (() => {
         line: yt?.signed_in ? "Your playlists and likes, in a floating pixel TV" : ok ? "Search and play in a floating pixel TV" : "Pasted links play; a free key adds search",
         steps: [`Open ${ext("https://console.cloud.google.com/apis/library/youtube.googleapis.com", "YouTube Data API v3")} in the Google Cloud console, pick or create a project (free) and press <b>Enable</b>.`,
           "Open <b>Credentials</b>, press <b>Create credentials</b>, then <b>API key</b>, and restrict the key to <b>YouTube Data API v3</b>. Paste it below and save it. Playing a pasted link needs no key.",
-          "Optional, to sign in for your own playlists and likes: on the <b>OAuth consent screen</b> pick <b>External</b>, add your Google account as a test user, then press <b>Publish app</b> (In production). In Testing, Google ends a sign-in after 7 days.",
-          "Then <b>Create credentials</b>, <b>OAuth client ID</b>, type <b>Desktop app</b>. Download its JSON file, paste it under <b>Sign in with Google</b> below, save, and press <b>Sign in with Google</b>."] });
+          `Optional, to sign in for your own playlists and likes: in ${ext("https://console.cloud.google.com/auth/audience", "Google Auth platform, Audience")} pick <b>External</b>, add your Google account under <b>Test users</b>, then press <b>Publish app</b> (In production). In Testing, Google ends a sign-in after 7 days.`,
+          `Then in ${ext("https://console.cloud.google.com/auth/clients", "Clients")}, <b>Create client</b>, type <b>Desktop app</b>. Download its JSON file and press <b>Choose the client file</b> under <b>Sign in with Google</b> below (or paste it), then press <b>Sign in with Google</b>. Google says it <b>hasn't verified this app</b>: it is yours, press <b>Continue</b>.`] });
     } else {
       apps.push({ id: "youtube", group: "media", label: "YouTube", soon: true, line: "Videos in a floating pixel TV" });
     }
@@ -649,7 +656,16 @@ const Settings = (() => {
       if (!musicHooked) { musicHooked = true; Music.onStatus(() => { if (dialog()?.open && tab === "connections") paint(); }); }
       Music.refresh();
     }
-    if (typeof MusicYouTube !== "undefined") MusicYouTube.refresh().then(() => { if (dialog()?.open && tab === "connections") paint(); });
+    if (typeof MusicYouTube !== "undefined") {
+      if (!tubeHooked) { tubeHooked = true; MusicYouTube.onSignIn(() => { if (dialog()?.open && tab === "connections") paint(); }); }
+      MusicYouTube.refresh().then((st) => {
+        if (dialog()?.open && tab === "connections") paint();
+        // a client file waiting in Downloads, by its name, while no client is saved
+        if (st && !st.client_set && (state.features || []).includes("youtube-client-file")) {
+          api("youtube-client-files").then((out) => { ytFiles = out.files || []; if (ytFiles.length && dialog()?.open && tab === "connections") paint(); }).catch(() => {});
+        }
+      });
+    }
     if (!(state.features || []).includes("settings")) { report = null; paint(); return; }
     loading = true; paint();
     const wantSetup = (state.features || []).includes("setup");
@@ -825,27 +841,36 @@ const Settings = (() => {
       toast("Saved.", "Now press Sign in with Google.");
     } catch (ex) { err.textContent = ex.message; err.hidden = false; }
   });
-  // After Google's page in the browser, PixelDeck learns of the sign-in when its window is back in front.
-  let ytSigningIn = 0;
-  const ytCheck = async () => {
-    if (!ytSigningIn || Date.now() > ytSigningIn || typeof MusicYouTube === "undefined") return;
-    const st = await MusicYouTube.refresh();
-    if (!st?.signed_in) return;
-    ytSigningIn = 0;
-    if (dialog()?.open) paint();
-    toast("YouTube is signed in.", st.channel ? `As ${st.channel}. Your playlists are in the Music panel.` : "Your playlists are in the Music panel.");
-  };
-  addEventListener("focus", ytCheck);
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) ytCheck(); });
+  // The client file, chosen here and read by the page, goes in as if pasted; one found in
+  // Downloads is read by the server, by its name. Either way the file itself is left alone.
+  async function youtubeClientFrom(button, call) {
+    const err = button.closest(".set-card")?.querySelector("[data-youtube-client-error]");
+    if (err) err.hidden = true;
+    try {
+      await busy(button, call);
+      ytFiles = [];
+      if (typeof MusicYouTube !== "undefined") await MusicYouTube.refresh();
+      paint();
+      toast("Saved.", "Now press Sign in with Google. You can delete the downloaded file.");
+    } catch (ex) { if (err) { err.textContent = ex.message; err.hidden = false; } else toast("Not saved.", ex.message, true); }
+  }
+  document.addEventListener("change", async (e) => {
+    const input = e.target.closest?.("#settings-dialog [data-youtube-client-file]"), file = input?.files?.[0];
+    if (!file) return;
+    input.value = "";
+    const text = file.size <= 65536 ? await file.text().catch(() => "") : "";
+    youtubeClientFrom(input.closest("label"), () => api("youtube-client", { method: "POST", body: { client: text, secret: "" } }));
+  });
+  document.addEventListener("click", (e) => {
+    const use = e.target.closest?.("#settings-dialog [data-youtube-use]");
+    if (use) youtubeClientFrom(use, () => api("youtube-client-file", { method: "POST", body: { name: use.dataset.youtubeUse } }));
+  });
   document.addEventListener("click", async (e) => {
     const t = e.target.closest?.("#settings-dialog [data-youtube-signin], #settings-dialog [data-youtube-signout], #settings-dialog [data-youtube-client-clear]");
     if (!t) return;
     try {
       if (t.matches("[data-youtube-signin]")) {
-        const out = await busy(t, () => api("youtube-signin", { method: "POST", body: {} }));
-        ytSigningIn = Date.now() + 10 * 60 * 1000;  // a sign-in link is good for ten minutes
-        if (!out.opened) window.open(out.url, "_blank", "noopener,noreferrer");
-        toast("Google's sign-in page is open in your browser.", "Sign in there and come back: PixelDeck notices by itself.");
+        if (typeof MusicYouTube !== "undefined") await busy(t, () => MusicYouTube.signIn());
         return;
       }
       if (t.matches("[data-youtube-signout]")) {
