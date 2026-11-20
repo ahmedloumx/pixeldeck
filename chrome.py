@@ -6,9 +6,11 @@ script message; only the requests below are understood, everything else is ignor
 """
 
 import json
+import re
 from pathlib import Path
 
-ACTIONS = ("move", "maximize", "minimize", "close", "titlebar", "hello")
+ACTIONS = ("move", "maximize", "minimize", "close", "titlebar", "hello", "youtube")
+VIDEO_ID = re.compile(r"[A-Za-z0-9_-]{11}")
 PREFS_KEY = "prdesk.prefs.v1"
 
 
@@ -35,6 +37,15 @@ def parse(raw):
         if not isinstance(raw.get("system"), bool):
             return None
         return {"action": "titlebar", "system": raw["system"]}
+    if action == "youtube":
+        # A video whose owner keeps it on YouTube: the window opens youtube.com itself for it.
+        # Only an id goes through, so the page cannot point that window anywhere else.
+        vid = raw.get("id")
+        if not isinstance(vid, str) or not VIDEO_ID.fullmatch(vid):
+            return None
+        title = raw.get("title") if isinstance(raw.get("title"), str) else ""
+        title = "".join(c for c in title if c.isprintable())[:200].strip()
+        return {"action": "youtube", "id": vid, "title": title}
     return {"action": action}
 
 

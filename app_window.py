@@ -176,6 +176,9 @@ class DeskApp(Gtk.Application):
         if not request or not self.main:
             return
         action, win = request["action"], self.main
+        if action == "youtube":
+            self._youtube(request["id"], request["title"])
+            return
         if action == "move":
             surface, seat = win.get_surface(), win.get_display().get_default_seat()
             device = seat.get_pointer() if seat else None
@@ -294,6 +297,101 @@ class DeskApp(Gtk.Application):
             return
         Gio.AppInfo.launch_default_for_uri(uri, None)
 
+    # ------------------------------------------------------------ the YouTube window
+
+    # Hosts the YouTube window may show: YouTube, and Google's sign-in and consent pages for it.
+    YT_HOSTS = ("youtube.com", "google.com", "gstatic.com", "googleusercontent.com", "ytimg.com", "ggpht.com")
+    YT_CSS = b"""
+    window.pd-yt { background: #0b0d12; }
+    .pd-yt-bar { background: #161a22; border-bottom: 3px solid #f6c445; padding: 4px 6px 4px 8px; }
+    .pd-yt-tag { color: #0b0d12; background: #f6c445; font-family: monospace; font-weight: 800; font-size: 9px; letter-spacing: 1px; padding: 2px 6px; }
+    .pd-yt-title { color: #e9ecf2; font-family: monospace; font-weight: 700; font-size: 12px; }
+    .pd-yt-btn { min-height: 22px; min-width: 22px; padding: 0 6px; border-radius: 0; border: 2px solid #3a3f4b; background: #0f1218; color: #e9ecf2; font-family: monospace; font-weight: 800; box-shadow: none; }
+    .pd-yt-btn:hover { border-color: #f6c445; color: #f6c445; }
+    .pd-yt-bezel { background: #1d212b; padding: 6px; border: 3px solid #2b303c; }
+    .pd-yt-foot { color: #8b93a3; font-family: monospace; font-size: 9px; letter-spacing: 1px; padding: 3px 8px; background: #0f1218; }
+    """
+
+    def _youtube(self, video_id, title):
+        """youtube.com itself in a small window of its own, for a video its owner keeps on YouTube:
+        an embedded player refuses it, YouTube's own page plays it. PixelDeck draws the frame
+        around the page (a bar with the bot, the title and close), never anything on it."""
+        url = f"https://www.youtube.com/watch?v={video_id}"
+        if getattr(self, "yt_window", None) is not None:
+            self.yt_label.set_text(title or "YouTube")
+            self.yt_view.load_uri(url)
+            self.yt_window.present()
+            return
+        if not getattr(self, "yt_css", None):
+            self.yt_css = Gtk.CssProvider()
+            self.yt_css.load_from_data(self.YT_CSS, -1)
+            Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), self.yt_css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        # Its own content manager: YouTube's page never reaches the dashboard's message handler.
+        policies = WebKit.WebsitePolicies(autoplay=WebKit.AutoplayPolicy.ALLOW)
+        view = WebKit.WebView(network_session=self.session, user_content_manager=WebKit.UserContentManager(), website_policies=policies)
+        view.set_vexpand(True)
+        view.connect("decide-policy", self._on_youtube_policy)
+        view.connect("create", lambda _v, action: self._outside(action.get_request().get_uri()) or None)
+        win = Gtk.Window(application=self, title=f"YouTube: {title}" if title else "YouTube", default_width=760, default_height=520)
+        win.add_css_class("pd-yt")
+        bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        bar.add_css_class("pd-yt-bar")
+        icon = Gtk.Image.new_from_icon_name(ICON)
+        icon.set_pixel_size(24)
+        tag = Gtk.Label(label="PLAYING ON YOUTUBE")
+        tag.add_css_class("pd-yt-tag")
+        label = Gtk.Label(label=title or "YouTube", xalign=0, hexpand=True, ellipsize=3)  # 3: ellipsize at the end
+        label.add_css_class("pd-yt-title")
+        back = Gtk.Button(label="PIXELDECK", tooltip_text="Back to PixelDeck")
+        back.connect("clicked", lambda _b: self.main and self.main.present())
+        close = Gtk.Button(label="X", tooltip_text="Close the YouTube window")
+        close.connect("clicked", lambda _b: win.close())
+        for b in (back, close):
+            b.add_css_class("pd-yt-btn")
+        for w in (icon, tag, label, back, close):
+            bar.append(w)
+        handle = Gtk.WindowHandle(child=bar)  # the bar moves the window, as a title bar does
+        win.set_titlebar(handle)
+        bezel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        bezel.add_css_class("pd-yt-bezel")
+        bezel.append(view)
+        foot = Gtk.Label(label="YOUTUBE'S OWN PAGE, IN A PIXELDECK WINDOW", xalign=0)
+        foot.add_css_class("pd-yt-foot")
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        body.append(bezel)
+        body.append(foot)
+        bezel.set_vexpand(True)
+        win.set_child(body)
+        win.connect("close-request", self._youtube_closed)
+        self.yt_window, self.yt_view, self.yt_label = win, view, label
+        view.load_uri("about:blank" if self.selftest and self.selftest.get("offline_youtube") else url)
+        if self.selftest is not None:
+            self.selftest.setdefault("youtube", []).append(url)
+        win.present()
+
+    def _youtube_closed(self, win):
+        # closing stops the video: the page goes away with the window
+        self.yt_view.try_close()
+        self.yt_window = self.yt_view = self.yt_label = None
+        return False
+
+    def _on_youtube_policy(self, _view, decision, kind):
+        if kind == WebKit.PolicyDecisionType.RESPONSE:
+            return False
+        uri = decision.get_navigation_action().get_request().get_uri()
+        parts = urlsplit(uri)
+        host = (parts.hostname or "").lower()
+        if uri.startswith("about:") or (parts.scheme == "https" and any(host == h or host.endswith("." + h) for h in self.YT_HOSTS)):
+            if kind == WebKit.PolicyDecisionType.NEW_WINDOW_ACTION:
+                decision.ignore()
+                self._outside(uri)
+                return True
+            return False
+        # anything else a YouTube page links to opens in your browser, not in this window
+        decision.ignore()
+        self._outside(uri)
+        return True
+
     def _on_create(self, view, _action):
         # A panel popped out of the workspace gets a window of its own, same profile.
         child = WebKit.WebView(related_view=view, user_content_manager=self.content, website_policies=view.get_website_policies())
@@ -356,6 +454,7 @@ class DeskApp(Gtk.Application):
         if isinstance(report, dict):
             report["windows"] = len(self.get_windows())
             report["sent_to_browser"] = self.selftest.get("outside", [])
+            report["youtube_windows"] = self.selftest.get("youtube", [])
             report["webkit"] = f"{WebKit.get_major_version()}.{WebKit.get_minor_version()}.{WebKit.get_micro_version()}"
         print(json.dumps(report, indent=1), flush=True)
         if isinstance(report, dict) and (report.get("errors") or report.get("error")):

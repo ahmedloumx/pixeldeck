@@ -168,3 +168,7 @@
 :root.is-away .set-wait-led, :root.is-away .yt-wait-led { animation-play-state: paused; }
 @media (prefers-reduced-motion: reduce) { .set-wait-led, .yt-wait-led { animation: none; } }
 :root[data-motion="calm"] .set-wait-led, :root[data-motion="calm"] .yt-wait-led { animation: none; }
+
+/* A refused video: YouTube's own page in a window of its own. */
+.ytv-win { flex: none; min-height: 24px; padding: 0 10px; font-size: var(--text-xs, 12px); }
+.ytv-win[hidden] { display: none; }
