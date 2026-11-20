@@ -22,12 +22,26 @@ class ParseTest(unittest.TestCase):
 
     def test_a_youtube_window_takes_a_video_id_only(self):
         self.assertEqual(chrome.parse({"action": "youtube", "id": "dQw4w9WgXcQ", "title": " Neon\u0007 Harbor "}),
-                         {"action": "youtube", "id": "dQw4w9WgXcQ", "title": "Neon Harbor"})
-        self.assertEqual(chrome.parse({"action": "youtube", "id": "a-b_c-d_e-f"}), {"action": "youtube", "id": "a-b_c-d_e-f", "title": ""})
+                         {"action": "youtube", "id": "dQw4w9WgXcQ", "title": "Neon Harbor", "mode": "window"})
+        self.assertEqual(chrome.parse({"action": "youtube", "id": "a-b_c-d_e-f", "mode": "dock"}), {"action": "youtube", "id": "a-b_c-d_e-f", "title": "", "mode": "dock"})
+        self.assertEqual(chrome.parse({"action": "youtube", "id": "a-b_c-d_e-f", "mode": "elsewhere"})["mode"], "window")
         self.assertEqual(len(chrome.parse({"action": "youtube", "id": "dQw4w9WgXcQ", "title": "x" * 900})["title"]), 200)
         for vid in ("dQw4w9WgXc", "dQw4w9WgXcQQ", "https://evil.example/x", "dQw4w9WgX/Q", "../../etc/pa", None, 12345678901, ["dQw4w9WgXcQ"]):
             with self.subTest(vid=vid):
                 self.assertIsNone(chrome.parse({"action": "youtube", "id": vid}))
+
+    def test_the_tv_screen_place_and_the_youtube_commands(self):
+        self.assertEqual(chrome.parse({"action": "ytplace", "x": 10.4, "y": 20.6, "w": 440, "h": 248, "show": True}),
+                         {"action": "ytplace", "x": 10, "y": 21, "w": 440, "h": 248, "show": True})
+        self.assertEqual(chrome.parse({"action": "ytplace", "x": -5, "y": 0, "w": -3, "h": 9, "show": False})["w"], 0)
+        for bad in ({"x": "1", "y": 0, "w": 1, "h": 1, "show": True}, {"x": 1, "y": 0, "w": 1, "h": 1, "show": "yes"},
+                    {"x": 1e9, "y": 0, "w": 1, "h": 1, "show": True}, {"x": True, "y": 0, "w": 1, "h": 1, "show": True}, {"x": 1, "y": 0, "w": 1, "show": True}):
+            with self.subTest(bad=bad):
+                self.assertIsNone(chrome.parse({"action": "ytplace", **bad}))
+        for cmd in ("toggle", "pause", "stop", "popout", "dock", "page"):
+            self.assertEqual(chrome.parse({"action": "ytctl", "cmd": cmd}), {"action": "ytctl", "cmd": cmd})
+        for cmd in ("eval", "load", "", None, 1):
+            self.assertIsNone(chrome.parse({"action": "ytctl", "cmd": cmd}))
 
     def test_anything_else_is_refused(self):
         for raw in ('{"action": "exec", "cmd": "rm"}', '{"action": "move", "x": "1", "y": 2, "button": 1}',

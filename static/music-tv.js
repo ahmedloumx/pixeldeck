@@ -31,6 +31,12 @@ const MusicTV = (() => {
   let listening = 0, heard = false, drag = null, seen = "";
   let skip = null;                           // what the Next button does: set while a queue waits
   let failedFor = null;                      // the video whose error was already passed on
+  // YouTube's own page, for a video refused here: PixelDeck's window lays it on the TV's screen
+  // (dock) or pops it out into a framed window; { where, playing, auto, endedSeen } while it plays.
+  let native = null, placing = 0, lastPlace = "";
+  const nativeOk = () => typeof PixelChrome !== "undefined" && PixelChrome.available();
+  const autoPop = () => typeof Prefs === "undefined" || Prefs.get("ytAutoPop") !== false;
+  const ytctl = (cmd) => PixelChrome.send("ytctl", { cmd });
   const listeners = new Set(), endedListeners = new Set();
   const g = (name, px = 2) => (typeof Music !== "undefined" ? Music.core.glyph(name, px) : "");
   const still = () => matchMedia("(prefers-reduced-motion: reduce)").matches || document.documentElement.dataset.motion === "calm";
@@ -42,7 +48,7 @@ const MusicTV = (() => {
     seen = now;
     for (const fn of listeners) fn();
   }
-  const playing = () => !!frame && (info.state === 1 || info.state === 3);
+  const playing = () => (native ? native.playing : !!frame && (info.state === 1 || info.state === 3));
   const onScreen = () => !!el && el.isConnected && !el.hidden && el.getClientRects().length > 0;
   const fmt = (s) => {
     s = Math.max(0, Math.floor(s || 0));
@@ -96,6 +102,7 @@ const MusicTV = (() => {
       </div></div>
       <div class="ytv-foot"><span class="ytv-led" aria-hidden="true"></span><span class="ytv-state num8" data-r="state" role="status">OFF</span>
         <span class="ytv-knobs" aria-hidden="true"><i></i><i></i></span>
+        <button class="ytv-auto num8" type="button" data-ytv="auto" data-r="auto" hidden aria-pressed="true" data-tip="Leaving the Music tab pops the video out into its window; coming back puts it in the TV">AUTO POP OUT</button>
         <button class="btn btn--primary ytv-win" type="button" data-ytv="window" data-r="win" hidden data-tip="Its owner keeps it on YouTube: open YouTube's own page in a small window">Play in a YouTube window</button>
         <button class="link ytv-out" type="button" data-r="out" hidden>Watch on YouTube</button></div>
       <span class="ytv-bot" aria-hidden="true">${typeof Sprites !== "undefined" ? Sprites.svg("bot", { scale: 3, idle: "blink" }) : ""}</span>`;
@@ -182,6 +189,8 @@ const MusicTV = (() => {
     } else if (what === "onError") {
       info.error = Number(said) || 5;
     }
+    // refused here by its owner: YouTube's own page plays it, on the TV's screen, with no click
+    if (what === "onError" && REFUSED.has(info.error) && video && nativeOk()) { goNative(); return; }
     paint();
     // ended, or cannot play here at all (its owner's choice, removed, private): either way it is over
     if (what === "onError" && failedFor !== video?.id) {  // once per video, however often the player says it
@@ -210,20 +219,27 @@ const MusicTV = (() => {
     r.move.innerHTML = st.floating ? g("dock") : g("pop");
     r.move.setAttribute("aria-label", st.floating ? "Back into the Music panel" : "Float it over the layout");
     r.move.dataset.tip = st.floating ? "Back into the Music panel" : "Float it";
-    r.idle.hidden = !!frame;
+    r.idle.hidden = !!frame || !!native;
+    el.classList.toggle("is-native", !!native);
     r.idleText.textContent = video ? (video.title || "PRESS PLAY").toUpperCase() : "NO SIGNAL";
     // floating and empty, it shows the way to a video; in the panel the list is right there
     r.start.hidden = !video && !st.floating;
     r.start.textContent = video ? "Play" : "Find a video";
     poster();
-    const word = err ? "CANNOT PLAY" : !frame ? (video ? "STOPPED" : "OFF") : STATE[info.state] || "READY";
+    const word = native ? (native.where === "window" ? "IN ITS WINDOW" : native.playing ? "ON YOUTUBE" : "PAUSED")
+      : err ? "CANNOT PLAY" : !frame ? (video ? "STOPPED" : "OFF") : STATE[info.state] || "READY";
     const time = frame && info.duration > 0 ? `  ${fmt(info.time)} / ${fmt(info.duration)}` : frame && info.time > 0 ? `  ${fmt(info.time)}` : "";
-    r.state.textContent = err || `${word}${time}`;
+    const ntime = native && info.duration > 0 ? `  ${fmt(info.time)} / ${fmt(info.duration)}` : "";
+    r.state.textContent = native ? `${word}${ntime}` : err || `${word}${time}`;
     r.state.classList.toggle("is-error", !!err);
     r.out.hidden = !video;
     if (video) r.out.dataset.external = `https://www.youtube.com/watch?v=${video.id}`;
     // refused here by its owner (or YouTube): YouTube's own page still plays it, in a window
-    r.win.hidden = !video || !REFUSED.has(info.error);
+    r.win.hidden = !video || (!native && !REFUSED.has(info.error));
+    r.win.textContent = native ? (native.where === "window" ? "Back in the TV" : "Pop out") : "Play in a YouTube window";
+    r.auto.hidden = !native;
+    r.auto.setAttribute("aria-pressed", String(autoPop()));
+    r.play.disabled = !video;
     notify();
   }
   // The stopped set shows the video's own picture, pixelated, behind the Play button.
@@ -291,6 +307,7 @@ const MusicTV = (() => {
     if (!floating && !(slot && slot.getClientRects().length)) floating = true;
     video = { id: next.id, title: next.title || null, channel: next.channel || null };
     info = { state: -1, time: Number(next.time) > 0 ? Number(next.time) : 0, duration: 0, error: 0 };
+    leaveNative();
     detach();
     if (floating !== st.floating || el.parentElement !== (floating ? document.body : slot)) moveTo(floating);
     attach(true);
@@ -299,6 +316,7 @@ const MusicTV = (() => {
       starts even in a window behind others, where a new player would wait to be seen. */
   function next(nextVideo) {
     if (!nextVideo || !ID.test(nextVideo.id)) return;
+    if (native) { play(nextVideo); return; }
     if (!frame || !heard) { play(nextVideo); return; }
     video = { id: nextVideo.id, title: nextVideo.title || null, channel: nextVideo.channel || null };
     info = { state: 3, time: 0, duration: 0, error: 0 };
@@ -316,6 +334,7 @@ const MusicTV = (() => {
   }
   function toggle() {
     if (!video) return;
+    if (native) { ytctl("toggle"); native.playing = !native.playing; paint(); return; }
     if (!frame) { if (!onScreen()) moveTo(true); attach(true); return; }
     if (playing()) command("pauseVideo"); else command("playVideo");
     info.state = playing() ? 2 : 3;
@@ -323,6 +342,7 @@ const MusicTV = (() => {
   }
   /** Stop the video; a floating set goes back into the panel, out of the way. */
   function stop() {
+    leaveNative();
     detach();
     info = { ...info, state: -1, error: 0 };
     if (st.floating) moveTo(false); else paint();
@@ -371,7 +391,69 @@ const MusicTV = (() => {
     if (what === "skip") return skip?.();
     if (what === "close") return stop();
     if (what === "move") return st.floating ? dock() : float();
-    if (what === "window") return openWindow();
+    if (what === "window") return native ? (native.where === "window" ? (native.auto = false, ytctl("dock"), native.where = "dock") : (native.auto = false, ytctl("popout"), native.where = "window"), paint()) : openWindow();
+    if (what === "auto") { Prefs.set({ ytAutoPop: !autoPop() }); return paint(); }
+  }
+
+  /* ------------------------------------------------------------ YouTube's own page */
+
+  function goNative() {
+    detach();
+    native = { where: "dock", playing: true, auto: false, endedSeen: false };
+    info = { ...info, state: 3, error: 0, time: 0, duration: 0 };
+    lastPlace = "";
+    PixelChrome.send("youtube", { id: video.id, title: video.title || "", mode: "dock" });
+    clearInterval(placing);
+    placing = setInterval(placeNative, 150);
+    placeNative();
+    paint();
+    notify();
+  }
+  function leaveNative() {
+    if (!native) return;
+    native = null;
+    clearInterval(placing);
+    ytctl("stop");
+  }
+  // Anything of the page's own that would lie over the TV's screen (a menu, a dialog, the bell):
+  // YouTube's page is a window of its own above the page, so it steps aside meanwhile.
+  const COVERS = "dialog[open], .mb-pop, .bell-panel:not([hidden]), .md-pop, .scope-pop, .mc--drop:not([hidden]), .jump[open], .rs-pop";
+  function covered(box) {
+    for (const c of document.querySelectorAll(COVERS)) {
+      const b = c.getBoundingClientRect();
+      if (b.width && b.height && b.left < box.right && b.right > box.left && b.top < box.bottom && b.bottom > box.top) return true;
+    }
+    return false;
+  }
+  function placeNative() {
+    if (!native || !el) return;
+    if (document.hidden) return;  // the whole window minimized: it stays as it is
+    const box = r.screen.getBoundingClientRect();
+    const inView = onScreen() && box.width > 40 && box.height > 30;
+    if (!inView && native.where === "dock") {
+      if (autoPop()) { native.auto = true; native.where = "window"; ytctl("popout"); }
+      else if (native.playing) { ytctl("pause"); native.playing = false; }
+      paint();
+    } else if (inView && native.where === "window" && native.auto) {
+      native.auto = false; native.where = "dock"; ytctl("dock"); paint();
+    }
+    const show = inView && native.where === "dock" && !covered(box);
+    const key = show ? `${Math.round(box.left)},${Math.round(box.top)},${Math.round(box.width)},${Math.round(box.height)}` : "hidden";
+    if (key === lastPlace) return;
+    lastPlace = key;
+    PixelChrome.send("ytplace", { x: box.left, y: box.top, w: box.width, h: box.height, show });
+  }
+  /** What PixelDeck's window says about YouTube's page, every second while it plays. */
+  function nativeState(s) {
+    if (!native || !s || typeof s !== "object") return;
+    if (s.stopped) { native = null; clearInterval(placing); info = { ...info, state: -1 }; paint(); notify(); return; }
+    if (s.where === "dock" || s.where === "window") native.where = s.where;
+    if (typeof s.playing === "boolean") native.playing = s.playing;
+    if (Number.isFinite(s.time) && s.time >= 0) info.time = s.time;
+    if (Number.isFinite(s.duration) && s.duration > 0) info.duration = s.duration;
+    if (s.ended && !native.endedSeen) { native.endedSeen = true; for (const fn of endedListeners) fn(null); }
+    paint();
+    notify();
   }
   /* A video its owner keeps on YouTube plays on YouTube's own page: in PixelDeck's window, a small
      framed window of its own (app_window.py); in a browser, a small popup. The set stops here. */
@@ -402,7 +484,7 @@ const MusicTV = (() => {
     // Out of sight (the panel hidden, Spotify chosen, the set closed): the video pauses.
     new ResizeObserver(() => {
       if (st.floating && !drag) place(st.x, st.y);
-      if (!onScreen() && playing()) { command("pauseVideo"); info.state = 2; paint(); }
+      if (!native && !onScreen() && playing()) { command("pauseVideo"); info.state = 2; paint(); }
       if (onScreen()) poster();
     }).observe(el);
     paint();
@@ -419,5 +501,15 @@ const MusicTV = (() => {
     playing, loaded: () => !!frame, ended: () => !!frame && info.state === 0,
     video: () => (video ? { ...video, time: info.time } : null),
     onChange: (fn) => listeners.add(fn),
+    nativeState,
+    /** Play a video on YouTube's own page in the TV straight away (PixelDeck's window only). */
+    youtubePage: (v) => {
+      if (!v || !ID.test(v.id) || !nativeOk()) return false;
+      leaveNative();
+      video = { id: v.id, title: v.title || null, channel: v.channel || null };
+      if (st.floating || !(slot && slot.getClientRects().length)) moveTo(!(slot && slot.getClientRects().length));
+      goNative();
+      return true;
+    },
   };
 })();

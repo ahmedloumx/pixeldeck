@@ -172,3 +172,9 @@
 /* A refused video: YouTube's own page in a window of its own. */
 .ytv-win { flex: none; min-height: 24px; padding: 0 10px; font-size: var(--text-xs, 12px); }
 .ytv-win[hidden] { display: none; }
+
+/* YouTube's own page lies on the screen (PixelDeck's window places it): the screen stays black under it. */
+.ytv.is-native .ytv-screen { background: #000; }
+.ytv-auto { flex: none; padding: 2px 6px; border: 1px solid var(--mu-deck-edge, #3a3f4b); background: none; color: var(--mu-deck-ink, #8b93a3); font-size: var(--num-7, 7px); cursor: pointer; }
+.ytv-auto[aria-pressed="true"] { color: #f6c445; border-color: #f6c445; }
+.ytv-auto[hidden] { display: none; }

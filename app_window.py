@@ -120,6 +120,13 @@ class DeskApp(Gtk.Application):
         settings.set_enable_back_forward_navigation_gestures(False)
         _full_frames(settings)
         self.main = self._window(view, *self._geometry())
+        # The dashboard sits in an overlay, so YouTube's own page can lie on the TV's screen.
+        self.main_view, self.yt_view, self.yt_where, self.yt_window, self.yt_place = view, None, None, None, None
+        self.main.set_child(None)
+        self.overlay = Gtk.Overlay()
+        self.overlay.set_child(view)
+        self.overlay.connect("get-child-position", self._yt_position)
+        self.main.set_child(self.overlay)
         self.main.connect("close-request", self._save_geometry)
         self.main.connect("notify::maximized", lambda *_: self._chrome_state())
         self._apply_titlebar()
@@ -165,7 +172,7 @@ class DeskApp(Gtk.Application):
         if not self.main:
             return
         state = json.dumps({"maximized": bool(self.main.is_maximized()), "titlebar": self.titlebar})
-        self.main.get_child().evaluate_javascript(
+        self.main_view.evaluate_javascript(
             f"typeof PixelChrome !== 'undefined' && PixelChrome.state({state})", -1, None, None, None, None, None)
 
     def _on_chrome(self, _manager, value):
@@ -177,7 +184,14 @@ class DeskApp(Gtk.Application):
             return
         action, win = request["action"], self.main
         if action == "youtube":
-            self._youtube(request["id"], request["title"])
+            self._youtube(request["id"], request["title"], request["mode"])
+            return
+        if action == "ytplace":
+            self.yt_place = request
+            self._yt_apply()
+            return
+        if action == "ytctl":
+            self._yt_command(request["cmd"])
             return
         if action == "move":
             surface, seat = win.get_surface(), win.get_display().get_default_seat()
@@ -297,9 +311,9 @@ class DeskApp(Gtk.Application):
             return
         Gio.AppInfo.launch_default_for_uri(uri, None)
 
-    # ------------------------------------------------------------ the YouTube window
+    # ------------------------------------------------------------ YouTube's own page, in the TV
 
-    # Hosts the YouTube window may show: YouTube, and Google's sign-in and consent pages for it.
+    # Hosts YouTube's page may show: YouTube, and Google's sign-in and consent pages for it.
     YT_HOSTS = ("youtube.com", "google.com", "gstatic.com", "googleusercontent.com", "ytimg.com", "ggpht.com")
     YT_CSS = b"""
     window.pd-yt { background: #0b0d12; }
@@ -307,32 +321,117 @@ class DeskApp(Gtk.Application):
     .pd-yt-tag { color: #0b0d12; background: #f6c445; font-family: monospace; font-weight: 800; font-size: 9px; letter-spacing: 1px; padding: 2px 6px; }
     .pd-yt-title { color: #e9ecf2; font-family: monospace; font-weight: 700; font-size: 12px; }
     .pd-yt-btn { min-height: 22px; min-width: 22px; padding: 0 6px; border-radius: 0; border: 2px solid #3a3f4b; background: #0f1218; color: #e9ecf2; font-family: monospace; font-weight: 800; box-shadow: none; }
-    .pd-yt-btn:hover { border-color: #f6c445; color: #f6c445; }
+    .pd-yt-btn:hover, .pd-yt-btn:checked { border-color: #f6c445; color: #f6c445; }
     .pd-yt-bezel { background: #1d212b; padding: 6px; border: 3px solid #2b303c; }
     .pd-yt-foot { color: #8b93a3; font-family: monospace; font-size: 9px; letter-spacing: 1px; padding: 3px 8px; background: #0f1218; }
     """
+    # The crop: YouTube's own player, controls and all, fills the view; the rest of its page is
+    # hidden around it, as a user style would. Nothing is drawn on the player.
+    YT_CROP = """
+    html, body, ytd-app, ytd-page-manager, ytd-watch-flexy { overflow: hidden !important; background: #000 !important; }
+    ytd-masthead, #masthead-container, #below, #secondary, #guide, tp-yt-app-drawer, ytd-mini-guide-renderer { visibility: hidden !important; }
+    #movie_player { position: fixed !important; inset: 0 !important; width: 100vw !important; height: 100vh !important;
+      z-index: 2147483647 !important; visibility: visible !important; background: #000 !important; }
+    #movie_player .html5-video-container, #movie_player video.html5-main-video { left: 0 !important; top: 0 !important;
+      width: 100vw !important; height: 100vh !important; object-fit: contain !important; }
+    """
+    YT_STATE = ("(() => { const v = document.querySelector('video.html5-main-video') || document.querySelector('video');"
+                " return JSON.stringify(v ? { playing: !v.paused && !v.ended, time: v.currentTime || 0,"
+                " duration: isFinite(v.duration) ? v.duration : 0, ended: v.ended } : {}); })()")
 
-    def _youtube(self, video_id, title):
-        """youtube.com itself in a small window of its own, for a video its owner keeps on YouTube:
-        an embedded player refuses it, YouTube's own page plays it. PixelDeck draws the frame
-        around the page (a bar with the bot, the title and close), never anything on it."""
+    def _youtube(self, video_id, title, mode="window"):
+        """youtube.com itself, for a video its owner keeps on YouTube: an embedded player refuses
+        it, YouTube's own page plays it. By default it sits on the TV's screen in the dashboard
+        (dock); it can pop out into a small framed window and back."""
         url = f"https://www.youtube.com/watch?v={video_id}"
-        if getattr(self, "yt_window", None) is not None:
-            self.yt_label.set_text(title or "YouTube")
-            self.yt_view.load_uri(url)
-            self.yt_window.present()
-            return
+        view = self._yt_view()
+        self.yt_title = title or "YouTube"
+        self._yt_move(mode)
+        view.load_uri("about:blank" if self.selftest and self.selftest.get("offline_youtube") else url)
+        if self.selftest is not None:
+            self.selftest.setdefault("youtube", []).append({"url": url, "mode": mode})
+        if not getattr(self, "yt_poll", 0):
+            self.yt_poll = GLib.timeout_add(1000, self._yt_report)
+
+    def _yt_view(self):
+        if getattr(self, "yt_view", None) is not None:
+            return self.yt_view
         if not getattr(self, "yt_css", None):
             self.yt_css = Gtk.CssProvider()
             self.yt_css.load_from_data(self.YT_CSS, -1)
             Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), self.yt_css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         # Its own content manager: YouTube's page never reaches the dashboard's message handler.
+        self.yt_content = WebKit.UserContentManager()
+        self.yt_crop = WebKit.UserStyleSheet.new(self.YT_CROP, WebKit.UserContentInjectedFrames.TOP_FRAME, WebKit.UserStyleLevel.USER,
+                                                 ["https://www.youtube.com/watch*"], None)
+        self.yt_content.add_style_sheet(self.yt_crop)
+        self.yt_cropped = True
         policies = WebKit.WebsitePolicies(autoplay=WebKit.AutoplayPolicy.ALLOW)
-        view = WebKit.WebView(network_session=self.session, user_content_manager=WebKit.UserContentManager(), website_policies=policies)
+        view = WebKit.WebView(network_session=self.session, user_content_manager=self.yt_content, website_policies=policies)
         view.set_vexpand(True)
+        view.set_hexpand(True)
         view.connect("decide-policy", self._on_youtube_policy)
         view.connect("create", lambda _v, action: self._outside(action.get_request().get_uri()) or None)
-        win = Gtk.Window(application=self, title=f"YouTube: {title}" if title else "YouTube", default_width=760, default_height=520)
+        rgba = Gdk.RGBA()
+        rgba.parse("#000000")
+        view.set_background_color(rgba)
+        self.yt_view = view
+        return view
+
+    def _yt_move(self, where):
+        """Put YouTube's page on the TV's screen (dock) or in its own framed window."""
+        view = self._yt_view()
+        parent = view.get_parent()
+        if parent is not None and where == self.yt_where:
+            return
+        if parent is self.overlay:
+            self.overlay.remove_overlay(view)
+        elif parent is not None:
+            parent.remove(view)
+        self.yt_where = where
+        if where == "dock":
+            if self.yt_window is not None:
+                self.yt_window.set_visible(False)
+            view.set_halign(Gtk.Align.START)
+            view.set_valign(Gtk.Align.START)
+            self.overlay.add_overlay(view)
+            self.overlay.set_clip_overlay(view, True)
+            self._yt_apply()
+        else:
+            view.set_halign(Gtk.Align.FILL)
+            view.set_valign(Gtk.Align.FILL)
+            view.set_visible(True)
+            win = self._yt_frame()
+            self.yt_bezel.append(view)
+            self.yt_label.set_text(getattr(self, "yt_title", "YouTube"))
+            win.set_title(f"YouTube: {self.yt_title}")
+            win.present()
+        self._yt_report()
+
+    def _yt_position(self, _overlay, widget, allocation):
+        # Docked, YouTube's page takes exactly the TV screen's box, whatever size it had before.
+        p = self.yt_place
+        if widget is not self.yt_view or self.yt_where != "dock" or not p:
+            return False
+        allocation.x, allocation.y, allocation.width, allocation.height = max(0, p["x"]), max(0, p["y"]), max(1, p["w"]), max(1, p["h"])
+        return True
+
+    def _yt_apply(self):
+        view, p = self.yt_view, self.yt_place
+        if view is None or self.yt_where != "dock":
+            return
+        if not p or not p["show"] or p["w"] < 40 or p["h"] < 30:
+            view.set_visible(False)
+            return
+        view.set_visible(True)
+        view.queue_resize()
+
+    def _yt_frame(self):
+        """The framed window YouTube's page pops out into: a bar with the bot, the title, the
+        crop switch, back to the TV and close; a bezel; a line saying whose page it is."""
+        if self.yt_window is not None:
+            return self.yt_window
+        win = Gtk.Window(application=self, title="YouTube", default_width=760, default_height=480)
         win.add_css_class("pd-yt")
         bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         bar.add_css_class("pd-yt-bar")
@@ -340,40 +439,95 @@ class DeskApp(Gtk.Application):
         icon.set_pixel_size(24)
         tag = Gtk.Label(label="PLAYING ON YOUTUBE")
         tag.add_css_class("pd-yt-tag")
-        label = Gtk.Label(label=title or "YouTube", xalign=0, hexpand=True, ellipsize=3)  # 3: ellipsize at the end
+        label = Gtk.Label(label="YouTube", xalign=0, hexpand=True, ellipsize=3)  # 3: ellipsize at the end
         label.add_css_class("pd-yt-title")
-        back = Gtk.Button(label="PIXELDECK", tooltip_text="Back to PixelDeck")
-        back.connect("clicked", lambda _b: self.main and self.main.present())
-        close = Gtk.Button(label="X", tooltip_text="Close the YouTube window")
-        close.connect("clicked", lambda _b: win.close())
-        for b in (back, close):
+        page = Gtk.ToggleButton(label="PAGE", tooltip_text="Show YouTube's whole page (to sign in, read, subscribe)")
+        page.connect("toggled", lambda b: self._yt_page(b.get_active()))
+        dock = Gtk.Button(label="TV", tooltip_text="Back into PixelDeck's TV")
+        dock.connect("clicked", lambda _b: self._yt_command("dock"))
+        close = Gtk.Button(label="X", tooltip_text="Stop and close")
+        close.connect("clicked", lambda _b: self._yt_command("stop"))
+        for b in (page, dock, close):
             b.add_css_class("pd-yt-btn")
-        for w in (icon, tag, label, back, close):
+        for w in (icon, tag, label, page, dock, close):
             bar.append(w)
-        handle = Gtk.WindowHandle(child=bar)  # the bar moves the window, as a title bar does
-        win.set_titlebar(handle)
-        bezel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        win.set_titlebar(Gtk.WindowHandle(child=bar))  # the bar moves the window, as a title bar does
+        bezel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, vexpand=True)
         bezel.add_css_class("pd-yt-bezel")
-        bezel.append(view)
         foot = Gtk.Label(label="YOUTUBE'S OWN PAGE, IN A PIXELDECK WINDOW", xalign=0)
         foot.add_css_class("pd-yt-foot")
         body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         body.append(bezel)
         body.append(foot)
-        bezel.set_vexpand(True)
         win.set_child(body)
-        win.connect("close-request", self._youtube_closed)
-        self.yt_window, self.yt_view, self.yt_label = win, view, label
-        view.load_uri("about:blank" if self.selftest and self.selftest.get("offline_youtube") else url)
-        if self.selftest is not None:
-            self.selftest.setdefault("youtube", []).append(url)
-        win.present()
+        # closing the window stops the video, as the X does
+        win.connect("close-request", lambda _w: (self._yt_command("stop"), True)[1])
+        self.yt_window, self.yt_bezel, self.yt_label, self.yt_page_btn = win, bezel, label, page
+        return win
 
-    def _youtube_closed(self, win):
-        # closing stops the video: the page goes away with the window
-        self.yt_view.try_close()
-        self.yt_window = self.yt_view = self.yt_label = None
-        return False
+    def _yt_page(self, whole):
+        """The crop off (YouTube's whole page, to sign in or read) or back on."""
+        if self.yt_view is None or whole == (not self.yt_cropped):
+            return
+        if whole:
+            self.yt_content.remove_style_sheet(self.yt_crop)
+        else:
+            self.yt_content.add_style_sheet(self.yt_crop)
+        self.yt_cropped = not whole
+
+    def _yt_command(self, cmd):
+        view = self.yt_view
+        if view is None:
+            return
+        if cmd in ("toggle", "pause"):
+            act = "v.paused ? v.play() : v.pause()" if cmd == "toggle" else "v.pause()"
+            view.evaluate_javascript(f"(() => {{ const v = document.querySelector('video.html5-main-video') || document.querySelector('video'); if (v) {act}; }})()",
+                                     -1, None, None, None, None, None)
+        elif cmd == "popout":
+            self._yt_move("window")
+        elif cmd == "dock":
+            self._yt_move("dock")
+            if self.main:
+                self.main.present()
+        elif cmd == "page":
+            self._yt_page(self.yt_cropped)
+            if getattr(self, "yt_page_btn", None) is not None:
+                self.yt_page_btn.set_active(not self.yt_cropped)
+        elif cmd == "stop":
+            view.load_uri("about:blank")
+            if self.yt_where == "dock":
+                view.set_visible(False)
+            if self.yt_window is not None:
+                self.yt_window.set_visible(False)
+            if getattr(self, "yt_poll", 0):
+                GLib.source_remove(self.yt_poll)
+                self.yt_poll = 0
+            self._yt_tell({"stopped": True})
+            return
+        self._yt_report()
+
+    def _yt_report(self):
+        """Every second while a video is on: tell the page where YouTube's page is and how it plays."""
+        view = self.yt_view
+        if view is None:
+            self.yt_poll = 0
+            return False
+
+        def done(v, result, _data):
+            try:
+                state = json.loads(v.evaluate_javascript_finish(result).to_string() or "{}")
+            except (GLib.Error, TypeError, ValueError):
+                state = {}
+            self._yt_tell(state if isinstance(state, dict) else {})
+        view.evaluate_javascript(self.YT_STATE, -1, None, None, None, done, None)
+        return True
+
+    def _yt_tell(self, state):
+        if not self.main_view:
+            return
+        state = {**state, "where": getattr(self, "yt_where", None), "page": not getattr(self, "yt_cropped", True)}
+        self.main_view.evaluate_javascript(f"typeof MusicTV !== 'undefined' && MusicTV.nativeState && MusicTV.nativeState({json.dumps(state)})",
+                                           -1, None, None, None, None, None)
 
     def _on_youtube_policy(self, _view, decision, kind):
         if kind == WebKit.PolicyDecisionType.RESPONSE:

@@ -445,10 +445,13 @@ wins over the file, the file wins over Windows Credential Manager (for `BITBUCKE
 | `PIXELDECK_CACHE_DIR`, `_STATE_DIR`, `_DATA_DIR`, `_CONFIG_DIR`, `PIXELDECK_SETTINGS_FILE` | Move where PixelDeck keeps its files. |
 
 Some videos are kept on YouTube by their owner (most label music videos): no embedded player
-may play them, PixelDeck's TV included. For those the TV offers **Play in a YouTube window**:
-YouTube's own page in a small window with PixelDeck's frame around it (in a browser, a small
-popup). Sign in to YouTube there once for your account. PixelDeck draws nothing on YouTube's
-page, and a link on it to another site opens in your browser.
+may play them. In PixelDeck's window the TV then switches by itself to YouTube's own player,
+cropped to the video and laid exactly on the TV's screen, so it plays in the pixel set with no
+click. **AUTO POP OUT** (on by default) moves it into a small framed window of its own when you
+leave the Music tab, and back into the TV when you return; **Pop out** and **TV** do it by hand,
+and **PAGE** in that window shows YouTube's whole page (to sign in once for your account).
+PixelDeck draws nothing on YouTube's player, and a link to another site opens in your browser.
+In a browser instead of PixelDeck's window, such a video opens in a small popup.
 
 ### Letting an agent open pull requests through you
 
