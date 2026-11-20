@@ -444,6 +444,12 @@ wins over the file, the file wins over Windows Credential Manager (for `BITBUCKE
 | `PIXELDECK_PORT` | The local port. Default 8642. |
 | `PIXELDECK_CACHE_DIR`, `_STATE_DIR`, `_DATA_DIR`, `_CONFIG_DIR`, `PIXELDECK_SETTINGS_FILE` | Move where PixelDeck keeps its files. |
 
+Some videos are kept on YouTube by their owner (most label music videos): no embedded player
+may play them, PixelDeck's TV included. For those the TV offers **Play in a YouTube window**:
+YouTube's own page in a small window with PixelDeck's frame around it (in a browser, a small
+popup). Sign in to YouTube there once for your account. PixelDeck draws nothing on YouTube's
+page, and a link on it to another site opens in your browser.
+
 ### Letting an agent open pull requests through you
 
 ```sh

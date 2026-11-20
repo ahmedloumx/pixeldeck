@@ -21,6 +21,8 @@ const MusicTV = (() => {
     150: "Its owner does not let it play outside YouTube.", 153: "YouTube refused to play it here.",
     [-1]: "YouTube is not answering. Check the connection, or watch it on YouTube.",
   };
+  // The refusals YouTube's own page does not have: the owner's choice, or YouTube's for embeds.
+  const REFUSED = new Set([101, 150, 153]);
   let el = null, r = {}, frame = null, slot = null;
   let st = (() => { try { return { floating: false, x: null, y: null, ...(JSON.parse(localStorage.getItem(KEY)) || {}) }; } catch { return { floating: false, x: null, y: null }; } })();
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(st)); } catch { /* storage blocked: it forgets on reload */ } };
@@ -94,6 +96,7 @@ const MusicTV = (() => {
       </div></div>
       <div class="ytv-foot"><span class="ytv-led" aria-hidden="true"></span><span class="ytv-state num8" data-r="state" role="status">OFF</span>
         <span class="ytv-knobs" aria-hidden="true"><i></i><i></i></span>
+        <button class="btn btn--primary ytv-win" type="button" data-ytv="window" data-r="win" hidden data-tip="Its owner keeps it on YouTube: open YouTube's own page in a small window">Play in a YouTube window</button>
         <button class="link ytv-out" type="button" data-r="out" hidden>Watch on YouTube</button></div>
       <span class="ytv-bot" aria-hidden="true">${typeof Sprites !== "undefined" ? Sprites.svg("bot", { scale: 3, idle: "blink" }) : ""}</span>`;
     r = {};
@@ -219,6 +222,8 @@ const MusicTV = (() => {
     r.state.classList.toggle("is-error", !!err);
     r.out.hidden = !video;
     if (video) r.out.dataset.external = `https://www.youtube.com/watch?v=${video.id}`;
+    // refused here by its owner (or YouTube): YouTube's own page still plays it, in a window
+    r.win.hidden = !video || !REFUSED.has(info.error);
     notify();
   }
   // The stopped set shows the video's own picture, pixelated, behind the Play button.
@@ -366,6 +371,16 @@ const MusicTV = (() => {
     if (what === "skip") return skip?.();
     if (what === "close") return stop();
     if (what === "move") return st.floating ? dock() : float();
+    if (what === "window") return openWindow();
+  }
+  /* A video its owner keeps on YouTube plays on YouTube's own page: in PixelDeck's window, a small
+     framed window of its own (app_window.py); in a browser, a small popup. The set stops here. */
+  function openWindow() {
+    if (!video) return;
+    const v = video;
+    stop();
+    if (typeof PixelChrome !== "undefined" && PixelChrome.available() && PixelChrome.send("youtube", { id: v.id, title: v.title || "" })) return;
+    window.open(`https://www.youtube.com/watch?v=${encodeURIComponent(v.id)}`, "pixeldeck-youtube", "popup,width=780,height=520");
   }
 
   /* ------------------------------------------------------------ mount */
