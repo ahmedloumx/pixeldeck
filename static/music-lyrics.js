@@ -85,7 +85,14 @@ const MusicLyrics = (() => {
 
   function paintAll() {
     for (const v of [...views]) {
-      if (!v.el.isConnected) { views.delete(v); continue; }
+      // A panel moved between slots leaves the page for a moment; dropping its view then left the
+      // lyrics stuck on what they said before. A view gone for a minute is let go.
+      if (!v.el.isConnected) {
+        v.gone = v.gone || Date.now();
+        if (Date.now() - v.gone > 60000) views.delete(v);
+        continue;
+      }
+      v.gone = 0;
       if (v.el.getClientRects().length) paint(v);
     }
     if (!views.size) { clearInterval(timer); timer = 0; }
