@@ -366,7 +366,7 @@ const MusicTV = (() => {
     el.setPointerCapture(e.pointerId);
     el.classList.add("is-dragging");
   }
-  function onMove(e) { if (drag && e.pointerId === drag.id) place(e.clientX - drag.dx, e.clientY - drag.dy); }
+  function onMove(e) { if (drag && e.pointerId === drag.id) { place(e.clientX - drag.dx, e.clientY - drag.dy); placeSoon(); } }
   function onUp(e) {
     if (!drag || e.pointerId !== drag.id) return;
     drag = null;
@@ -401,11 +401,13 @@ const MusicTV = (() => {
     detach();
     native = { where: "dock", playing: true, auto: false, endedSeen: false };
     info = { ...info, state: 3, error: 0, time: 0, duration: 0 };
+    // the box first: YouTube's page is then made at the TV screen's size, never at none (a page
+    // first laid out at no size stayed blank in WebKit)
     lastPlace = "";
+    placeNative();
     PixelChrome.send("youtube", { id: video.id, title: video.title || "", mode: "dock" });
     clearInterval(placing);
-    placing = setInterval(placeNative, 150);
-    placeNative();
+    placing = setInterval(placeNative, 250);
     paint();
     notify();
   }
@@ -425,6 +427,24 @@ const MusicTV = (() => {
     }
     return false;
   }
+  function visiblePart(box) {
+    let l = Math.max(0, box.left), t = Math.max(0, box.top), rr = Math.min(innerWidth, box.right), b = Math.min(innerHeight, box.bottom);
+    for (let a = r.screen.parentElement; a && a !== document.body; a = a.parentElement) {
+      const cs = getComputedStyle(a);
+      if (cs.overflowX === "visible" && cs.overflowY === "visible") continue;
+      const c = a.getBoundingClientRect();
+      if (!c.width && !c.height) continue;  // a box laid out as its children only (display: contents)
+      l = Math.max(l, c.left); t = Math.max(t, c.top); rr = Math.min(rr, c.right); b = Math.min(b, c.bottom);
+    }
+    return { left: l, top: t, width: Math.max(0, rr - l), height: Math.max(0, b - t) };
+  }
+  let placeQueued = false;
+  // A move (a drag, a scroll, a resize) places it on the next frame, so it follows the set.
+  function placeSoon() {
+    if (placeQueued || !native) return;
+    placeQueued = true;
+    requestAnimationFrame(() => { placeQueued = false; placeNative(); });
+  }
   function placeNative() {
     if (!native || !el) return;
     if (document.hidden) return;  // the whole window minimized: it stays as it is
@@ -437,11 +457,12 @@ const MusicTV = (() => {
     } else if (inView && native.where === "window" && native.auto) {
       native.auto = false; native.where = "dock"; ytctl("dock"); paint();
     }
-    const show = inView && native.where === "dock" && !covered(box);
-    const key = show ? `${Math.round(box.left)},${Math.round(box.top)},${Math.round(box.width)},${Math.round(box.height)}` : "hidden";
+    const cut = visiblePart(box);
+    const show = inView && native.where === "dock" && cut.width > 1 && cut.height > 1 && !covered(cut);
+    const key = show ? [box.left, box.top, box.width, box.height, cut.left, cut.top, cut.width, cut.height].map(Math.round).join(",") : "hidden";
     if (key === lastPlace) return;
     lastPlace = key;
-    PixelChrome.send("ytplace", { x: box.left, y: box.top, w: box.width, h: box.height, show });
+    PixelChrome.send("ytplace", { x: box.left, y: box.top, w: box.width, h: box.height, cx: cut.left, cy: cut.top, cw: cut.width, ch: cut.height, show });
   }
   /** What PixelDeck's window says about YouTube's page, every second while it plays. */
   function nativeState(s) {
@@ -480,7 +501,9 @@ const MusicTV = (() => {
     el.addEventListener("click", onClick);
     el.addEventListener("keydown", onKey);
     addEventListener("message", onMessage);
-    addEventListener("resize", () => { if (st.floating) place(st.x, st.y); });
+    addEventListener("resize", () => { if (st.floating) place(st.x, st.y); placeSoon(); });
+    // any scroll (the panel, its columns) moves the screen: YouTube's page follows on the next frame
+    document.addEventListener("scroll", () => placeSoon(), { capture: true, passive: true });
     // Out of sight (the panel hidden, Spotify chosen, the set closed): the video pauses.
     new ResizeObserver(() => {
       if (st.floating && !drag) place(st.x, st.y);

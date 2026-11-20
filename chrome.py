@@ -54,7 +54,15 @@ def parse(raw):
         if not all(_number(v) and -20000 <= v <= 20000 for v in box) or not isinstance(raw.get("show"), bool):
             return None
         x, y, w, h = (round(float(v)) for v in box)
-        return {"action": "ytplace", "x": x, "y": y, "w": max(0, w), "h": max(0, h), "show": raw["show"]}
+        # the part of it the page shows (a panel cuts it when scrolled or short); all of it by default
+        cut = [raw.get(k) for k in ("cx", "cy", "cw", "ch")]
+        if all(v is None for v in cut):
+            cut = [x, y, w, h]
+        elif not all(_number(v) and -20000 <= v <= 20000 for v in cut):
+            return None
+        cx, cy, cw, ch = (round(float(v)) for v in cut)
+        return {"action": "ytplace", "x": x, "y": y, "w": max(0, w), "h": max(0, h),
+                "cx": cx, "cy": cy, "cw": max(0, cw), "ch": max(0, ch), "show": raw["show"]}
     if action == "ytctl":
         return {"action": "ytctl", "cmd": raw["cmd"]} if raw.get("cmd") in YT_COMMANDS else None
     return {"action": action}

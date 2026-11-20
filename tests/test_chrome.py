@@ -32,7 +32,10 @@ class ParseTest(unittest.TestCase):
 
     def test_the_tv_screen_place_and_the_youtube_commands(self):
         self.assertEqual(chrome.parse({"action": "ytplace", "x": 10.4, "y": 20.6, "w": 440, "h": 248, "show": True}),
-                         {"action": "ytplace", "x": 10, "y": 21, "w": 440, "h": 248, "show": True})
+                         {"action": "ytplace", "x": 10, "y": 21, "w": 440, "h": 248, "cx": 10, "cy": 21, "cw": 440, "ch": 248, "show": True})
+        cut = chrome.parse({"action": "ytplace", "x": 10, "y": 300, "w": 440, "h": 248, "cx": 10, "cy": 300, "cw": 440, "ch": 120.4, "show": True})
+        self.assertEqual((cut["cy"], cut["ch"]), (300, 120))
+        self.assertIsNone(chrome.parse({"action": "ytplace", "x": 1, "y": 1, "w": 1, "h": 1, "cx": "a", "cy": 1, "cw": 1, "ch": 1, "show": True}))
         self.assertEqual(chrome.parse({"action": "ytplace", "x": -5, "y": 0, "w": -3, "h": 9, "show": False})["w"], 0)
         for bad in ({"x": "1", "y": 0, "w": 1, "h": 1, "show": True}, {"x": 1, "y": 0, "w": 1, "h": 1, "show": "yes"},
                     {"x": 1e9, "y": 0, "w": 1, "h": 1, "show": True}, {"x": True, "y": 0, "w": 1, "h": 1, "show": True}, {"x": 1, "y": 0, "w": 1, "show": True}):
