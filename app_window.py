@@ -188,7 +188,8 @@ class DeskApp(Gtk.Application):
             return
         if action == "ytplace":
             self.yt_place = request
-            self._yt_apply()
+            if self.yt_view is not None:
+                self._yt_apply()
             return
         if action == "ytctl":
             self._yt_command(request["cmd"])
@@ -409,21 +410,24 @@ class DeskApp(Gtk.Application):
         self._yt_report()
 
     def _yt_position(self, _overlay, widget, allocation):
-        # Docked, YouTube's page takes exactly the TV screen's box, whatever size it had before.
+        # Docked, YouTube's page takes the part of the TV's screen the dashboard shows (all of it,
+        # unless a panel cuts it): its player fits that box, so it never spills over the panels.
         p = self.yt_place
         if widget is not self.yt_view or self.yt_where != "dock" or not p:
             return False
-        allocation.x, allocation.y, allocation.width, allocation.height = max(0, p["x"]), max(0, p["y"]), max(1, p["w"]), max(1, p["h"])
+        allocation.x, allocation.y, allocation.width, allocation.height = max(0, p["cx"]), max(0, p["cy"]), max(1, p["cw"]), max(1, p["ch"])
         return True
 
     def _yt_apply(self):
         view, p = self.yt_view, self.yt_place
         if view is None or self.yt_where != "dock":
             return
-        if not p or not p["show"] or p["w"] < 40 or p["h"] < 30:
-            view.set_visible(False)
-            return
+        # Hidden means see-through and click-through, never unmapped: WebKit keeps drawing, so it
+        # shows again at once (a view hidden before its first frame stayed blank once shown).
+        shown = bool(p and p["show"] and p["cw"] >= 60 and p["ch"] >= 40)
         view.set_visible(True)
+        view.set_opacity(1.0 if shown else 0.0)
+        view.set_can_target(shown)
         view.queue_resize()
 
     def _yt_frame(self):
