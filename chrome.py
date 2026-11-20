@@ -9,7 +9,8 @@ import json
 import re
 from pathlib import Path
 
-ACTIONS = ("move", "maximize", "minimize", "close", "titlebar", "hello", "youtube")
+ACTIONS = ("move", "maximize", "minimize", "close", "titlebar", "hello", "youtube", "ytplace", "ytctl")
+YT_COMMANDS = ("toggle", "pause", "stop", "popout", "dock", "page")
 VIDEO_ID = re.compile(r"[A-Za-z0-9_-]{11}")
 PREFS_KEY = "prdesk.prefs.v1"
 
@@ -45,7 +46,17 @@ def parse(raw):
             return None
         title = raw.get("title") if isinstance(raw.get("title"), str) else ""
         title = "".join(c for c in title if c.isprintable())[:200].strip()
-        return {"action": "youtube", "id": vid, "title": title}
+        mode = raw.get("mode") if raw.get("mode") in ("window", "dock") else "window"
+        return {"action": "youtube", "id": vid, "title": title, "mode": mode}
+    if action == "ytplace":
+        # where the TV's screen is in the page, so YouTube's own page can sit exactly on it
+        box = [raw.get(k) for k in ("x", "y", "w", "h")]
+        if not all(_number(v) and -20000 <= v <= 20000 for v in box) or not isinstance(raw.get("show"), bool):
+            return None
+        x, y, w, h = (round(float(v)) for v in box)
+        return {"action": "ytplace", "x": x, "y": y, "w": max(0, w), "h": max(0, h), "show": raw["show"]}
+    if action == "ytctl":
+        return {"action": "ytctl", "cmd": raw["cmd"]} if raw.get("cmd") in YT_COMMANDS else None
     return {"action": action}
 
 
