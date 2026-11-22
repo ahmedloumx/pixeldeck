@@ -1,12 +1,20 @@
 /* The Music panel, its library, the status bar mini player and the compact player (floating,
    or dropped down from the status bar): a pixel boombox with a CRT for the album art and a
-   green phosphor LCD. Every rule sits under .mu, .ml, .mc, .mu-panel or .st-music. Motion is
-   stepped so it reads as 8-bit, runs only while music plays (or a window opens), and stops
-   under reduced motion and the calm setting. */
+   phosphor LCD in the theme's accent. Every rule sits under .mu, .ml, .mc, .mu-panel or
+   .st-music. Motion is stepped so it reads as 8-bit, runs only while music plays (or a window
+   opens), and stops under reduced motion and the calm setting. */
 
 :root {
-  --mu-lcd-bg: oklch(23% 0.05 148); --mu-lcd-edge: oklch(33% 0.065 148); --mu-lcd-ink: oklch(88% 0.2 142);
-  --mu-lcd-dim: oklch(33% 0.07 146); --mu-lcd-glow: oklch(80% 0.2 142 / 0.5);
+  /* The screens (the deck's LCD, the volume, the compact player's and the status bar's) take the
+     accent, as the lyrics do: ink in it, a dark screen tinted with its hue, and unlit segments a
+     faint trace of it, dark enough that a lit block stands well apart from an unlit one. */
+  --mu-lcd-ink: var(--color-accent);
+  --mu-lcd-bg: color-mix(in oklab, var(--mu-lcd-ink) 13%, oklch(13% 0.01 260));
+  --mu-lcd-edge: color-mix(in oklab, var(--mu-lcd-ink) 25%, oklch(18% 0.01 260));
+  --mu-lcd-dim: color-mix(in oklab, var(--mu-lcd-ink) 24%, oklch(17% 0.01 260));
+  --mu-lcd-glow: color-mix(in oklab, var(--mu-lcd-ink) 50%, transparent);
+  /* the screens' second colour: loud volume, the visualiser's peaks, repeat one */
+  --mu-lcd-warm: var(--sprite-yellow);
   --mu-box: oklch(27% 0.012 250); --mu-box-hi: oklch(35% 0.012 250); --mu-box-lo: oklch(20% 0.01 250);
   --mu-metal: oklch(40% 0.01 250); --mu-paper: oklch(93% 0.025 88); --mu-paper-ink: oklch(24% 0.02 260);
   /* the deck's own keys and lettering, so a theme can make it a dark machine or a silver one */
@@ -18,12 +26,17 @@
 }
 /* Retro grey: a silver boombox with light keys; the screens stay dark, as screens are */
 :root[data-tone="light"] {
+  /* a light theme's accent is dark: the screens lift it toward white, and what sits on the
+     silver box or on paper takes the accent's deep shade */
+  --mu-lcd-ink: color-mix(in oklab, var(--color-accent) 55%, white);
   --mu-box: #a4a4a4; --mu-box-hi: #c6c6c6; --mu-box-lo: #7b7b7b; --mu-metal: #8d8d8d;
   --mu-key-hi: #fbfbfb; --mu-key-a: #e6e6e6; --mu-key-b: #cbcbcb; --mu-key-lo: #9e9e9e;
   --mu-key-ink: #151515; --mu-deck-ink: #151515; --mu-deck-muted: #3a3a3a; --mu-brand: #262626;
-  --mu-device-bg: #e6e6e6; --mu-kicker: #0f4f20; --mu-vol-ink: #0c4a1a; --mu-vol-glow: transparent;
-  --mu-now-bg: #b2ccb4; --mu-now-ink: #0c4a1a; --mu-now-bar: #166329;
+  --mu-device-bg: #e6e6e6; --mu-kicker: var(--color-accent-deep); --mu-vol-ink: var(--color-accent-deep); --mu-vol-glow: transparent;
+  --mu-now-bg: var(--color-accent-soft); --mu-now-ink: var(--color-accent-deep); --mu-now-bar: var(--color-accent);
 }
+/* amber ink is yellow already: loud turns orange, so it still stands out before the red */
+:root[data-accent="amber"] { --mu-lcd-warm: oklch(72% 0.19 50); }
 
 /* The panel scrolls itself when the deck and the library are stacked; side by side, each
    column scrolls on its own and the panel stays put. */
@@ -176,7 +189,7 @@
 .mu-eq i { position: relative; flex: 1 1 0; height: 56px; background: linear-gradient(transparent 2px, var(--mu-lcd-dim) 2px) 0 0 / 100% 7px; }
 .mu-eq i::after { content: ""; position: absolute; inset: 0; clip-path: inset(87.5% 0 0 0);
   background: linear-gradient(var(--mu-lcd-bg) 2px, transparent 2px) 0 0 / 100% 7px,
-    linear-gradient(to top, var(--mu-lcd-ink) 0 62.5%, var(--sprite-yellow) 62.5% 87.5%, var(--sprite-red) 87.5%) 0 0 / 100% 100% no-repeat; }
+    linear-gradient(to top, var(--mu-lcd-ink) 0 62.5%, var(--mu-lcd-warm) 62.5% 87.5%, var(--sprite-red) 87.5%) 0 0 / 100% 100% no-repeat; }
 .mu.is-idle .mu-eq i::after { clip-path: inset(100% 0 0 0); }
 .mu-eq i.mu-eq-a { --d: 750ms; } .mu-eq i.mu-eq-b { --d: 625ms; } .mu-eq i.mu-eq-c { --d: 500ms; }
 .mu.is-playing .mu-eq i::after { animation: mu-eq-a var(--d, 500ms) steps(1, end) var(--o, 0ms) infinite; }
@@ -203,9 +216,9 @@
 .mu-key--play .mu-glyph--pause, .mu-key--play.is-playing .mu-glyph--play { display: none; }
 .mu-key--play.is-playing .mu-glyph--pause { display: block; }
 .mu-key--toggle { min-width: 58px; height: 46px; }
-.mu-led { width: 8px; height: 6px; background: oklch(30% 0.04 145); box-shadow: 0 0 0 var(--pixel) var(--sprite-dark); }
+.mu-led { width: 8px; height: 6px; background: var(--mu-lcd-dim); box-shadow: 0 0 0 var(--pixel) var(--sprite-dark); }
 .mu-key--toggle[aria-pressed="true"] .mu-led { background: var(--mu-lcd-ink); box-shadow: 0 0 0 var(--pixel) var(--sprite-dark), 0 0 8px var(--mu-lcd-glow); }
-.mu-key--toggle[data-mode="track"] .mu-led { background: var(--sprite-yellow); box-shadow: 0 0 0 var(--pixel) var(--sprite-dark), 0 0 8px var(--sprite-yellow); }
+.mu-key--toggle[data-mode="track"] .mu-led { background: var(--mu-lcd-warm); box-shadow: 0 0 0 var(--pixel) var(--sprite-dark), 0 0 8px var(--mu-lcd-warm); }
 .mu-key--like[aria-pressed="true"] .mu-glyph { color: var(--sprite-red); filter: drop-shadow(0 0 4px var(--sprite-red)); }
 
 .mu-vol { display: grid; grid-template-columns: auto auto auto; align-items: end; gap: var(--space-xs); margin-bottom: 5px; }
@@ -213,7 +226,7 @@
 .mu-vol-blocks { display: flex; align-items: flex-end; gap: 3px; height: 40px; padding: 4px; cursor: pointer; background: var(--sprite-dark); box-shadow: inset 0 0 0 1px var(--mu-box-lo); }
 .mu-vol-blocks i { width: 9px; height: var(--h); background: var(--mu-lcd-dim); }
 .mu-vol-blocks i.is-on { background: var(--mu-lcd-ink); box-shadow: 0 0 4px var(--mu-lcd-glow); }
-.mu-vol-blocks i.is-hot { background: var(--sprite-yellow); }
+.mu-vol-blocks i.is-hot { background: var(--mu-lcd-warm); }
 .mu-vol-blocks i.is-hot:last-child { background: var(--sprite-red); }
 .mu-vol-blocks[aria-disabled="true"] { cursor: not-allowed; opacity: 0.6; }
 .mu-vol-num { min-width: 3ch; font-size: 10px; color: var(--mu-vol-ink); text-shadow: 0 0 6px var(--mu-vol-glow); }
@@ -515,7 +528,7 @@
 .mc--drop .mc-rows { max-height: none; min-height: 0; }
 .mc-more { padding: 4px 0 0; }
 .mc-more-btn { display: flex; gap: 6px; width: 100%; padding: 6px 8px; border: var(--rule-hair) dashed var(--color-rule-2); background: none; color: var(--color-ink-2); font: 400 var(--num-9) var(--font-num); cursor: pointer; }
-.mc-more-btn:hover, .mc-more-btn:focus-visible { border-style: solid; border-color: var(--mu-lcd-ink); color: var(--color-ink); outline: none; }
+.mc-more-btn:hover, .mc-more-btn:focus-visible { border-style: solid; border-color: var(--mu-now-bar); color: var(--color-ink); outline: none; }
 .mc.is-dragging { box-shadow: inset 0 0 0 var(--pixel) var(--color-paper-2), 10px 10px 0 var(--sprite-dark), 0 26px 50px oklch(0% 0 0 / 0.55); }
 .mc-head { display: flex; align-items: center; gap: 8px; height: 28px; margin: 0 -10px; padding: 0 4px 0 8px; cursor: grab; user-select: none; touch-action: none;
   background: repeating-linear-gradient(to bottom, var(--color-paper-2) 0 2px, var(--color-paper-3) 2px 4px); border-bottom: var(--pixel) solid var(--color-rule-2); }
@@ -553,7 +566,7 @@
 .mc-vol i:nth-child(5) { height: 57%; } .mc-vol i:nth-child(6) { height: 65%; } .mc-vol i:nth-child(7) { height: 73%; } .mc-vol i:nth-child(8) { height: 81%; }
 .mc-vol i:nth-child(9) { height: 90%; } .mc-vol i:nth-child(10) { height: 100%; }
 .mc-vol i.is-on { background: var(--mu-lcd-ink); }
-.mc-vol i.is-on:nth-child(n + 8) { background: var(--sprite-yellow); }
+.mc-vol i.is-on:nth-child(n + 8) { background: var(--mu-lcd-warm); }
 .mc-list { display: grid; gap: 6px; border-top: var(--pixel) solid var(--color-rule); padding-top: 8px; }
 .mc-list[hidden] { display: none; }
 .mc-list-tabs { display: flex; gap: 4px; }
@@ -566,14 +579,15 @@
 .mc-row-btn:disabled { cursor: default; }
 .mc-row.is-run .mc-row-btn { grid-template-columns: 22px minmax(0, 1fr) auto auto; }
 .mc-row-rep { font-size: 11px; }
-.mc-row.is-current .mc-row-btn { color: var(--mu-lcd-ink); box-shadow: inset 3px 0 0 var(--mu-lcd-ink); }
+/* the rows sit on paper, not on a screen: a light theme's lifted screen ink would be too pale there */
+.mc-row.is-current .mc-row-btn { color: var(--mu-now-ink); box-shadow: inset 3px 0 0 var(--mu-now-bar); }
 .mc-n, .mc-row-dur { font-size: 7px; color: var(--color-muted); }
 .mc-row-text { display: grid; min-width: 0; }
 .mc-row-text b, .mc-row-text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mc-row-text b { font-weight: 500; font-size: var(--text-xs); }
 .mc-row-text small { font-size: 11px; color: var(--color-muted); }
 .mc-empty { padding: 6px; font-size: var(--text-xs); color: var(--color-muted); }
-.mc-empty.num8 { font-size: 7px; color: var(--mu-lcd-ink); }
+.mc-empty.num8 { font-size: 7px; color: var(--mu-kicker); }
 /* opening: a CRT switching on (a line that opens to the full window); the dropdown unrolls from the bar */
 .mc.is-opening { animation: mc-on 300ms steps(6, end) both; }
 .mc.is-closing { animation: mc-off 240ms steps(5, end) both; }
@@ -676,10 +690,10 @@ body.is-music-playing .term-mascot .spr { animation: mu-bob-small 1000ms steps(1
 .md-eq i:nth-child(2) { animation-delay: -0.3s; } .md-eq i:nth-child(3) { animation-delay: -0.6s; }
 @keyframes md-eq { 0% { height: 3px; } 25% { height: 11px; } 50% { height: 6px; } 75% { height: 12px; } 100% { height: 3px; } }
 /* playing: the deck's phosphor green, glowing */
-.md-btn.is-live { border-color: var(--mu-lcd-ink); background: var(--mu-lcd-bg); box-shadow: 0 3px 0 oklch(40% 0.12 145), 0 0 14px var(--mu-lcd-glow); }
+.md-btn.is-live { border-color: var(--mu-lcd-ink); background: var(--mu-lcd-bg); box-shadow: 0 3px 0 color-mix(in oklab, var(--mu-lcd-ink) 40%, oklch(16% 0.01 260)), 0 0 14px var(--mu-lcd-glow); }
 .md-btn.is-live .md-pic { color: var(--mu-lcd-ink); filter: drop-shadow(0 0 4px var(--mu-lcd-glow)); }
 .md-btn.is-live .md-btn-name { color: var(--mu-lcd-ink); text-shadow: 0 0 6px var(--mu-lcd-glow); }
-.md-btn.is-live .md-btn-kind { color: oklch(78% 0.15 142); }
+.md-btn.is-live .md-btn-kind { color: color-mix(in oklab, var(--mu-lcd-ink) 80%, var(--mu-lcd-bg)); }
 .md-btn.is-live .md-eq { display: flex; }
 .md-pop { position: fixed; z-index: 70; display: grid; gap: 6px; max-height: min(60dvh, 420px); overflow: auto; padding: 8px;
   background: var(--mu-box); border: 2px solid var(--mu-box-lo); box-shadow: 4px 4px 0 oklch(8% 0 0 / 0.85); animation: md-open 120ms steps(3, end); }
@@ -689,12 +703,12 @@ body.is-music-playing .term-mascot .spr { animation: mu-bob-small 1000ms steps(1
 .md-card:hover, .md-card:focus-visible { border-color: var(--mu-lcd-dim); outline: none; }
 .md-card:disabled { cursor: default; opacity: 0.55; }
 .md-card .md-pic { width: 30px; height: 30px; color: var(--mu-deck-muted); }
-.md-card.is-on { border-color: var(--mu-lcd-ink); background: var(--mu-lcd-bg); box-shadow: 0 3px 0 oklch(40% 0.12 145), 0 0 14px var(--mu-lcd-glow); }
+.md-card.is-on { border-color: var(--mu-lcd-ink); background: var(--mu-lcd-bg); box-shadow: 0 3px 0 color-mix(in oklab, var(--mu-lcd-ink) 40%, oklch(16% 0.01 260)), 0 0 14px var(--mu-lcd-glow); }
 .md-card.is-on .md-pic { color: var(--mu-lcd-ink); }
 .md-card.is-on .md-card-name { color: var(--mu-lcd-ink); text-shadow: 0 0 6px var(--mu-lcd-glow); }
-.md-card.is-on .md-card-kind { color: oklch(78% 0.15 142); }
+.md-card.is-on .md-card-kind { color: color-mix(in oklab, var(--mu-lcd-ink) 80%, var(--mu-lcd-bg)); }
 .md-card.is-on .md-eq { display: flex; }
-.md-vol { grid-column: 1 / -1; height: 4px; background: oklch(30% 0.05 148); }
+.md-vol { grid-column: 1 / -1; height: 4px; background: var(--mu-lcd-dim); }
 .md-vol i { display: block; height: 100%; background: var(--mu-lcd-ink); }
 .md-none { margin: 4px; max-width: 30ch; color: var(--mu-deck-muted); font-size: 13px; }
 .md-fly { position: fixed; z-index: 80; width: 6px; height: 6px; background: var(--mu-lcd-ink); box-shadow: 0 0 8px var(--mu-lcd-glow); pointer-events: none; }
