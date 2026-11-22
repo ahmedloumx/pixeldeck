@@ -333,11 +333,14 @@ const MusicLibrary = (() => {
     const entry = cache.get(keyOf(v)) || {};
     // the row answers at once; the deck catches up when Spotify does
     if (!core.still()) { row.classList.remove("is-starting"); void row.offsetWidth; row.classList.add("is-starting"); setTimeout(() => row.classList.remove("is-starting"), 1400); }
+    // Liked Songs and Recent have no context to play in: they play their list from this song on
+    const uris = list.slice(Number(row.dataset.i)).map((x) => x.uri).filter(Boolean).slice(0, 100);
     if (v.kind === "playlist" || v.kind === "album") {
       core.playFrom({ context: entry.head?.uri || `spotify:${v.kind}:${v.id}`, offset_uri: t.uri });
+    } else if (v.kind === "search") {
+      // the other hits are mostly other takes on the same song: a found song plays in its album
+      core.playSong(t, { uris, offset_uri: t.uri });
     } else {
-      // Liked Songs, Recent and search have no context to play in: play the list from this song on
-      const uris = list.slice(Number(row.dataset.i)).map((x) => x.uri).filter(Boolean).slice(0, 100);
       core.playFrom({ uris, offset_uri: t.uri });
     }
   }

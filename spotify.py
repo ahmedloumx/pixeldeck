@@ -232,11 +232,16 @@ def trim_item(raw, album=None):
         artists, artist_ids = _artists(raw.get("artists"))
         album_raw = raw.get("album") if isinstance(raw.get("album"), dict) else album if isinstance(album, dict) else {}
         images = album_raw.get("images")
+    album_id = _ident(album_raw.get("id"))
+    episode = raw.get("type") == "episode"
     return {
         "id": _ident(raw.get("id")), "uri": _uri(raw.get("uri"), TRACK_URI_RE),
-        "kind": "episode" if raw.get("type") == "episode" else "track",
+        "kind": "episode" if episode else "track",
         "name": _text(raw.get("name")) or "Untitled", "artists": artists, "artist_ids": artist_ids,
-        "album": _text(album_raw.get("name")), "album_id": _ident(album_raw.get("id")),
+        "album": _text(album_raw.get("name")), "album_id": album_id,
+        # where a song found on its own plays from, so what follows it is its album and not the
+        # same song again; an episode's "album" is its show, which plays no list
+        "album_uri": f"spotify:album:{album_id}" if album_id and not episode else None,
         "number": _int(raw.get("track_number"), None), "duration_ms": max(0, _int(raw.get("duration_ms"))),
         "playable": raw.get("is_playable") is not False and not raw.get("is_local"), **_pictures(images),
     }

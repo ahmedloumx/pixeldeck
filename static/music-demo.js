@@ -337,7 +337,7 @@ const MusicDemo = (() => {
     const album = ALBUMS[t.album];
     return {
       id: t.id, uri: `spotify:track:${t.id}`, kind: "track", name: t.name, artists: t.people.map((p) => ARTISTS[p].name),
-      artist_ids: t.people.map((p) => ARTISTS[p].id), album: album.name, album_id: album.id, number: t.number,
+      artist_ids: t.people.map((p) => ARTISTS[p].id), album: album.name, album_id: album.id, album_uri: `spotify:album:${album.id}`, number: t.number,
       duration_ms: t.duration_ms, playable: true, art: art(album), thumb: art(album),
     };
   }
@@ -458,7 +458,11 @@ const MusicDemo = (() => {
     },
     queue: async () => {
       now_(); clock();
-      const upcoming = [...s.queue, ...Array.from({ length: Math.min(10, s.list.length - 1) }, (_, k) => s.list[(s.i + 1 + k) % s.list.length])];
+      // Spotify's way: repeat on a song names it again and again, and repeat on a list goes round
+      // it, so a list of one song is that song over and over
+      const after = s.repeat === "track" ? Array(10).fill(s.current)
+        : Array.from({ length: s.repeat === "context" ? 10 : Math.min(10, s.list.length - 1) }, (_, k) => s.list[(s.i + 1 + k) % s.list.length]);
+      const upcoming = [...s.queue, ...after];
       return { current: song(byId.get(s.current)), items: upcoming.map((t) => song(byId.get(t))) };
     },
     queueAdd: async (uri) => { now_(); const id = idOf(uri); if (byId.has(id)) s.queue.push(id); return { ok: true }; },

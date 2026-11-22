@@ -128,15 +128,18 @@ const MusicFloat = (() => {
   // Dropped from the status bar, the list stays short: the next few songs, then a way to the rest.
   const DROP_ROWS = 6;
   function paintList(el) {
-    const all = el._list.items || [], current = core.player?.item?.id;
+    const queue = el._list.kind === "queue", current = core.player?.item?.id;
+    // The queue names a song once for every time it plays, so a run of one song is one row. This
+    // list keeps a row for each song: a click there plays from that row's own place in it.
+    const all = queue ? core.runs(el._list.items || []) : (el._list.items || []).map((t) => ({ t, times: 1 }));
     const items = el === drop ? all.slice(0, DROP_ROWS) : all;
     const more = all.length - items.length;
-    el._r.rows.innerHTML = items.length ? items.map((t, i) => `<li class="mc-row${t.id && t.id === current ? " is-current" : ""}">
-        <button class="mc-row-btn" type="button" data-mc="row" data-i="${i}"${el._list.kind === "queue" ? " disabled" : ""}>
+    el._r.rows.innerHTML = items.length ? items.map(({ t, times }, i) => `<li class="mc-row${t.id && t.id === current ? " is-current" : ""}${times > 1 ? " is-run" : ""}">
+        <button class="mc-row-btn" type="button" data-mc="row" data-i="${i}"${queue ? " disabled" : ""}>
           <span class="mc-n num8">${String(i + 1).padStart(2, "0")}</span><span class="mc-row-text"><b>${esc(t.name)}</b><small>${esc((t.artists || []).join(", "))}</small></span>
-          <span class="mc-row-dur num8">${core.fmt(t.duration_ms)}</span></button></li>`).join("")
+          ${times > 1 ? `<span class="mc-row-rep">${core.repeats(times)}</span>` : ""}<span class="mc-row-dur num8">${core.fmt(t.duration_ms)}</span></button></li>`).join("")
       + (more > 0 ? `<li class="mc-more"><button class="mc-more-btn" type="button" data-mc="more">+${more} more, open in Music</button></li>` : "")
-      : `<li class="mc-empty">${el._list.kind === "queue" ? "The queue is empty." : "Nothing here."}</li>`;
+      : `<li class="mc-empty">${queue ? "The queue is empty." : "Nothing here."}</li>`;
   }
   function setList(el, kind) {
     el._list = { kind, items: null, at: 0, key: "" };

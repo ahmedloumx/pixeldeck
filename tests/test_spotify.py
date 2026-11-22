@@ -327,7 +327,7 @@ class ApiTest(SpotifyBase):
         }))
         now = self.route("GET", "spotify-now")
         self.assertEqual(now["item"], {"id": "t1", "uri": None, "kind": "track", "name": "Song", "artists": ["A", "B"], "artist_ids": [None, None],
-                                       "album": "Album", "album_id": None, "number": None, "duration_ms": 200000, "playable": True,
+                                       "album": "Album", "album_id": None, "album_uri": None, "number": None, "duration_ms": 200000, "playable": True,
                                        "art": ART.replace("4851", "b273"), "thumb": ART})
         self.assertEqual((now["is_playing"], now["progress_ms"], now["shuffle"], now["repeat"]), (True, 61000, True, "context"))
         self.assertEqual((now["device"]["volume"], now["playlist"], now["disallows"]), (55, "37i9dQZF1DXcBWIGoYBM5M", ["resuming"]))
@@ -478,12 +478,24 @@ class LibraryTest(SpotifyBase):
         q = parse_qs(urlsplit(self.fake.to(API + "/search")[-1].url).query)
         self.assertEqual((q["type"][0], q["limit"][0], q["q"][0]), ("track,album,artist,playlist", "10", "neon <b>"))
         self.assertEqual((len(out["tracks"]["items"]), out["tracks"]["next"], out["albums"]["items"], out["playlists"]["items"][0]["name"]), (1, 1, [], "Mix"))
+        # a song found on its own plays inside its album, so the page needs the album's address
+        self.assertEqual(out["tracks"]["items"][0]["album_uri"], "spotify:album:al1")
         self.route("GET", "spotify-search", {"q": ["neon"], "type": ["track"], "offset": ["10"]})
         q = parse_qs(urlsplit(self.fake.to(API + "/search")[-1].url).query)
         self.assertEqual((q["type"][0], q["offset"][0]), ("track", "10"))
         for bad in ({"q": [""]}, {"q": ["x" * 201]}, {"q": ["x"], "type": ["show"]}):
             with self.subTest(query=bad), self.assertRaises(ValueError):
                 self.route("GET", "spotify-search", bad)
+
+    def test_a_song_names_its_album_only_when_it_has_one(self):
+        self.assertEqual(spotify.trim_item(T1)["album_uri"], "spotify:album:al1")
+        # an album's own songs come without the album: the album passed in stands in
+        bare = {k: v for k, v in T1.items() if k != "album"}
+        self.assertEqual(spotify.trim_item(bare, {"id": "al2", "name": "Two"})["album_uri"], "spotify:album:al2")
+        self.assertIsNone(spotify.trim_item(bare)["album_uri"])
+        self.assertIsNone(spotify.trim_item({**T1, "album": {"id": "al1:x", "name": "Al"}})["album_uri"])
+        episode = {"type": "episode", "id": "e1", "uri": "spotify:episode:e1", "name": "Ep", "show": {"id": "s1", "name": "Show"}}
+        self.assertIsNone(spotify.trim_item(episode)["album_uri"], "a show is not an album: it plays no list")
 
     def test_recent_pages_back_with_the_cursor(self):
         self.connect()
@@ -532,12 +544,14 @@ class LibraryTest(SpotifyBase):
         self.route("POST", "spotify-play", body={"context": "spotify:playlist:p1", "offset_uri": "spotify:track:t1", "device_id": "dev1"})
         self.route("POST", "spotify-play", body={"uris": ["spotify:track:t1", "spotify:track:t2"], "offset_uri": "spotify:track:t2"})
         self.route("POST", "spotify-play", body={"context": "spotify:artist:a1", "offset_uri": "spotify:track:t1"})
-        calls = self.fake.to(API + "/me/player/play")[-3:]
+        self.route("POST", "spotify-play", body={"context": "spotify:album:al1", "offset_uri": "spotify:track:t1"})
+        calls = self.fake.to(API + "/me/player/play")[-4:]
         self.assertTrue(calls[0].url.endswith("?device_id=dev1"))
         self.assertEqual([json.loads(c.body) for c in calls], [
             {"context_uri": "spotify:playlist:p1", "offset": {"uri": "spotify:track:t1"}},
             {"uris": ["spotify:track:t1", "spotify:track:t2"], "offset": {"uri": "spotify:track:t2"}},
-            {"context_uri": "spotify:artist:a1"}])
+            {"context_uri": "spotify:artist:a1"},
+            {"context_uri": "spotify:album:al1", "offset": {"uri": "spotify:track:t1"}}])
         for body in ({}, {"context": "spotify:user:me:collection"}, {"uris": []}, {"uris": ["spotify:album:x"]},
                      {"uris": ["spotify:track:t1"], "offset_uri": "spotify:track:t9"}, {"context": "spotify:album:a", "offset_uri": "x"}):
             with self.subTest(body=body), self.assertRaises(ValueError):
