@@ -37,7 +37,7 @@ const Music = (() => {
   let signIn = null;                     // { url, opened, until, scopes } while a sign-in is out in the browser
   let pollTimer = 0, statusTimer = 0, revealTimer = 0, seekTimer = 0, volTimer = 0;
   let pendingSeek = null, pendingVol = null;
-  let lastFilled = -1, paintedItem = null, endAsked = false, trackSeen = null, lastOn = null;
+  let lastFilled = -1, paintedItem = null, endAsked = false, trackSeen = null, contextSeen = "", lastOn = null;
   // A short stepped flourish on a change: the class is put back on so its animation runs again.
   // The 125 ms beat every looping animation steps on (music.css). Each one starts when its element
   // does (the panel shown, a song started, a list built), so once running its start is snapped
@@ -525,7 +525,12 @@ const Music = (() => {
       if (item?.id) checkLikes([item.id]);
       if (!first) flash(els.lcd, "is-new", 420);
       loadUpNext();
+    } else if ((player?.context?.uri || "") !== contextSeen) {
+      // the same song started again somewhere else (found by search, now in its album) has
+      // another Up next
+      loadUpNext();
     }
+    contextSeen = player?.context?.uri || "";
     const on = playing();
     if (on !== lastOn) { if (lastOn !== null) { flash(els.play, "is-flip", 200); flash(miniEls.play, "is-flip", 200); } lastOn = on; requestAnimationFrame(syncBeat); }
     paintDevices();
@@ -685,13 +690,25 @@ const Music = (() => {
       if (err.message !== "reloading" && nextKey === key) paintUpNext(null);
     }
   }
+  /* Spotify's queue lists a song once for every time it will play: one song played on its own
+     with repeat on comes back as that song again and again. A run of the same song is one row
+     that says how many times it comes. */
+  function runs(items) {
+    const out = [];
+    for (const t of items) {
+      const key = t.uri || t.id || `${t.name}|${(t.artists || []).join(", ")}`, last = out[out.length - 1];
+      if (last && last.key === key) last.times++; else out.push({ t, key, times: 1 });
+    }
+    return out;
+  }
+  const repeats = (times) => `x${times}${player?.repeat && player.repeat !== "off" ? ", on repeat" : ""}`;
   function paintUpNext(items) {
     if (!els.nextRows) return;
     els.nextRows.innerHTML = items === null ? '<li class="mu-next-empty">Spotify did not say what plays next.</li>'
       : !items.length ? '<li class="mu-next-empty">Nothing queued after this song.</li>'
-        : items.slice(0, 12).map((t, i) => `<li class="mu-next-row" style="--i:${i}"><span class="mu-next-n num8">${String(i + 1).padStart(2, "0")}</span>
+        : runs(items).slice(0, 12).map(({ t, times }, i) => `<li class="mu-next-row${times > 1 ? " is-run" : ""}" style="--i:${i}"><span class="mu-next-n num8">${String(i + 1).padStart(2, "0")}</span>
             <canvas class="mu-next-art" width="16" height="16" data-thumb="${esc(t.thumb || `plain:${t.id || t.name}`)}" aria-hidden="true"></canvas>
-            <span class="mu-next-text"><b>${esc(t.name)}</b><small>${esc((t.artists || []).join(", "))}</small></span><span class="mu-next-dur num8">${fmt(t.duration_ms)}</span></li>`).join("");
+            <span class="mu-next-text"><b>${esc(t.name)}</b><small>${esc((t.artists || []).join(", "))}</small></span>${times > 1 ? `<span class="mu-next-rep">${repeats(times)}</span>` : ""}<span class="mu-next-dur num8">${fmt(t.duration_ms)}</span></li>`).join("");
     for (const c of els.nextRows.querySelectorAll("canvas[data-thumb]")) drawArt(c, c.dataset.thumb, 32);
   }
 
@@ -936,6 +953,11 @@ const Music = (() => {
       return false;
     }
   }
+  /* A song found on its own (search) plays inside its album. Played by itself, Spotify's queue is
+     that one song, so Up next had nothing else to list; with repeat on, it listed it over and over. */
+  function playSong(t, alone = { uris: [t.uri] }) {
+    return playFrom(t.album_uri ? { context: t.album_uri, offset_uri: t.uri } : alone);
+  }
   async function queueAdd(uri, name) {
     try {
       await source().queueAdd(uri);
@@ -1142,7 +1164,7 @@ const Music = (() => {
   const core = {
     get player() { return player; }, get status() { return status; }, get mode() { return mode; }, get look() { return look; },
     source, position, playing, fmt, glyph, cassette, marquee, fit, still, can,
-    act, playFrom, queueAdd, like, checkLikes, liked: (id) => likes.get(id), missing, libraryLocked,
+    act, playFrom, playSong, queueAdd, runs, repeats, like, checkLikes, liked: (id) => likes.get(id), missing, libraryLocked,
     drawArt, artKey, cycleLook, lookLabel: () => LOOKS[look].label,
     addView: (v) => { views.add(v); return v; }, onTrack: (fn) => trackListeners.add(fn),
     openPanel, shown, connect,

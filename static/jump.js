@@ -183,7 +183,7 @@ const Jump = (() => {
     if (r.kind === "person") { if (state.pr) closePr(); setWho(r.p.who); Layout.activate("queue"); return; }
     if (r.kind === "cmd") { try { r.c.run(); } catch (err) { toast("That did not work.", err.message, true); } return; }
     const x = r.x, core = Music.core;
-    if (r.type === "track" && x.uri) return core.playFrom({ uris: [x.uri] });
+    if (r.type === "track" && x.uri) return core.playSong(x);
     if ((r.type === "album" || r.type === "playlist") && x.uri) return core.playFrom({ context: x.uri });
     if (r.type === "artist" && typeof MusicLibrary !== "undefined") { core.openPanel(); MusicLibrary.open({ kind: "artist", id: x.id, label: x.name }); }
   }

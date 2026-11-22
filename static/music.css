@@ -497,6 +497,10 @@
 .mu-next-text b, .mu-next-text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mu-next-text b { font-weight: 500; font-size: var(--text-sm); }
 .mu-next-text small { font-size: var(--text-xs); color: var(--color-muted); }
+/* one song that Spotify lists again and again is one row, with how many times it comes */
+.mu-next-row.is-run { grid-template-columns: 20px 28px minmax(0, 1fr) auto auto; }
+.mu-next-rep, .mc-row-rep { padding: 1px 5px; border: 1px solid color-mix(in oklab, var(--mu-now-bar) 55%, transparent); color: var(--mu-now-ink); white-space: nowrap; }
+.mu-next-rep { font-size: var(--text-xs); }
 .mu-next-empty { padding: 6px; font-size: var(--text-sm); color: var(--color-muted); }
 .mu-next .mu-next-row { animation: ml-rise 180ms steps(3, end) both; animation-delay: calc(var(--i, 0) * 22ms); }
 
@@ -560,6 +564,8 @@
   color: var(--color-ink-2); background: var(--color-paper-3); border: 0; border-radius: 0; font: inherit; cursor: pointer; }
 .mc-row-btn:hover:not(:disabled) { background: var(--color-paper-2); color: var(--color-ink); }
 .mc-row-btn:disabled { cursor: default; }
+.mc-row.is-run .mc-row-btn { grid-template-columns: 22px minmax(0, 1fr) auto auto; }
+.mc-row-rep { font-size: 11px; }
 .mc-row.is-current .mc-row-btn { color: var(--mu-lcd-ink); box-shadow: inset 3px 0 0 var(--mu-lcd-ink); }
 .mc-n, .mc-row-dur { font-size: 7px; color: var(--color-muted); }
 .mc-row-text { display: grid; min-width: 0; }
