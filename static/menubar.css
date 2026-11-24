@@ -79,8 +79,8 @@
 @keyframes jump-in { from { opacity: 0; transform: translateY(-10px) scale(0.97); } }
 @keyframes jump-out { to { opacity: 0; transform: translateY(-6px) scale(0.98); } }
 @keyframes jump-fade { from { opacity: 0; } }
-.jump-spin { width: 10px; height: 10px; border: 2px solid var(--color-accent); border-right-color: transparent; border-radius: 50%; opacity: 0; transition: opacity 120ms; }
-.jump-field.is-busy .jump-spin { opacity: 1; animation: turn 0.7s linear infinite; }
+.jump-spin { display: block; color: var(--color-accent); opacity: 0; transition: opacity 120ms; }
+.jump-field.is-busy .jump-spin { opacity: 1; animation: pix-wheel 1s steps(8, end) infinite; }
 .jump-list > .mb-group:first-child { padding-top: 4px; }
 @media (prefers-reduced-motion: reduce) { .jump[open], .jump[open]::backdrop, .jump.is-closing, .jump.is-closing::backdrop { animation: none; } }
 :root[data-motion="calm"] .jump[open], :root[data-motion="calm"] .jump[open]::backdrop { animation: none; }

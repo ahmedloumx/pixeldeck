@@ -379,12 +379,11 @@
 .pr-dialog-foot .merge-note[hidden] { display: none; }
 .merge-wait { color: var(--color-muted); font-variant-numeric: tabular-nums; }
 
-/* Busy: a spinner that turns on the compositor and a light sweeping under the label, both
-   smooth (not stepped), so a wait reads as work going on. */
+/* Busy: besides the pixel wheel (app.css), a light walks under the label on the same beat. It
+   moves by its left edge, which WebKit paints itself, so it never stalls on the GPU either. */
 :where(.btn.is-busy) { position: relative; overflow: hidden; }
-.btn.is-busy .spin { will-change: transform; animation: turn 0.75s linear infinite; }
 .btn.is-busy::after {
-  content: ""; position: absolute; left: 0; bottom: 0; width: 45%; height: 2px; background: currentColor; opacity: 0.6;
-  will-change: transform; animation: busy-sweep 1.2s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  content: ""; position: absolute; left: -45%; bottom: 0; width: 45%; height: 2px; background: currentColor; opacity: 0.6;
+  animation: busy-sweep 1.5s steps(12, end) infinite;
 }
-@keyframes busy-sweep { from { transform: translateX(-110%); } to { transform: translateX(240%); } }
+@keyframes busy-sweep { to { left: 100%; } }
