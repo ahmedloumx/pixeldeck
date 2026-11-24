@@ -66,7 +66,8 @@ Full documentation, with the architecture, security model and measured performan
   history. Silence it per kind, keep only your own pull requests, or snooze it. Your own actions
   never notify you.
   When a merge into its target leaves one of your branches behind, you hear it at once (one call
-  per open pull request of yours every 3 minutes) with a Sync button, like Bitbucket's; approvals
+  per open pull request of yours every 3 minutes, and one more for a branch that is behind, to ask
+  whether it conflicts) with a Sync button, like Bitbucket's; approvals
   taken back and new tasks notify too, and every kind is on by default.
 - **Status bar.** The main things only: when your pull requests were read and the next read, the
   connection, the music player, your apps, the bell and refresh. Bitbucket API calls left this
@@ -126,7 +127,10 @@ Full documentation, with the architecture, security model and measured performan
   back, from the pull request's toolbar.
 - **Actions.** Open a pull request from a pushed branch; sync, merge or decline your own pull
   request; delete a pushed branch. Each asks for a second click in place. When your branch is behind its
-  target, a bar says by how much and offers **Sync now**, like Bitbucket's.
+  target, a bar says by how much and offers **Sync now**, like Bitbucket's. When a sync would stop on
+  conflicts, Bitbucket's yellow triangle flags it: on the row, under the title, in the bar (with the
+  files, from git's own merge of the two tips in your clone) and beside each file in Files changed.
+  A sync that stops anyway is an amber warning listing the files; nothing is pushed.
 - **Merge popup.** Like Bitbucket's: the strategies the target branch allows (merge commit,
   squash, fast forward and the rebase ones, its default picked), the commit message Bitbucket
   would write, closing the branch, and the ticket from Jira with its status. Pick the status it

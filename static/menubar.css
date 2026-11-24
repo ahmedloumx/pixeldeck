@@ -95,6 +95,7 @@
 .jump-tag { padding: 2px 4px; border: var(--rule-hair) solid var(--color-rule-2); color: var(--color-ink-2); font: 400 var(--num-8) var(--font-num); }
 .jump-tag.is-ok { border-color: var(--color-ok); color: var(--color-ok); }
 .jump-tag.is-wait { border-color: var(--color-wait); color: var(--color-wait); }
+.jump-tag .spr-warn { vertical-align: -1px; }
 .jump-tag.is-bad { border-color: var(--color-bad); color: var(--color-bad); }
 .jump-row.is-at .jump-tag { border-color: var(--color-accent-ink); color: var(--color-accent-ink); }
 .jump-none { margin: 10px; color: var(--color-muted); font-size: 13px; }

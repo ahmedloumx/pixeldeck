@@ -18,6 +18,7 @@
 .p-stone { fill: var(--sprite-stone); } .p-stone-deep { fill: var(--sprite-stone-deep); }
 .p-grass { fill: var(--sprite-grass); } .p-amber { fill: var(--critter, var(--sprite-amber)); }
 .p-ink { fill: currentColor; }
+.p-warn { fill: var(--sprite-warn); } .p-warn-deep { fill: var(--sprite-warn-deep); }
 .chip .spr-tomb { width: 10px; height: 12px; }
 
 /* ------------------------------------------------- the pull request view folds */
@@ -364,6 +365,12 @@
 .check-pill.is-ok { --tone: var(--color-ok); --tone-soft: var(--color-ok-soft); }
 .check-pill.is-wait { --tone: var(--color-wait); --tone-soft: var(--color-wait-soft); }
 .check-pill.is-bad { --tone: var(--color-bad); --tone-soft: var(--color-bad-soft); }
+.check-pill > .spr-warn { width: 12px; height: 10px; }  /* its own pixels, not stretched to the 16px icons */
+
+/* A sync would stop on conflicts: the bar turns amber, names the files and offers no button that can only fail. */
+.sync-bar.is-warn { flex-wrap: wrap; border-color: var(--color-wait); background: var(--color-wait-soft); }
+.sync-bar.is-warn > span { flex: 1 1 20rem; min-width: 0; }
+.sync-bar.is-warn .conflict-files { flex-basis: 100%; margin: 0 0 0 calc(24px + var(--space-sm)); }
 
 /* Synced from here: the bar turns green and stays, so you see it landed. */
 .sync-bar.is-ok { border-color: var(--color-ok); background: var(--color-ok-soft); animation: sync-landed 360ms steps(3, end); }

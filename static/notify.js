@@ -64,7 +64,8 @@ const Notify = (() => {
         ? `${first(ev.names[0])} left ${ev.count === 1 ? "a comment" : `${ev.count} comments`} on ${whose} ${pr}`
         : `${ev.count === 1 ? "A new comment" : `${ev.count} new comments`} on ${whose} ${pr}`;
       case "updated": return `${actor} pushed new commits to ${pr}`;
-      case "behind": return `${pr} is ${ev.count}${ev.more ? "+" : ""} ${ev.count === 1 && !ev.more ? "commit" : "commits"} behind ${ev.dest || "its target"}`;
+      case "behind": return `${pr} is ${ev.count}${ev.more ? "+" : ""} ${ev.count === 1 && !ev.more ? "commit" : "commits"} behind ${ev.dest || "its target"}${
+        ev.conflicts === true ? ", and conflicts with it" : ev.conflicts ? `, and ${ev.conflicts === 1 ? "1 file conflicts" : `${ev.conflicts} files conflict`}` : ""}`;
       case "unapproved": return `${actor} took back the approval on ${whose} ${pr}`;
       case "tasks": return `${ev.count === 1 ? "A new task" : `${ev.count} new tasks`} on ${whose} ${pr}`;
       case "merged": return ev.actor ? `${actor} merged ${whose} ${pr}` : `${isMine(ev) ? "Your" : whose} ${pr} was merged`;

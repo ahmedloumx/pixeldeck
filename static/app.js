@@ -353,6 +353,32 @@ function behindOf(pr) {
   if (seen) return { n: seen.behind || 0, more: !!seen.more, known: true, synced: seen.behind ? null : done };
   return { n: 0, more: false, known: !!done, synced: done };
 }
+// The files a sync would stop on, Bitbucket's yellow triangle: the clone's own merge when the pull
+// request is open here, else the host's last look. null when the merge is clean or not known;
+// files is empty when the host says it conflicts without naming them (GitHub, GitLab). A list row
+// carries its own look; only a pull request read on its own (deep) is matched to its list entry.
+function conflictsOf(pr, { deep = true } = {}) {
+  const sync = state.pr && prKey(state.pr.pr) === prKey(pr) ? state.pr.sync : null;
+  const seen = pr.behind || (deep ? findPr(prKey(pr))?.behind : null);
+  const c = sync?.available && Array.isArray(sync.conflicts) ? sync.conflicts : seen?.conflicts;
+  if (c === true) return { files: [] };
+  return Array.isArray(c) && c.length ? { files: c } : null;
+}
+const warnIcon = (scale = 1) => Sprites.svg("warn", { scale });
+const conflictWords = (c, dest) => (c.files.length
+  ? `${plural(c.files.length, "file")} ${c.files.length === 1 ? "conflicts" : "conflict"} with ${dest || "the target"}`
+  : `Conflicts with ${dest || "the target"}`);
+// The first few conflicted files, each under the triangle, then how many more.
+function conflictList(files, max = 5) {
+  const shown = files.slice(0, max).map((f) => `<li>${warnIcon()}<code>${esc(f)}</code></li>`).join("");
+  return `<ul class="conflict-files">${shown}${files.length > max ? `<li class="conflict-more">and ${files.length - max} more</li>` : ""}</ul>`;
+}
+function conflictTag(pr) {
+  const c = pr.state === "OPEN" ? conflictsOf(pr, { deep: false }) : null;
+  if (!c) return "";
+  const names = c.files.length ? `: ${c.files.slice(0, 3).join(", ")}${c.files.length > 3 ? ` and ${c.files.length - 3} more` : ""}` : "";
+  return `<span class="q-conflict" data-tip="${esc(`${conflictWords(c, pr.dest)}${names}. A sync stops on them`)}">${warnIcon()}conflicts</span>`;
+}
 // Bitbucket's merge button: green once nothing waits, yellow while a review or a sync is due.
 function mergeReadiness(pr) {
   const s = signals(pr);
@@ -361,6 +387,8 @@ function mergeReadiness(pr) {
   if (s.changes.length) waits.push(`${listNames(s.changes.map((r) => r.name))} asked for changes`);
   else if (!s.approvals.length) waits.push("it waits for an approval");
   if (b.n) waits.push(`it is ${b.n}${b.more ? "+" : ""} ${b.n === 1 && !b.more ? "commit" : "commits"} behind ${pr.dest}: sync it first`);
+  const c = conflictsOf(pr);
+  if (c) waits.push(c.files.length ? `${conflictWords(c, pr.dest)}: resolve them first` : `it conflicts with ${pr.dest}: resolve that first`);
   if (s.tasks) waits.push(`${plural(s.tasks, "task")} still open`);
   return { ready: !waits.length, waits, s, b };
 }
@@ -393,6 +421,11 @@ function prChecks(pr) {
       ? pill("wait", Sprites.svg("sync", { scale: 1 }), `<b>${b.n}${b.more ? "+" : ""}</b> behind ${esc(pr.dest)}`, "The target moved on: sync this branch before it merges")
       : pill("ok", svg("check", "2.6"), `${b.synced ? "Synced: up" : "Up"} to date with ${esc(pr.dest)}`, b.synced ? `Synced at ${clock(b.synced.at)}` : ""));
   }
+  const c = conflictsOf(pr);
+  if (c) {
+    out.push(pill("wait", warnIcon(), c.files.length ? `<b>${plural(c.files.length, "file")}</b> ${c.files.length === 1 ? "conflicts" : "conflict"} with ${esc(pr.dest)}` : `<b>Conflicts</b> with ${esc(pr.dest)}`,
+      c.files.length ? `${c.files.slice(0, 6).join(", ")}${c.files.length > 6 ? ` and ${c.files.length - 6} more` : ""}. A sync stops on them: resolve them in your checkout` : "A sync stops on them: resolve them in your checkout"));
+  }
   if (s.tasks) out.push(pill("wait", svg("task"), plural(s.tasks, "open task")));
   return out.join("");
 }
@@ -402,7 +435,7 @@ function prRow(pr, opts = {}) {
   const ticket = pr.ticket ? `<span class="id">${esc(pr.ticket.key)}</span>` : "";
   const author = opts.showAuthor ? `<span>${esc(pr.author.name)}</span>` : "";
   const fresh = isNew(pr) ? `<span class="new-mark">New activity</span>` : "";
-  const behind = behindTag(pr, "q-behind");
+  const behind = conflictTag(pr) + behindTag(pr, "q-behind");
   const merged = pr.state === "MERGED";
   const tookD = merged ? duration(tookMs(pr)) : null;
   const last = merged
@@ -1168,11 +1201,12 @@ function tabFiles() {
   const perFile = tally(threads.map((t) => t.path));
   const countOf = new Map(perFile);
   const letter = { added: "A", removed: "D", renamed: "R", modified: "M" };
+  const clash = conflictedPaths();
   const list = diff.files.map((f, i) => {
     const slash = f.path.lastIndexOf("/");
     return `<li><button class="file-link${viewed.has(f.path) ? " is-viewed" : ""}" type="button" data-goto="${i}">
       <span class="fstatus is-${f.status}">${letter[f.status] || "M"}</span>
-      <span class="fname"><b>${esc(f.path.slice(slash + 1))}</b><small>${esc(slash > 0 ? f.path.slice(0, slash) : "")}</small></span>
+      <span class="fname"><b>${clash.has(f.path) ? fileFlag() : ""}${esc(f.path.slice(slash + 1))}</b><small>${esc(slash > 0 ? f.path.slice(0, slash) : "")}</small></span>
       <span class="fnum plus">+${f.added}</span><span class="fnum minus">-${f.removed}</span>${countOf.get(f.path) ? `<span class="fcom" title="comments">${countOf.get(f.path)}</span>` : ""}
     </button></li>`;
   }).join("");
@@ -1182,7 +1216,7 @@ function tabFiles() {
     const collapsed = viewed.has(f.path) || big || f.binary;
     return `<section class="file${collapsed ? " is-collapsed" : ""}" id="file-${i}" data-file="${i}">
       <header class="file-head">
-        <button class="file-toggle" type="button" data-toggle-file="${i}" aria-expanded="${!collapsed}"><span class="caret" aria-hidden="true"></span><span class="branch">${esc(f.status === "renamed" ? `${f.old_path} to ${f.path}` : f.path)}</span></button>
+        <button class="file-toggle" type="button" data-toggle-file="${i}" aria-expanded="${!collapsed}"><span class="caret" aria-hidden="true"></span><span class="branch">${esc(f.status === "renamed" ? `${f.old_path} to ${f.path}` : f.path)}</span></button>${clash.has(f.path) ? fileFlag(true) : ""}
         <span class="fnum plus">+${f.added}</span><span class="fnum minus">-${f.removed}</span>
         <label class="check"><input type="checkbox" data-viewed="${i}"${viewed.has(f.path) ? " checked" : ""}> Viewed</label>
       </header>
@@ -1193,6 +1227,39 @@ function tabFiles() {
       <span class="energy viewed-bar">${Array.from({ length: 12 }, (_, i) => `<i class="${i < Math.round((done / diff.files.length) * 12) ? "on" : ""}"></i>`).join("")}</span></div>
       <ol>${list}</ol>${diff.cut ? '<p class="empty">The diff was cut at 4 MB.</p>' : ""}</aside>
     <div class="file-blocks">${blocks}</div></div>`;
+}
+
+// Files a sync would stop on, by path: the clone's merge, else the host's look.
+function conflictedPaths() {
+  const pr = state.pr?.detail?.pr || state.pr?.pr;
+  return new Set((pr && conflictsOf(pr)?.files) || []);
+}
+function fileFlag(head = false) {
+  const dest = esc((state.pr?.detail?.pr || state.pr?.pr)?.dest || "the target");
+  return head
+    ? `<span class="file-flag is-head" data-tip="Conflicts with ${dest}: a sync stops on this file">${warnIcon()}Conflict</span>`
+    : `<span class="file-flag" data-tip="Conflicts with ${dest}">${warnIcon()}</span>`;
+}
+// The sync status lands after the diff is drawn: its triangles are set in place, so the diff
+// being read does not jump.
+function paintFileFlags() {
+  const diff = state.pr?.diff;
+  const body = $("#pr-body");
+  if (!diff || state.pr.tab !== "files" || !body) return;
+  const clash = conflictedPaths();
+  for (const link of $$(".file-link[data-goto]", body)) {
+    const on = clash.has(diff.files[Number(link.dataset.goto)]?.path);
+    const name = link.querySelector(".fname b");
+    const flag = name?.querySelector(".file-flag");
+    if (on && !flag) name?.insertAdjacentHTML("afterbegin", fileFlag());
+    else if (!on && flag) flag.remove();
+  }
+  for (const head of $$(".file[data-file] > .file-head", body)) {
+    const on = clash.has(diff.files[Number(head.parentElement.dataset.file)]?.path);
+    const flag = head.querySelector(".file-flag");
+    if (on && !flag) head.querySelector(".file-toggle")?.insertAdjacentHTML("afterend", fileFlag(true));
+    else if (!on && flag) flag.remove();
+  }
 }
 
 function fileBody(i) {
@@ -1478,6 +1545,14 @@ function syncBar() {
   if (!s?.available) return "";
   if (!s.behind) return "";
   const n = `${s.behind} ${s.behind === 1 ? "commit" : "commits"}`;
+  // The clone's own merge stops on these files, so a sync would too: no button that can only fail.
+  const files = Array.isArray(s.conflicts) ? s.conflicts : [];
+  if (files.length) {
+    return `<div class="sync-bar is-warn" role="status">${warnIcon(2)}
+      <span>Conflicts with <code>${esc(s.dest)}</code>: <b>${plural(files.length, "file")}</b>. This branch is ${n} behind and a sync stops on ${files.length === 1 ? "it" : "them"}.
+        Resolve ${files.length === 1 ? "it" : "them"} in your checkout, or ask Claude with the fix button.</span>
+      ${conflictList(files)}</div>`;
+  }
   return `<div class="sync-bar" role="status">${Sprites.svg("sync", { scale: 2 })}
     <span>This branch is <b>${n}</b> behind <code>${esc(s.dest)}</code>.</span>
     <button class="btn sync-now" type="button" data-sync>Sync now</button></div>`;
@@ -1493,20 +1568,45 @@ function paintSync() {
   if (checks) checks.innerHTML = prChecks(pr);
   const merge = $(".pr-tools [data-merge]");
   if (merge && !merge.classList.contains("is-busy") && !merge.classList.contains("btn--armed")) merge.outerHTML = mergeButton(pr);
+  paintFileFlags();
 }
-// A sync done from here clears "behind" everywhere at once, not at the next look.
+// A sync done from here clears "behind" and its conflicts everywhere at once, not at the next look.
 function markSynced(repo, id, pulled) {
   const key = `${repo}#${id}`;
   for (const person of Object.values(state.people || {})) {
-    for (const pr of person?.open || []) if (prKey(pr) === key) pr.behind = { behind: 0, more: false };
+    for (const pr of person?.open || []) if (prKey(pr) === key) pr.behind = { behind: 0, more: false, conflicts: [] };
   }
   justSynced.set(key, { at: Date.now() / 1000, pulled: pulled || 0 });
   if (state.pr && prKey(state.pr.pr) === key) {
-    state.pr.pr.behind = { behind: 0, more: false };
-    if (state.pr.sync) state.pr.sync = { ...state.pr.sync, behind: 0 };
+    state.pr.pr.behind = { behind: 0, more: false, conflicts: [] };
+    if (state.pr.sync) state.pr.sync = { ...state.pr.sync, behind: 0, conflicts: [] };
   }
   renderAll();
   paintSync();
+}
+// A sync that stopped on conflicts flags the pull request everywhere at once, as the server does
+// for the next list it serves: the rows, the line under the title, the bar and the Files tab.
+function markConflicts(repo, id, files, behind) {
+  const key = `${repo}#${id}`;
+  const flag = (pr) => {
+    pr.behind = { behind: 0, more: false, ...pr.behind, ...(behind ? { behind, more: false } : {}), conflicts: files.length ? files : true };
+  };
+  for (const person of Object.values(state.people || {})) for (const pr of person?.open || []) if (prKey(pr) === key) flag(pr);
+  if (state.pr && prKey(state.pr.pr) === key) {
+    flag(state.pr.pr);
+    if (state.pr.sync?.available && files.length) state.pr.sync = { ...state.pr.sync, conflicts: files, ...(behind ? { behind } : {}) };
+  }
+  renderAll();
+  paintSync();
+}
+// A sync stopped on conflicts: Bitbucket's amber warning rather than an error, since nothing broke
+// and nothing was pushed. Each file sits under the triangle; the advice follows.
+function conflictToast(title, files, advice) {
+  const box = toast(title, advice, "warn");
+  const body = box.firstElementChild;
+  body.insertAdjacentHTML("afterbegin", warnIcon(2));
+  const note = body.querySelector("small");
+  if (files.length) (note || body).insertAdjacentHTML(note ? "beforebegin" : "beforeend", conflictList(files, 6));
 }
 const NEEDS_RESTART = "Restart PixelDeck once: close the window, run run.sh --stop in a terminal, then click the dock icon.";
 async function syncPr(button) {
@@ -1523,8 +1623,9 @@ async function syncPr(button) {
   } catch (err) {
     if (err.status === 409) {
       const files = err.data?.conflicts || [];
-      toast(`Sync stopped: ${files.length} ${files.length === 1 ? "file conflicts" : "files conflict"} with ${s.dest}. Nothing was pushed.`,
-        `${files.slice(0, 6).join(", ")}${files.length > 6 ? ", ..." : ""}. Resolve them in your checkout, or ask Claude with the fix button.`, true);
+      markConflicts(pr.repo, pr.id, files, err.data?.behind);
+      conflictToast(`Sync stopped: ${files.length ? conflictWords({ files }, s.dest) : `conflicts with ${s.dest}`}. Nothing was pushed.`, files,
+        "Resolve them in your checkout, or ask Claude with the fix button.");
     } else if (/no route/.test(err.message)) toast("Sync needs the newer PixelDeck server.", NEEDS_RESTART, true);
     else toast("Could not sync the branch.", err.message, true);
   }
@@ -1624,9 +1725,10 @@ function replay(action, button) {
 
 /* -------------------------------------------------------------- toasts */
 
+// bad: true for an error (red), "warn" for something to fix that broke nothing (amber).
 function toast(title, detail = "", bad = false, link = null, stay = false) {
   const box = document.createElement("div");
-  box.className = `toast${bad ? " is-bad" : ""}`;
+  box.className = `toast${bad === "warn" ? " is-warn" : bad ? " is-bad" : ""}`;
   box.setAttribute("role", bad ? "alert" : "status");
   const go = link ? `<button class="link" type="button" data-${link.open ? "open" : "external"}="${esc(link.open || link.url)}">${esc(link.label)}</button>` : "";
   box.innerHTML = `<div>${esc(title)}${detail ? `<small>${esc(detail)}</small>` : ""}${go}</div><button class="btn btn--quiet" type="button" data-dismiss>Dismiss</button>`;
@@ -1634,6 +1736,7 @@ function toast(title, detail = "", bad = false, link = null, stay = false) {
   const kill = () => box.remove();
   box.querySelector("[data-dismiss]").addEventListener("click", kill);
   if (!stay) setTimeout(kill, bad ? 12000 : link ? 15000 : 7000);
+  return box;
 }
 // Icon tools keep their sprite: only the label changes when a click arms or runs them.
 function getLabel(button) { const l = button.querySelector(".tool-label"); return l ? l.innerHTML : button.innerHTML; }
@@ -1911,10 +2014,13 @@ async function doMerge(pr, body, button, inline = null) {
   } catch (err) {
     merging.delete(key);
     const behind = state.pr?.sync?.behind;
+    const files = state.pr?.sync?.conflicts?.length ? state.pr.sync.conflicts : null;  // then the bar lists them and offers no sync
     let message = `Could not merge: ${err.message}`;
     if (/no route/.test(err.message)) message = "Merge needs the newer PixelDeck server.";
     else if (behind) {
-      message = `Could not merge: the branch is ${behind} ${behind === 1 ? "commit" : "commits"} behind ${state.pr.sync.dest}. ${err.message} Sync it first with the bar above.`;
+      message = files
+        ? `Could not merge: ${conflictWords({ files }, state.pr.sync.dest)}. ${err.message} Resolve them first: the bar above lists them.`
+        : `Could not merge: the branch is ${behind} ${behind === 1 ? "commit" : "commits"} behind ${state.pr.sync.dest}. ${err.message} Sync it first with the bar above.`;
       const bar = $(".sync-bar");
       if (bar) { bar.classList.remove("is-nudge"); void bar.offsetWidth; bar.classList.add("is-nudge"); }
     }
@@ -2231,8 +2337,9 @@ async function syncFromEvent(ev, button) {
   } catch (err) {
     if (err.status === 409) {
       const files = err.data?.conflicts || [];
-      toast(`Sync stopped on #${ev.pr_id}: ${plural(files.length, "file")} conflict with ${ev.dest || "the target"}. Nothing was pushed.`,
-        `${files.slice(0, 6).join(", ")}${files.length > 6 ? ", ..." : ""}. Resolve them in your checkout, or with the fix button on the pull request.`, true);
+      markConflicts(ev.repo, Number(ev.pr_id), files, err.data?.behind);
+      conflictToast(`Sync stopped on #${ev.pr_id}: ${files.length ? conflictWords({ files }, ev.dest) : `conflicts with ${ev.dest || "the target"}`}. Nothing was pushed.`, files,
+        "Resolve them in your checkout, or with the fix button on the pull request.");
     } else toast(`Could not sync #${ev.pr_id}.`, err.message, true);
   }
 }

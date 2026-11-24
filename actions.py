@@ -375,9 +375,10 @@ def review(engine, body):
 class SyncConflict(Exception):
     """The destination does not merge cleanly into the branch; nothing was pushed."""
 
-    def __init__(self, dest, files):
+    def __init__(self, dest, files, behind=None):
         super().__init__(f"{dest} does not merge cleanly: {len(files)} file(s) conflict")
         self.files = files
+        self.behind = behind
 
 
 _clones = {"at": 0, "root": None, "map": {}}
@@ -411,14 +412,47 @@ def _counts(repo_dir, pr):
     return behind, ahead
 
 
+_OID = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+
+
+def _conflicts(repo_dir, pr, behind):
+    """The files a sync would stop on: git's own merge of the fetched tips, done the way the
+    sync does it (the target into the branch). merge-tree --write-tree works in the object
+    store only, so no checkout, index or worktree changes. A branch level with its target
+    cannot conflict. None when git cannot tell: older than 2.38, or an error. Exit 1 alone
+    is not enough, since a ref git cannot resolve exits 1 too; a conflict also prints the
+    merged tree's id first."""
+    if not behind:
+        return []
+    try:
+        out = gitscan.run(repo_dir, "merge-tree", "--write-tree", "--name-only", "--no-messages", "-z",
+                          f"origin/{pr['source']}", f"origin/{pr['dest']}", timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    fields = out.stdout.split("\0")
+    if out.returncode not in (0, 1) or not _OID.fullmatch(fields[0]):
+        return None
+    if out.returncode == 0:
+        return []
+    paths = []
+    for path in fields[1:]:
+        if not path:
+            break  # the end of the conflicted files
+        paths.append(path)
+    return paths
+
+
 def sync_status(engine, root, repo, pr_id):
-    """How far the branch is behind its destination, read from a fresh fetch of the clone."""
+    """How far the branch is behind its destination, and the files a sync would conflict on,
+    read from a fresh fetch of the clone. conflicts is a list of paths, empty when the merge
+    is clean, or None when git could not tell."""
     pr = _own_open(engine, repo, pr_id)
     repo_dir = _clone(root, repo)
     if repo_dir is None:
         return {"available": False, "why": f"no local clone of {repo} under {root}"}
     behind, ahead = _counts(repo_dir, pr)
-    return {"available": True, "behind": behind, "ahead": ahead, "source": pr["source"], "dest": pr["dest"]}
+    return {"available": True, "behind": behind, "ahead": ahead, "conflicts": _conflicts(repo_dir, pr, behind),
+            "source": pr["source"], "dest": pr["dest"]}
 
 
 def sync(engine, root, body):
@@ -449,12 +483,13 @@ def sync(engine, root, body):
         try:
             gitscan.git(path, "merge", "--no-ff", "--no-verify", "-m", f"Merged {dest} into {src}", f"origin/{dest}", timeout=180)
         except (RuntimeError, subprocess.TimeoutExpired):
-            conflicts = gitscan.git(path, "diff", "--name-only", "--diff-filter=U").split()
+            # -z: the page matches these paths to the diff's, so a space or an accent must not split or quote them
+            conflicts = [p for p in gitscan.git(path, "diff", "--name-only", "-z", "--diff-filter=U").split("\0") if p]
             try:
                 gitscan.git(path, "merge", "--abort")
             except RuntimeError:
                 pass
-            raise SyncConflict(dest, conflicts) from None
+            raise SyncConflict(dest, conflicts, behind) from None
         head = gitscan.git(path, "rev-parse", "HEAD").strip()
         gitscan.git(path, "push", "--no-verify", "origin", f"{head}:refs/heads/{src}", timeout=180)
     finally:

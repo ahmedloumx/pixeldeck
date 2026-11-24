@@ -261,6 +261,16 @@ class DetailTest(GitHubBase):
         with self.assertRaises(ValueError):
             self.host().diff("../../etc", 7)
 
+    def test_conflicts_are_a_flag_without_files(self):
+        self.fake.on("GET", f"{API}/repos/acme/shop/pulls/7",
+                     answer(200, {**pull(7), "mergeable": None, "mergeable_state": "unknown"}),
+                     answer(200, {**pull(7), "mergeable": False, "mergeable_state": "dirty"}),
+                     answer(200, {**pull(7), "mergeable": True, "mergeable_state": "blocked"}))
+        one = {"repo": "acme/shop", "id": 7, "source": "feat/x", "dest": "develop"}
+        self.assertIsNone(self.host().conflicts(one), "GitHub is still working it out")
+        self.assertIs(self.host().conflicts(one), True, "it conflicts, and GitHub does not say where")
+        self.assertEqual(self.host().conflicts(one), [], "blocked by a review is not a conflict")
+
 
 class TransportTest(GitHubBase):
     def test_pages_follow_the_link_header_on_this_host_only(self):

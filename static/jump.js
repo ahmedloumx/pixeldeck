@@ -129,6 +129,7 @@ const Jump = (() => {
     if (pr.state === "DECLINED") return '<span class="jump-tag">DECLINED</span>';
     const s = signals(pr);
     if (s.changes.length) return '<span class="jump-tag is-bad">CHANGES</span>';
+    if (conflictsOf(pr, { deep: false })) return `<span class="jump-tag is-wait">${Sprites.svg("warn", { scale: 1 })} CONFLICTS</span>`;
     if (pr.behind?.behind) return `<span class="jump-tag is-wait">${esc(pr.behind.behind)} BEHIND</span>`;
     if (s.approved) return '<span class="jump-tag is-ok">APPROVED</span>';
     return '<span class="jump-tag">OPEN</span>';
