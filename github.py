@@ -481,6 +481,16 @@ class GitHubHost(Host):
         answer = self.api.get(f"{base}/compare/{quote(pr['dest'], safe='/')}...{quote(pr['source'], safe='/')}", {"per_page": 1})
         return int(answer.get("behind_by") or 0), False
 
+    def conflicts(self, pr):
+        """GitHub says whether the branch merges cleanly, not which files do not: True when it
+        conflicts. None while GitHub is still working it out: mergeable is null on the read
+        that starts the work, and the next look reads the answer."""
+        base, n = self._path(pr["repo"], pr["id"])
+        pull = self.api.get(f"{base}/pulls/{n}")
+        if pull.get("mergeable_state") == "dirty" or pull.get("mergeable") is False:
+            return True
+        return [] if pull.get("mergeable") is True else None
+
     def commenters(self, repo, pr_id, count):
         inline, general = self._comments(repo, pr_id)
         newest = sorted(inline + general, key=lambda c: c.get("created_at") or "", reverse=True)[:count]

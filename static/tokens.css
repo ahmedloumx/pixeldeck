@@ -45,5 +45,7 @@
   --sprite-white: oklch(97% 0.005 250); --sprite-dark: oklch(16% 0.01 250);
   --sprite-stone: oklch(64% 0.01 250); --sprite-stone-deep: oklch(44% 0.01 250);
   --sprite-grass: oklch(64% 0.15 145); --sprite-amber: oklch(82% 0.15 80);
+  /* the conflict triangle: Bitbucket's warning amber on every theme, its rim deep enough for light paper */
+  --sprite-warn: oklch(81% 0.167 74); --sprite-warn-deep: oklch(56% 0.13 62);
   --dur-fold: 420ms;
 }

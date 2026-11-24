@@ -115,6 +115,16 @@ class GitLabTest(GitLabBase):
         with self.assertRaises(ValueError):
             self.host().diff("../x", 1)
 
+    def test_conflicts_are_a_flag_without_files(self):
+        self.fake.on("GET", f"{PROJECT}/merge_requests/12",
+                     answer(200, {**mr(12), "merge_status": "checking", "detailed_merge_status": "checking", "has_conflicts": False}),
+                     answer(200, {**mr(12), "merge_status": "cannot_be_merged", "detailed_merge_status": "conflict", "has_conflicts": True}),
+                     answer(200, {**mr(12), "merge_status": "can_be_merged", "detailed_merge_status": "not_approved", "has_conflicts": False}))
+        one = {"repo": "acme/web/shop", "id": 12, "source": "feat/x", "dest": "develop"}
+        self.assertIsNone(self.host().conflicts(one), "GitLab has not finished checking")
+        self.assertIs(self.host().conflicts(one), True, "it conflicts, and GitLab does not say where")
+        self.assertEqual(self.host().conflicts(one), [], "waiting for an approval is not a conflict")
+
     def test_a_spent_minute_is_waited_out_and_the_meter_is_hourly(self):
         self.fake.on("GET", f"{API}/user", answer(429, {"message": "Retry later"}, {"ratelimit-remaining": "0",
                                                                                     "ratelimit-reset": str(int(self.now[0]) + 40)}))

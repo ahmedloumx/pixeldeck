@@ -66,6 +66,14 @@ def _atomic_write(path, payload):
     os.replace(tmp, path)
 
 
+def _conflict_note(conflicts):
+    """What a "behind" event says about conflicts: how many files, True when the host does not
+    name them, nothing when the merge is clean or not known."""
+    if conflicts is True:
+        return {"conflicts": True}
+    return {"conflicts": len(conflicts)} if conflicts else {}
+
+
 class Engine:
     def __init__(self, root, workspace=None, host=None):
         self.root = Path(root)
@@ -201,7 +209,12 @@ class Engine:
         """Has a merge into the target left one of your branches behind? One call per open pull
         request of yours: the commits on the target that the branch does not have (five at most,
         that is enough to say so). A branch that falls behind is news once, until it is synced;
-        the first look after a start only records, like a first sync."""
+        the first look after a start only records, like a first sync.
+
+        A branch that is behind is also asked whether a sync would conflict, one more call: a
+        branch level with its target cannot. conflicts is what the host answers (a list of
+        paths, [] for a clean merge, True for a conflict it does not name) or None when it
+        could not tell; a failed ask never loses the behind count."""
         me = self._me_uuid()
         entry = self.person(me) if me else None
         if not entry:
@@ -215,11 +228,12 @@ class Engine:
                 behind, more = self.host.behind(pr)
             except HostError:
                 continue
+            conflicts = self._conflicts(pr) if behind else []
             before = store.get(key)
             with self.lock:
-                store[key] = {"behind": behind, "more": more, "at": time.time()}
+                store[key] = {"behind": behind, "more": more, "conflicts": conflicts, "at": time.time()}
             if before is not None and not before.get("behind") and behind:
-                found.append(events._base(pr, "behind", count=behind, more=more))
+                found.append(events._base(pr, "behind", count=behind, more=more, **_conflict_note(conflicts)))
         with self.lock:
             for key in [k for k in store if k not in open_keys]:
                 del store[key]
@@ -228,12 +242,30 @@ class Engine:
         self._save()
         return found
 
+    def _conflicts(self, pr):
+        try:
+            return self.host.conflicts(pr)
+        except HostError:
+            return None
+
     def behind(self, pr):
         return (self.data.get("behind") or {}).get(f"{pr['repo']}#{pr['id']}")
 
     def mark_synced(self, repo, pr_id):
         with self.lock:
-            self.data.setdefault("behind", {})[f"{repo}#{pr_id}"] = {"behind": 0, "more": False, "at": time.time()}
+            self.data.setdefault("behind", {})[f"{repo}#{pr_id}"] = {"behind": 0, "more": False, "conflicts": [], "at": time.time()}
+
+    def mark_conflicts(self, repo, pr_id, files, behind=None):
+        """A sync that stopped on conflicts: the lists say so at once, not at the next look.
+        behind is the sync's own count; without one the last look's stays."""
+        key = f"{repo}#{pr_id}"
+        with self.lock:
+            store = self.data.setdefault("behind", {})
+            entry = dict(store.get(key) or {"behind": 0, "more": False})
+            if behind:
+                entry.update(behind=behind, more=False)
+            entry.update(conflicts=list(files) or True, at=time.time())
+            store[key] = entry
 
     def _person_lock(self, uuid):
         """One refresh per person at a time: two at once would both compare against the same

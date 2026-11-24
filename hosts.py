@@ -11,6 +11,10 @@ questions about pull requests, in the shapes model.py gives the page:
   diff, commits, timeline                what the pull request view shows
   changes_requested(repo, id)            who asked for changes, for the insights
   behind(pr), commenters(repo, id, n)    for the notifications
+  conflicts(pr)                          the files a merge of the target into the branch would
+                                         conflict on: a list of paths ([] when it merges cleanly),
+                                         True when the host says it conflicts but not where, or
+                                         None when it cannot tell
   projects(), project_repos(key)         Bitbucket's project scope; other hosts have none
   repo_activity(repo, newer_than, ...)   one repository's pull request activity, newest first,
                                          for the team feed; None on a host without such a log
@@ -81,6 +85,9 @@ class Host:
         return list(features) if self.writes else [f for f in features if f not in BITBUCKET_FEATURES]
 
     def review_requests(self, uuid):
+        return None
+
+    def conflicts(self, pr):
         return None
 
     def projects(self):
@@ -183,6 +190,19 @@ class BitbucketHost(Host):
         raw = self.client.get(f"/repositories/{self.client.workspace}/{pr['repo']}/commits",
                               {"include": pr["dest"], "exclude": pr["source"], "pagelen": 5, "fields": "values.hash,next"})
         return len(raw.get("values") or []), bool(raw.get("next"))
+
+    def conflicts(self, pr):
+        """The files Bitbucket finds in conflict between the branch and its target. The pull
+        request's /conflicts redirects to the file conflicts of its two tips. Its diffstat does
+        not say: since the pull request diff became the three-dot one, a conflicted file is
+        listed there as plainly modified."""
+        out = []
+        for c in self.client.paged(self._base(pr["repo"], pr["id"]) + "/conflicts",
+                                   {"pagelen": 100, "fields": "values.path,next"}, max_pages=3):
+            path = c.get("path")
+            if isinstance(path, str) and path and path not in out:
+                out.append(path)
+        return out
 
     def commenters(self, repo, pr_id, count):
         """The newest comments' authors, newest first, deleted ones left out."""

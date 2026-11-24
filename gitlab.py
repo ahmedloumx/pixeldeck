@@ -35,6 +35,8 @@ OPEN_FRESH = 600
 # GitLab writes these notes itself when someone approves or asks for changes.
 APPROVED_NOTE = "approved this merge request"
 CHANGES_NOTE = "requested changes"
+# Merge statuses that mean GitLab has not finished checking whether the merge is clean.
+PENDING_MERGE = {"unchecked", "checking", "preparing", "cannot_be_merged_recheck"}
 
 
 def configured_group():
@@ -365,6 +367,17 @@ class GitLabHost(Host):
             raise HostError(0, "the branches are not known yet")
         answer = self.api.get(f"{project(pr['repo'])}/repository/compare", {"from": pr["source"], "to": pr["dest"]})
         return len(answer.get("commits") or []), False
+
+    def conflicts(self, pr):
+        """GitLab says whether the merge request conflicts, not in which files: True when it
+        does. It checks asynchronously, started by this very read, so a check not done yet is
+        None and the next look reads the answer."""
+        mr = self.api.get(f"{project(pr['repo'])}/merge_requests/{int(pr['id'])}")
+        if mr.get("has_conflicts") or mr.get("detailed_merge_status") == "conflict":
+            return True
+        if mr.get("detailed_merge_status") in PENDING_MERGE or mr.get("merge_status") in PENDING_MERGE:
+            return None
+        return []
 
     def commenters(self, repo, pr_id, count):
         notes = [n for n in self._notes(repo, pr_id) if not n.get("system")][:count]

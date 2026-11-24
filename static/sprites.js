@@ -11,6 +11,7 @@ const Sprites = (() => {
   const PALETTE = {
     o: "p-orange", O: "p-orange-deep", k: "p-dark", b: "p-blue", B: "p-blue-deep", y: "p-yellow",
     r: "p-red", w: "p-white", s: "p-stone", S: "p-stone-deep", g: "p-grass", a: "p-amber", c: "p-ink", t: "p-tint",
+    n: "p-warn", N: "p-warn-deep",
   };
 
   const DEFS = {
@@ -88,6 +89,9 @@ const Sprites = (() => {
     ] },
     spark: { frames: [["..y..", "..y..", "yywyy", "..y..", "..y.."]] },
     check: { frames: [[".........", "........c", ".......cc", "c.....cc.", "cc...cc..", ".cc.cc...", "..ccc....", "...c.....", "........."]] },
+    // Bitbucket's conflict flag: an amber triangle with a dark "!", a deeper rim so it holds on light paper
+    warn: { frames: [[".....NN.....", "....NnnN....", "...NnnnnN...", "...NnkknN...", "..NnnkknnN..", "..NnnkknnN..",
+      ".NnnnkknnnN.", ".NnnnnnnnnN.", "NnnnnkknnnnN", "NNNNNNNNNNNN"]] },
   };
 
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);

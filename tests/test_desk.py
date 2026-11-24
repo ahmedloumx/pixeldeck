@@ -971,7 +971,7 @@ class SyncTest(unittest.TestCase):
 
     def test_status_then_sync_merges_develop_and_pushes(self):
         status = self.actions.sync_status(self.engine, self.tmp, "shop-api", 42)
-        self.assertEqual((status["behind"], status["ahead"]), (1, 1))
+        self.assertEqual((status["behind"], status["ahead"], status["conflicts"]), (1, 1, []))
         out = self.actions.sync(self.engine, self.tmp, self.body)
         self.assertEqual((out["state"], out["merged"]), ("synced", 1))
         self.git(self.clone, "fetch", "-q", "origin")
@@ -982,15 +982,32 @@ class SyncTest(unittest.TestCase):
         self.assertEqual(list((self.tmp / "state" / "sync").iterdir()), [], "the temporary worktree is gone")
 
     def test_a_conflict_pushes_nothing(self):
+        # Both sides add a file whose name has a space and an accent: git would quote it without -z.
+        (self.clone / "docs").mkdir()
+        self.commit("docs/my notes é.txt", "theirs\n", "develop adds notes")
+        self.git(self.clone, "push", "-q", "origin", "develop")
         self.git(self.clone, "switch", "-q", "feat/x")
         self.commit("app.txt", "one\nmine\n", "clash")
+        (self.clone / "docs").mkdir(exist_ok=True)  # the switch took develop's copy, and its folder, away
+        self.commit("docs/my notes é.txt", "mine\n", "feature adds notes")
         self.git(self.clone, "push", "-q", "origin", "feat/x")
         before = self.remote_log("feat/x")
+        head = self.git(self.clone, "rev-parse", "HEAD")
+        status = self.actions.sync_status(self.engine, self.tmp, "shop-api", 42)
+        self.assertEqual((status["behind"], status["conflicts"]), (2, ["app.txt", "docs/my notes é.txt"]))
+        self.assertEqual((self.git(self.clone, "status", "--porcelain"), self.git(self.clone, "rev-parse", "HEAD")), ("", head),
+                         "the look merges in the object store only: checkout, index and branch are untouched")
         with self.assertRaises(self.actions.SyncConflict) as caught:
             self.actions.sync(self.engine, self.tmp, self.body)
-        self.assertEqual(caught.exception.files, ["app.txt"])
+        self.assertEqual((caught.exception.files, caught.exception.behind), (["app.txt", "docs/my notes é.txt"], 2))
         self.git(self.clone, "fetch", "-q", "origin")
         self.assertEqual(self.remote_log("feat/x"), before)
+
+    def test_conflicts_are_unknown_when_git_cannot_tell(self):
+        # A ref git cannot resolve exits 1 like a conflict does, but prints no merged tree.
+        self.assertIsNone(self.actions._conflicts(self.clone, {"source": "gone", "dest": "develop"}, 1))
+        self.assertEqual(self.actions._conflicts(self.clone, {"source": "gone", "dest": "develop"}, 0), [],
+                         "a branch level with its target cannot conflict: git is not asked")
 
     def test_only_your_own_pull_requests(self):
         self.engine.me = lambda: {"uuid": "{someone-else}"}
@@ -1115,6 +1132,21 @@ class ProposalRouteTest(unittest.TestCase):
                                     ("POST", "pr-create", {"repo": "shop-api", "branch": "feat/k"})):
             self.assertEqual(self.call(method, route, body, key=key)[0], 401, route)
         self.assertEqual(self.call("POST", "proposal-decide", {"id": item["id"], "action": "decline"}, page=True)[1]["status"], "declined")
+
+    def test_a_sync_stopped_by_conflicts_is_flagged_at_once(self):
+        engine, saved, marked = self.server_mod.Desk.engine, self.actions.sync, []
+
+        def stop(engine, root, body):
+            raise self.actions.SyncConflict("develop", ["app.txt", "docs/a b.md"], 3)
+        self.actions.sync = stop
+        engine.mark_conflicts = lambda repo, pr_id, files, behind=None: marked.append((repo, pr_id, files, behind))
+        try:
+            code, out = self.call("POST", "sync", {"repo": "shop-api", "id": 42}, page=True)
+        finally:
+            self.actions.sync = saved
+            del engine.mark_conflicts
+        self.assertEqual((code, out["conflicts"], out["behind"]), (409, ["app.txt", "docs/a b.md"], 3))
+        self.assertEqual(marked, [("shop-api", 42, ["app.txt", "docs/a b.md"], 3)], "the lists say so before the next look")
 
     def run_cli(self, branch, *extra):
         env = {**os.environ, "PIXELDECK_PORT": str(self.port), "PIXELDECK_STATE_DIR": str(self.state)}

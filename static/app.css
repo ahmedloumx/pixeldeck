@@ -324,7 +324,16 @@ kbd { font-family: var(--font-outlier); font-size: var(--text-xs); padding: 0 va
 .toasts { position: fixed; right: var(--space-lg); bottom: var(--space-lg); z-index: var(--z-toast); display: grid; gap: var(--space-xs); width: min(28rem, calc(100% - var(--space-xl))); }
 .toast { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-sm); padding: var(--space-sm) var(--space-md); border: var(--rule-hair) solid var(--color-rule-2); border-radius: var(--radius-pill); background: var(--color-paper-2); font-size: var(--text-sm); color: var(--color-ink); }
 .toast.is-bad { border-color: var(--color-bad); }
+.toast.is-warn { border-color: var(--color-wait); }
+.toast.is-warn > div > .spr-warn { margin: -3px var(--space-xs) 0 0; vertical-align: middle; }
 .toast small { display: block; margin-top: var(--space-3xs); font-family: var(--font-outlier); color: var(--color-muted); overflow-wrap: anywhere; }
+
+/* A sync would stop on conflicts: Bitbucket's amber triangle, the words in the waiting tone. */
+.q-conflict { display: inline-flex; align-items: center; gap: 4px; padding: 0 4px; font: 400 var(--num-8)/14px var(--font-num); color: var(--color-wait); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-wait) 45%, transparent); white-space: nowrap; }
+.conflict-files { display: grid; gap: var(--space-3xs); margin: var(--space-2xs) 0 0; padding: 0; list-style: none; font-size: var(--text-xs); }
+.conflict-files li { display: flex; align-items: center; gap: var(--space-2xs); min-width: 0; }
+.conflict-files code { min-width: 0; font-family: var(--font-outlier); color: var(--color-ink); overflow-wrap: anywhere; }
+.conflict-files .conflict-more { padding-left: calc(12px + var(--space-2xs)); color: var(--color-muted); }
 
 /* ---------- smaller screens ---------- */
 @media (max-width: 75rem) {

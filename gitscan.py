@@ -26,11 +26,16 @@ GIT_ENV = {**os.environ, "GIT_TERMINAL_PROMPT": "0",
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
-def git(repo_dir, *args, timeout=20):
-    result = subprocess.run(
+def run(repo_dir, *args, timeout=20):
+    """git with its exit code kept, for a command whose code is part of the answer (merge-tree)."""
+    return subprocess.run(
         ["git", "-C", str(repo_dir), *args],
         capture_output=True, text=True, timeout=timeout, env=GIT_ENV, creationflags=NO_WINDOW,
     )
+
+
+def git(repo_dir, *args, timeout=20):
+    result = run(repo_dir, *args, timeout=timeout)
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or f"git {' '.join(args)} failed")
     return result.stdout

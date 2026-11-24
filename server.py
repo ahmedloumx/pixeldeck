@@ -348,7 +348,11 @@ class Desk(BaseHTTPRequestHandler):
             if method == "POST" and route == "review":
                 return self._send(200, actions.review(engine, body))
             if method == "POST" and route == "sync":
-                result = actions.sync(engine, config.workspace_root(), body)
+                try:
+                    result = actions.sync(engine, config.workspace_root(), body)
+                except actions.SyncConflict as exc:
+                    engine.mark_conflicts(body.get("repo"), body.get("id"), exc.files, exc.behind)  # flagged before the next look
+                    raise
                 engine.mark_synced(body.get("repo"), body.get("id"))  # no stale "behind" until the next look
                 return self._send(200, result)
             if method == "GET" and route == "pr-sync":
@@ -423,7 +427,7 @@ class Desk(BaseHTTPRequestHandler):
         except jira.JiraError as exc:
             return self._error(HTTPStatus.BAD_GATEWAY, exc.message, upstream=exc.status, jira=JIRA.status())
         except actions.SyncConflict as exc:
-            return self._error(HTTPStatus.CONFLICT, str(exc), conflicts=exc.files)
+            return self._error(HTTPStatus.CONFLICT, str(exc), conflicts=exc.files, behind=exc.behind)
         except KeyError as exc:
             return self._error(HTTPStatus.NOT_FOUND, str(exc).strip("'"))
         except PermissionError as exc:
